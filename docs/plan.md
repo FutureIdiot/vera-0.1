@@ -42,7 +42,7 @@
 
 **目标**：新架构 + OpenCode 持续会话 + 一个 Space 的消息流，端到端打通。
 
-- [ ] gateway 骨架：Node 20+ ESM、薄路由、SSE 通道、JSON 文件存储（够用即可，形状按契约）
+- [x] gateway 骨架：Node 20+ ESM、薄路由、SSE 通道、JSON 文件存储（够用即可，形状按契约）+ mock adapter
 - [ ] OpenCode daemon adapter（搬运旧代码 + 按新接口收口）
 - [ ] Agent 注册：一个 OpenCode agent，身份字段按 ground truth 2.2
 - [ ] 一个默认 Space，消息收发

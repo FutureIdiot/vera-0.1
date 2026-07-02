@@ -45,7 +45,9 @@ export function createOpencodeAdapter() {
 
 ```js
 {
-  content,        // 回复全文（权威值；gateway 用它定稿 message）
+  content,        // 回复全文。adapter 可以不调 onDelta 只返回 content——
+                  // gateway 在零 delta 时以 content 兜底切气泡；有 delta 时
+                  // 气泡内容以 delta 累积为准，content 仅作日志与对账
   sessionState    // ★ 新的会话状态，gateway 原样存储，下次 run 传回
 }
 ```
@@ -119,6 +121,6 @@ export function createOpencodeAdapter() {
 
 两个示例对 gateway 呈现**完全相同**的接口行为。若某个接口改动只有其中一型能自然实现，说明改动泄漏了生命周期假设，打回。
 
-### 示例 C：mock adapter（Phase 2 一并实现）
+### 示例 C：mock adapter（Phase 2 已实现）
 
-回显固定文本、可注入延迟与错误，供 gateway 与前端在无真实 CLI 时测试。`sessionState` 存一个自增计数器，用于测试会话连续性语义。
+回显两段落文本（验证多气泡），`sessionState` 存自增计数器并带进回复（验证会话连续性），并演示同 callId 的 tool activity 原地更新。prompt 内触发词：`!!error` → 抛 `provider_error`；`!!approve` → 走一次 requestApproval 全链路（超时未答复留给 gateway 标 expired）。延迟来自 config 的 mock 配置。
