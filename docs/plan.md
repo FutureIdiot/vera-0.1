@@ -79,12 +79,13 @@
 
 ## Phase 5 — Memory 与数据层
 
-**目标**：ground truth 第三节的三层数据落地。
+**目标**：ground truth 第三节的三层数据落地。设计依据：`memory-hook.md`（含整合注记），按其第 16 节 MVP 顺序推进。
 
-- [ ] Memory：Space 内对话记录隔离、全局长期记忆读写
-- [ ] 记忆整理流水线（分块 → 标签 → 提炼写入），执行者可配置；整理任务用便宜模型跑批
-- [ ] 记忆注入走版本化批量更新，不逐条改写系统提示（缓存纪律，见 adapter-interface）
-- [ ] Memory Hook 机制（依赖《Memory Hook 设计文档》，文档未定则此项冻结）
+- [ ] 动工前：memory-hook.md 术语/API 对齐契约（按文档头部整合注记），形状收编进 api-contract.md
+- [ ] Raw Event 落盘 + 手动"保存到记忆"入口（MVP Step 1–3）
+- [ ] memory_write_hook（context 容量触发）+ stain 字段与前端色块（Step 4–5）
+- [ ] retrieve + injection（剥离 stain；注入段置于 prompt 尾部，缓存纪律）+ fetch_more / fetch_detail（Step 6）
+- [ ] memory_relations 一跳关联 + dream 维护 subagent（Step 7–8）；整理任务用便宜模型跑批
 - [ ] Files 层：Space 内隔离的附件存储
 - [ ] 数据层分类实现为可扩展结构，不硬编码枚举
 

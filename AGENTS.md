@@ -6,7 +6,7 @@
 
 - `docs/ground-truth.md` 是唯一设计基准。代码与它冲突时，停下来问用户，不要自行取舍。
 - **文档变更先于代码变更**：改接口先改 `docs/api-contract.md` / `docs/adapter-interface.md`，再动代码。
-- `docs/` 保持扁平，固定成员：`ground-truth.md`、`plan.md`、`api-contract.md`、`adapter-interface.md`、`salvage-notes.md`、`reference/`。**不得新建文档目录或另开计划文档**；阶段进展直接更新 `plan.md` 的状态标记。旧 Vera 的 docs 分了六个目录互相引用失效，是前车之鉴。
+- `docs/` 保持扁平，固定成员：`ground-truth.md`、`plan.md`、`api-contract.md`、`adapter-interface.md`、`salvage-notes.md`、`memory-hook.md`、`reference/`。**不得新建文档目录或另开计划文档**；阶段进展直接更新 `plan.md` 的状态标记。旧 Vera 的 docs 分了六个目录互相引用失效，是前车之鉴。
 
 ## 文件结构（不得自行增删目录）
 
