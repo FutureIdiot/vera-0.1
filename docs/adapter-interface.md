@@ -81,6 +81,9 @@ export function createOpencodeAdapter() {
 - **无交互模式**：CLI 必须以无交互参数运行（opencode `--dangerously-skip-permissions`、CC print 模式等），**禁止让 CLI 弹出选项式提问**。需要用户点头的危险操作走 `requestApproval`；其他问题让 agent 正常发消息问。Phase 2 的 OpenCode 先全跳过审批（skip-permissions），`requestApproval` 的真实桥接随 CC adapter 在 Phase 6 落地——但接口现在就在，adapter 不得自造第二种问询通道。
 - **常驻资源**：daemon 等长命资源是 adapter 内部实现细节，但必须实现 `shutdown()` 且自带空闲回收，不得依赖 gateway 帮忙清理。
 - **secrets**：api 型 adapter 通过 `agent.connection.secretRef` 向 `src/core/` 的 secrets 读取器换取明文，只存在于内存，不落日志、不进 sessionState。
+- **缓存纪律**（ground truth 技术约束）：
+  - CLI 型：**必须复用会话**（sessionState 机制的本意）。禁止退化成"每条消息新开会话、把历史拼进 prompt 重放"——那样供应商侧 prompt cache 全部落空，多轮成本近似平方增长。
+  - API 型：prompt 组装必须前缀稳定、只追加。system 提示与历史消息是稳定前缀；时间戳、AgentState 等动态内容只许放消息尾部；长期记忆注入采用版本化批量更新（记忆变更累积后一次性换版），不得逐条改写 system 提示。Anthropic 系设置 `cache_control` 断点。
 
 ## 四、映射示例（接口验收标准）
 

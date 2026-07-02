@@ -30,8 +30,8 @@
 
 **目标**：前后端、以及未来所有打工 agents 共同对齐的唯一接口基准。
 
-- [~] `docs/api-contract.md`：HTTP endpoints、SSE 事件类型与字段、Agent / Space / Message / Agent State 的数据形状、错误格式、断线重连语义（草稿完成，待 Theta 过目）
-- [~] `docs/adapter-interface.md`：adapter 层接口（草稿完成，待 Theta 过目）。**必须同时给出两个映射示例**：
+- [x] `docs/api-contract.md`：HTTP endpoints、SSE 事件类型与字段、Agent / Space / Message / Agent State 的数据形状、错误格式、断线重连语义
+- [x] `docs/adapter-interface.md`：adapter 层接口。**必须同时给出两个映射示例**：
   - OpenCode（daemon 型：会话活在常驻 HTTP 服务里）
   - Claude Code（resume 型：进程一次一命，靠 `--resume` 续会话）
   - 接口只承诺"adapter 自己负责会话连续性"，不得泄漏任何一种生命周期假设
@@ -82,7 +82,8 @@
 **目标**：ground truth 第三节的三层数据落地。
 
 - [ ] Memory：Space 内对话记录隔离、全局长期记忆读写
-- [ ] 记忆整理流水线（分块 → 标签 → 提炼写入），执行者可配置
+- [ ] 记忆整理流水线（分块 → 标签 → 提炼写入），执行者可配置；整理任务用便宜模型跑批
+- [ ] 记忆注入走版本化批量更新，不逐条改写系统提示（缓存纪律，见 adapter-interface）
 - [ ] Memory Hook 机制（依赖《Memory Hook 设计文档》，文档未定则此项冻结）
 - [ ] Files 层：Space 内隔离的附件存储
 - [ ] 数据层分类实现为可扩展结构，不硬编码枚举
