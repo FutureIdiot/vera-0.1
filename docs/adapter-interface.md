@@ -31,8 +31,12 @@ export function createOpencodeAdapter() {
   sessionState,   // ★ 不透明 JSON 或 null。上次 run 返回的值，gateway 原样持久化并奉还
   workspacePath,  // 本次 run 的工作目录（进程型 adapter 用作 cwd）
   onDelta(text),      // 回复正文的流式增量
-  onActivity(evt),    // 非回复过程事件：{ phase, label, detail, toolStatus? }
-                      // phase 枚举与 api-contract 的 agent.activity 一致
+  onActivity(evt),    // 过程事件：{ phase, label, detail, toolStatus?, callId? }
+                      // 带相同 callId 的多次调用由 gateway 合并为同一条
+                      // Activity 原地更新（工具 pending→running→completed）
+  requestApproval(req), // -> Promise<answer>。阻塞式提权申请：gateway 生成
+                      // Approval 卡片入时间线，resolve 用户的答复；run 结束
+                      // 前未答复则 resolve "deny" 并标记 expired
   signal          // AbortSignal，取消信号
 }
 ```
@@ -74,6 +78,7 @@ export function createOpencodeAdapter() {
 - **超时**：adapter 自带看门狗（默认 30 分钟，配置项 per-provider），gateway 不设外层超时。
 - **隔离**：adapter 不得读写 store、不得直接发 SSE、不得读其他 agent 的任何数据。与外界的全部通道就是 ctx 的回调和返回值。
 - **spawn**：一律走 `src/core/` 的 spawn 封装（内含 launchd PATH 修正与 kill 树逻辑），禁止直接 `child_process.spawn`。
+- **无交互模式**：CLI 必须以无交互参数运行（opencode `--dangerously-skip-permissions`、CC print 模式等），**禁止让 CLI 弹出选项式提问**。需要用户点头的危险操作走 `requestApproval`；其他问题让 agent 正常发消息问。Phase 2 的 OpenCode 先全跳过审批（skip-permissions），`requestApproval` 的真实桥接随 CC adapter 在 Phase 6 落地——但接口现在就在，adapter 不得自造第二种问询通道。
 - **常驻资源**：daemon 等长命资源是 adapter 内部实现细节，但必须实现 `shutdown()` 且自带空闲回收，不得依赖 gateway 帮忙清理。
 - **secrets**：api 型 adapter 通过 `agent.connection.secretRef` 向 `src/core/` 的 secrets 读取器换取明文，只存在于内存，不落日志、不进 sessionState。
 
