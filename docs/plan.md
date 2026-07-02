@@ -79,13 +79,13 @@
 
 ## Phase 5 — Memory 与数据层
 
-**目标**：ground truth 第三节的三层数据落地。设计依据：`memory-hook.md`（含整合注记），按其第 16 节 MVP 顺序推进。
+**目标**：ground truth 第三节的三层数据落地。设计依据：`memory-hook.md`——以《修订：文件库架构》（R1–R6）为准，按第 16 节 MVP 顺序推进。
 
 - [ ] 动工前：memory-hook.md 术语/API 对齐契约（按文档头部整合注记），形状收编进 api-contract.md
-- [ ] Raw Event 落盘 + 手动"保存到记忆"入口（MVP Step 1–3）
-- [ ] memory_write_hook（context 容量触发）+ stain 字段与前端色块（Step 4–5）
-- [ ] retrieve + injection（剥离 stain；注入段置于 prompt 尾部，缓存纪律）+ fetch_more / fetch_detail（Step 6）
-- [ ] memory_relations 一跳关联 + dream 维护 subagent（Step 7–8）；整理任务用便宜模型跑批
+- [ ] 文件库（Obsidian 兼容 vault）+ Raw Event 留 store + 手动"保存到记忆"入口（R1–R2，MVP Step 1–3）
+- [ ] memory_write_hook（context 容量触发；slug/钩子行质量为第一验收项）+ stain frontmatter 与前端色块（Step 4–5）
+- [ ] 三渠道注入：常驻索引（批量换版）、token 计价检索注入（哑墨、同会话去重、尾部放置）、fetch_more / fetch_detail 钻取（R3、R5，Step 6）
+- [ ] 派生索引与权重（双链入度、使用统计、置顶；无手工标注）+ dream 维护 subagent（R4，Step 7–8）；整理任务用便宜模型跑批
 - [ ] Files 层：Space 内隔离的附件存储
 - [ ] 数据层分类实现为可扩展结构，不硬编码枚举
 
