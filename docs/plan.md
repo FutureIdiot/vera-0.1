@@ -30,8 +30,8 @@
 
 **目标**：前后端、以及未来所有打工 agents 共同对齐的唯一接口基准。
 
-- [ ] `docs/api-contract.md`：HTTP endpoints、SSE 事件类型与字段、Agent / Space / Message / Agent State 的数据形状、错误格式、断线重连语义
-- [ ] `docs/adapter-interface.md`：adapter 层接口。**必须同时给出两个映射示例**：
+- [~] `docs/api-contract.md`：HTTP endpoints、SSE 事件类型与字段、Agent / Space / Message / Agent State 的数据形状、错误格式、断线重连语义（草稿完成，待 Theta 过目）
+- [~] `docs/adapter-interface.md`：adapter 层接口（草稿完成，待 Theta 过目）。**必须同时给出两个映射示例**：
   - OpenCode（daemon 型：会话活在常驻 HTTP 服务里）
   - Claude Code（resume 型：进程一次一命，靠 `--resume` 续会话）
   - 接口只承诺"adapter 自己负责会话连续性"，不得泄漏任何一种生命周期假设
