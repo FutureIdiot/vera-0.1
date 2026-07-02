@@ -77,8 +77,9 @@
 
 - `author`：`{ "type": "user" }` 或 `{ "type": "agent", "agentId": "agt_…" }`。用户和 agent 在消息层对等。
 - `target`：`{ "type": "broadcast" }` 或 `{ "type": "direct", "agentIds": ["agt_…"] }`。
-- agent 回复的消息在 run 开始时即创建（`status: "streaming"`，content 随 delta 增长），run 结束转 `completed` / `failed`。
 - `runId`：agent 消息关联其产生 run；用户消息为 null。
+
+**多气泡规则（产品需求，契约级）**：一次 run 的回复**不是一条巨长消息，而是一串短消息**。gateway 在流式输出中按段落边界切分：当前气泡以 `status: "streaming"` 创建、随 delta 增长，检测到切分点即定稿（`completed`）并开下一个气泡。一个 run 产生 N 条 Message 记录，每条是独立气泡，历史记录里也保持切分后的形态。切分策略（边界规则、最小/最大长度）是 gateway 配置项，不硬编码；前端只负责渲染，不做切分。
 
 ### Run
 
@@ -90,7 +91,7 @@
   "agentId": "agt_x1y2",
   "spaceId": "spc_a1b2",
   "triggerMessageId": "msg_m1n2",
-  "replyMessageId": "msg_p3q4",
+  "replyMessageIds": ["msg_p3q4", "msg_p3q5"],
   "status": "running",
   "createdAt": "…",
   "endedAt": null
@@ -196,15 +197,28 @@ data: { "seq": 1042, "type": "message.delta", "ts": "…", "data": { … } }
 
 | type | data | 说明 |
 |---|---|---|
-| `message.created` | `{ message }` | 新消息记录（用户消息即时；agent 回复在 run 开始时以空 content 创建） |
-| `message.delta` | `{ messageId, spaceId, delta }` | agent 回复的流式增量，客户端追加渲染 |
-| `message.completed` | `{ message }` | 回复定稿，content 为权威全文（客户端以此覆盖累积值） |
+| `message.created` | `{ message }` | 新消息记录。用户消息即时；agent 回复**每个气泡各发一次**（run 内多次） |
+| `message.delta` | `{ messageId, spaceId, delta }` | 当前气泡的流式增量，客户端追加渲染 |
+| `message.completed` | `{ message }` | 当前气泡定稿，content 为该气泡权威全文（客户端以此覆盖累积值） |
 | `run.started` | `{ run }` | |
 | `run.ended` | `{ run }` | status 为 completed/failed/cancelled；failed 时带 `error.code/message` |
 | `agent.activity` | `{ runId, agentId, spaceId, phase, label, detail, toolStatus? }` | 非回复类过程事件。`phase`：`routing` / `working` / `thinking` / `tool` / `usage` / `error` |
 | `agent.state.updated` | `{ agentState }` | |
 | `space.updated` / `agent.updated` | `{ space }` / `{ agent }` | 配置变更广播 `[P4]` |
 | `stream.reset` | `{}` | 客户端必须重新 bootstrap |
+
+**一次 agent 回复（两个气泡）的完整事件序列示例**：
+
+```
+run.started
+message.created    (气泡1, streaming)
+message.delta ×N   (气泡1)
+message.completed  (气泡1)
+message.created    (气泡2, streaming)
+message.delta ×N   (气泡2)
+message.completed  (气泡2)
+run.ended          (completed)
+```
 
 ### 客户端义务
 
