@@ -47,6 +47,7 @@
 - [ ] Agent 注册：一个 OpenCode agent，身份字段按 ground truth 2.2
 - [ ] 一个默认 Space，消息收发
 - [ ] 最简网页：一个输入框 + 一条消息流，能看到流式输出即可，不做任何视觉打磨
+- [ ] `scripts/verify.mjs`：把验收清单固化成脚本（起临时 gateway → 逐项断言 → 退出码报告），此后所有打工 agent 交活前必跑
 
 **完成标准**（全部满足）：
 1. 浏览器发消息，OpenCode 流式回复渲染到页面
