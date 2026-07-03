@@ -208,6 +208,7 @@ async function startGateway() {
       VERA_SSE_BUFFER_SIZE: "20",
       // 拉长 mock 的逐块延迟，给取消（cancel）测试留出足够窗口。
       VERA_MOCK_DELAY_MS: "150",
+      VERA_MEMORY_VAULT_PATH: join(dataDir, "memory"), // 别读到真实 ~/.vera/memory
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

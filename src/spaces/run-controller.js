@@ -34,7 +34,7 @@ export function cancelRun(runId) {
   return true;
 }
 
-export function executeRun({ store, hub, config, agent, space, triggerMessage, adapter, agentStates }) {
+export function executeRun({ store, hub, config, agent, space, triggerMessage, adapter, agentStates, memory }) {
   const spaceId = space.id;
   const run = {
     id: newRunId(),
@@ -62,6 +62,13 @@ export function executeRun({ store, hub, config, agent, space, triggerMessage, a
   });
 
   async function runAsync() {
+    // 常驻索引只在该 (agent, Space) 尚无已持久化 sessionState 时前置注入
+    // （即将开启全新外部会话）——api-contract.md「常驻索引注入」：只随新会话
+    // 换代，不逐条消息刷新。已有 sessionState 的后续消息不重复注入。
+    const priorSessionState = store.getSessionState(agent.id, spaceId);
+    const residentBlock = priorSessionState === null ? await memory?.residentIndex() : null;
+    const promptText = residentBlock ? `${residentBlock}\n\n${triggerMessage.content}` : triggerMessage.content;
+
     const bubbles = createBubbleStream({ store, hub, config, spaceId, runId: storedRun.id, agentId: agent.id });
     const activityIndex = new Map(); // callId -> activity id
 
@@ -103,8 +110,8 @@ export function executeRun({ store, hub, config, agent, space, triggerMessage, a
 
     const ctx = {
       agent,
-      prompt: { text: triggerMessage.content },
-      sessionState: store.getSessionState(agent.id, spaceId),
+      prompt: { text: promptText },
+      sessionState: priorSessionState,
       workspacePath: process.cwd(),
       onDelta: (text) => bubbles.delta(text),
       onActivity,

@@ -1,6 +1,9 @@
 // 配置加载：所有可调参数集中于此，代码其他地方一律引用这里产出的对象，不许硬编码
 // （AGENTS.md 配置纪律 / ground-truth.md 第四节）。
 
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 const DEFAULTS = {
   port: 3000,
   dataPath: "./data/store.json",
@@ -29,12 +32,25 @@ const DEFAULTS = {
     idleShutdownMs: 5 * 60 * 1000, // 无在飞 run 后多久回收 daemon
     watchdogMs: 30 * 60 * 1000, // 单次 run 看门狗（adapter-interface.md 行为规则）
   },
+  memory: {
+    vaultPath: "~/.vera/memory", // Obsidian 兼容 vault，仓库外（api-contract.md Memory 一节）
+    residentIndexMaxLines: 25, // 常驻索引截断行数
+  },
 };
 
 function num(value, fallback) {
   if (value === undefined || value === "") return fallback;
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+// `~` 前缀展开为用户主目录，其余路径原样返回（config 唯一负责展开的地方，
+// 其余模块只拿到已展开的绝对/相对路径）。
+function expandHome(path) {
+  if (typeof path === "string" && path.startsWith("~")) {
+    return join(homedir(), path.slice(1));
+  }
+  return path;
 }
 
 export function loadConfig(env = process.env) {
@@ -64,6 +80,10 @@ export function loadConfig(env = process.env) {
       daemonPort: num(env.VERA_OPENCODE_DAEMON_PORT, DEFAULTS.opencode.daemonPort),
       idleShutdownMs: num(env.VERA_OPENCODE_IDLE_SHUTDOWN_MS, DEFAULTS.opencode.idleShutdownMs),
       watchdogMs: num(env.VERA_OPENCODE_WATCHDOG_MS, DEFAULTS.opencode.watchdogMs),
+    },
+    memory: {
+      vaultPath: expandHome(env.VERA_MEMORY_VAULT_PATH || DEFAULTS.memory.vaultPath),
+      residentIndexMaxLines: num(env.VERA_MEMORY_INDEX_MAX_LINES, DEFAULTS.memory.residentIndexMaxLines),
     },
   };
 }
