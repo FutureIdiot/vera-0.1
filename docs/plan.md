@@ -62,21 +62,24 @@
 
 **目标**：手机在蜂窝网络下跑通同一条切片。
 
-- [ ] cloudflared 隧道（照 `docs/reference/vps-tunnel-deploy.md` Option A，个人隧道可跳过 VPS）
-- [ ] Cloudflare Access 认证
-- [ ] 手机浏览器实测：流式不结块、断线重连正常
+- [x] cloudflared 隧道（照 `docs/reference/vps-tunnel-deploy.md` Option A，个人隧道可跳过 VPS）——`vera.futureidiot.com` → `127.0.0.1:3210`，LaunchAgent 常驻（`com.cloudflare.cloudflared`，plist 需手补 `tunnel run vera` 参数）。本地网络屏蔽 UDP 7844，config.yml 钉死 `protocol: http2`。SSE 过隧道实测逐条到达（ping 间隔 25s 不结块）
+- [x] Cloudflare Access 认证（Zero Trust 面板手工配：email OTP → Theta 邮箱；team `plain-silence-4358`，session 1 week，实测未登录请求 302 到 Access 登录页）
+- [x] 手机浏览器实测（2026-07-03 真机验收）：蜂窝网络下流式逐字、锁屏/切后台重连、上下文连续均通过。附带教训：gateway 静态文件此前不发缓存头，Cloudflare 默认边缘缓存 .js/.css 导致前端改动手机拿不到——已改为 `Cache-Control: no-store`（api-contract.md 系统表），Phase 6 换 ETag。首测曾卡在 api.navy 免费日额度耗尽（UTC 午夜重置；超限时流式请求挂 60s 被掐、opencode 无限重试、run 挂 working 直到 30min 看门狗——provider 错误尽早浮出 UI 是后续待修项）。已加第二个 agent `Gemma`（本地 ollama `gemma4:e4b`，tmux 会话 `ollama` 常驻）绕开额度依赖；GLM 席位临时 silent，额度恢复后改回 default
 
-**完成标准**：手机蜂窝网络下发消息、看流式回复，体验与本地一致。
+**完成标准**：手机蜂窝网络下发消息、看流式回复，体验与本地一致。✅ 2026-07-03 达成。
+
+注（运维现状）：gateway 与 ollama 各跑在 tmux 会话里（`vera-gateway` / `ollama`，Phase 6 迁 launchd）；cloudflared 为用户级 LaunchAgent；重启 gateway 时 store 已自动迁移为 data/ 分集合文件（旧文件留 `store.json.legacy`），Gemma 会话跨重启复用同一 external session 验证通过。
 
 ## Phase 4 — 横向铺开
 
 **目标**：ground truth 第五节的功能模块成形。UI 从此阶段起认真做，**mobile-first**。
 
 - [ ] Space 管理：创建、配置、在场 agent 席位
-- [ ] 多 agent 共存，广播 / @定向
+- [ ] 多 agent 共存，广播 / @定向；转达消息带署名且不占 assistant 角色，补发 agent 错过的他人发言（ground truth 2.3 发言归属）
 - [ ] 响应规则：默认 / 静默 / 专注（per-agent per-Space）
 - [ ] Agent State 层（全局可见的活动状态）
-- [ ] Agent 管理界面：增删改、换模型/供应商不换身份
+- [ ] Agent/Account 拆分（ground truth 2.2 2026-07-03 修订）：连接类字段与会话上下文挪入 Account，Agent 保留命名+记忆，席位记录驾驶关系；一次迁移改干净，不留双名
+- [ ] Agent 管理界面：增删改、换模型/供应商不换身份；账户即联系人，点开私聊/多选建群（ground truth 五）
 - [ ] 系统配置：数据隔离规则落成配置文件字段
 - [ ] 前端正式布局：手机竖屏优先，所有视觉参数走 CSS 变量
 
