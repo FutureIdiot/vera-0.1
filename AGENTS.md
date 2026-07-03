@@ -72,7 +72,7 @@ Vera-0.0.1/
 - 开始前 `git status --short`；不得回退、覆盖用户或其他 agent 的未提交改动。
 - 不做与当前任务无关的"顺手整理"或大重构。
 - secrets 只存 `~/.vera/secrets.json`，不进 repo，不出现在日志与 API 返回中。
-- 后端改动至少验证：`node --check` 改动文件；起服务用临时数据路径（`VERA_DATA_PATH=/tmp/... PORT=<空闲端口>`），不污染真实数据。
+- 后端改动至少验证：`node --check` 改动文件；起服务用临时数据目录（`VERA_DATA_PATH=/tmp/... PORT=<空闲端口>`），不污染真实数据。
 - 涉及 SSE 的改动必须实测流式（curl 看事件逐条到达），不能只看单元测试。
 - 禁止破坏性 git 命令；提交信息说清楚做了什么、动了哪层。
 

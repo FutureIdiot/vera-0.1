@@ -193,14 +193,14 @@ async function waitForHealth(timeoutMs = 8000) {
 async function startGateway() {
   port = await getFreePort();
   dataDir = await mkdtemp(join(tmpdir(), "vera-verify-"));
-  const dataPath = join(dataDir, "store.json");
 
   child = spawn(process.execPath, [join(repoRoot, "src/server.js")], {
     cwd: repoRoot,
     env: {
       ...process.env,
       PORT: String(port),
-      VERA_DATA_PATH: dataPath,
+      // dataPath 语义是目录（store 按集合分文件），直接传临时目录
+      VERA_DATA_PATH: dataDir,
       // 刻意调小缓冲（默认 2000）：一次 mock run 本身就有 ~12 个事件，缓冲
       // 太小会导致"干净重放"测试还没来得及验证就已经跨越缓冲触发 reset；
       // 20 足够放下单次 run 的事件（验证紧接着该 run 之后立即重放），又足够

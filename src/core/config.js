@@ -3,7 +3,7 @@
 
 const DEFAULTS = {
   port: 3000,
-  dataPath: "./data/store.json",
+  dataPath: "./data", // 目录：store 按集合分文件存放于此（见 src/store/store.js）
   sse: {
     bufferSize: 2000,
     pingIntervalMs: 25000,
