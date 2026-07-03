@@ -246,6 +246,7 @@ data: { "seq": 1042, "type": "message.delta", "ts": "…", "data": { … } }
 ```
 
 - `seq` 单调递增，gateway 维护环形缓冲（默认最近 2000 条）。
+- `seq` **跨重启单调**：gateway 持久化 seq 水位，重启后从"水位 + 缓冲长度"跳跃续增。因此客户端带重启前的 `since` 重连必然落入缺口 → 收到 `stream.reset` → 重新 bootstrap，不会静默漏掉重启前后的事件。
 - 重连时带 `?since=<最后收到的 seq>`（或标准 `Last-Event-ID` 头，两者等价）；缓冲已滚过 → gateway 发 `stream.reset`，客户端丢弃本地状态、重走 `/api/bootstrap`。
 
 ### 事件类型

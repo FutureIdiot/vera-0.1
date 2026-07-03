@@ -43,16 +43,18 @@
 **目标**：新架构 + OpenCode 持续会话 + 一个 Space 的消息流，端到端打通。
 
 - [x] gateway 骨架：Node 20+ ESM、薄路由、SSE 通道、JSON 文件存储（够用即可，形状按契约）+ mock adapter
-- [ ] OpenCode daemon adapter（搬运旧代码 + 按新接口收口）
-- [ ] Agent 注册：一个 OpenCode agent，身份字段按 ground truth 2.2
-- [ ] 一个默认 Space，消息收发
-- [ ] 最简网页：一个输入框 + 一条消息流，能看到流式输出即可，不做任何视觉打磨
-- [ ] `scripts/verify.mjs`：把验收清单固化成脚本（起临时 gateway → 逐项断言 → 退出码报告），此后所有打工 agent 交活前必跑
+- [x] OpenCode daemon adapter（搬运旧代码 + 按新接口收口）
+- [x] Agent 注册：一个 OpenCode agent，身份字段按 ground truth 2.2
+- [x] 一个默认 Space，消息收发
+- [x] 最简网页：一个输入框 + 一条消息流，能看到流式输出即可，不做任何视觉打磨
+- [x] `scripts/verify.mjs`：把验收清单固化成脚本（起临时 gateway → 逐项断言 → 退出码报告），此后所有打工 agent 交活前必跑
 
-**完成标准**（全部满足）：
-1. 浏览器发消息，OpenCode 流式回复渲染到页面
-2. 连发多条消息，会话上下文连续（agent 记得前文）
-3. gateway 重启后，会话能恢复或明确降级（不静默丢失）
+**完成标准**（全部满足，2026-07-03 真机验收通过）：
+1. [x] 浏览器发消息，OpenCode 流式回复渲染到页面
+2. [x] 连发多条消息，会话上下文连续（agent 记得前文）
+3. [x] gateway 重启后，会话能恢复或明确降级（不静默丢失）——真机验证会话跨重启真恢复（零 session-reset）；另补 SSE seq 水位持久化 + 重启跳跃，客户端带旧 since 重连必触发 stream.reset，不静默漏事件
+
+注：开发期 gateway 用 `PORT=3210`（旧 Vera 常驻进程占着 3000，Phase 6 launchd 迁移时再收回）。
 
 ## Phase 3 — 隧道上手机
 

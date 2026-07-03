@@ -4,8 +4,10 @@
 // createEventHub 是纯逻辑（不依赖 node:http），方便单测；handleSseRequest 是
 // 挂在 node:http 上的适配层。
 
-export function createEventHub({ bufferSize = 2000, pingIntervalMs = 25000 } = {}) {
-  let seq = 0;
+// initialSeq：起始 seq（重启时由 server 从持久化水位 + 跳跃算出）；
+// onSeqAdvance：每次 publish 后回调最新 seq（server 接到 store 回写水位）。
+export function createEventHub({ bufferSize = 2000, pingIntervalMs = 25000, initialSeq = 0, onSeqAdvance = null } = {}) {
+  let seq = initialSeq;
   const buffer = []; // { seq, type, ts, data }
   const subscribers = new Set(); // { write(frameString) }
 
@@ -20,6 +22,7 @@ export function createEventHub({ bufferSize = 2000, pingIntervalMs = 25000 } = {
     if (buffer.length > bufferSize) buffer.shift();
     const frame = frameFor(envelope);
     for (const sub of subscribers) sub.write(frame);
+    onSeqAdvance?.(seq);
     return envelope;
   }
 
@@ -32,8 +35,11 @@ export function createEventHub({ bufferSize = 2000, pingIntervalMs = 25000 } = {
   }
 
   // 缓冲是否已经滚过 sinceSeq（即 sinceSeq 之后到最旧缓冲之间存在缺口）。
+  // sinceSeq 超前于当前 seq（来自 gateway 上一世、水位防抖丢失时可能出现）
+  // 同样算缺口：客户端状态与本世对不上，必须 reset。
   function hasGap(sinceSeq) {
-    if (sinceSeq >= seq) return false;
+    if (sinceSeq > seq) return true;
+    if (sinceSeq === seq) return false;
     const oldest = oldestBufferedSeq();
     if (oldest === null) return sinceSeq < seq;
     return sinceSeq < oldest - 1;

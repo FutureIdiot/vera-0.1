@@ -72,3 +72,35 @@ test("hasGap correctly detects a caught-up client (no gap)", () => {
   assert.equal(hub.hasGap(3), false); // fully caught up
   assert.equal(hub.hasGap(0), true); // missed seq 1, which is gone
 });
+
+test("restart semantics: initialSeq jump makes any previous-life since trigger stream.reset", () => {
+  // 上一世：seq 走到 1042，水位持久化
+  let watermark = 0;
+  const hub1 = createEventHub({ bufferSize: 5, onSeqAdvance: (s) => (watermark = s) });
+  for (let i = 0; i < 7; i++) hub1.publish("x", {});
+  assert.equal(watermark, 7);
+
+  // 本世：从水位 + 缓冲长度跳跃续增（server.js 接线逻辑）
+  const hub2 = createEventHub({ bufferSize: 5, initialSeq: watermark + 5 });
+  hub2.publish("y", {}); // seq 13
+
+  // 上一世的任何 since（包括恰好等于水位、以及水位防抖丢失后略超前的值）都必须 reset
+  for (const staleSince of [1, 7, 9]) {
+    const sub = fakeSubscriber();
+    hub2.subscribe(sub, { sinceSeq: staleSince });
+    const envs = sub.envelopes();
+    assert.equal(envs[0].type, "stream.reset", `since=${staleSince} 应触发 reset`);
+  }
+
+  // 本世正常客户端不受影响
+  const live = fakeSubscriber();
+  hub2.subscribe(live, { sinceSeq: 12 }); // 12 = initialSeq，等价"从头听本世"
+  assert.deepEqual(live.envelopes().map((e) => e.seq), [13]);
+});
+
+test("since ahead of current seq (future client) is treated as a gap", () => {
+  const hub = createEventHub({ bufferSize: 5 });
+  hub.publish("a", {});
+  assert.equal(hub.hasGap(999), true);
+  assert.equal(hub.hasGap(1), false);
+});

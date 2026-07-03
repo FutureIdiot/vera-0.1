@@ -10,7 +10,7 @@ import { dirname } from "node:path";
 const COLLECTIONS = ["agents", "spaces", "messages", "activities", "approvals", "runs"];
 
 function emptyData() {
-  const data = { sessionStates: {}, _seq: 0 };
+  const data = { sessionStates: {}, _seq: 0, eventSeqWatermark: 0 };
   for (const name of COLLECTIONS) data[name] = [];
   return data;
 }
@@ -108,6 +108,20 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     scheduleSave();
   }
 
+  // SSE seq 水位（api-contract.md「seq 跨重启单调」）：hub 每次 publish 后回写，
+  // 重启时 server 用它算跳跃后的起始 seq。防抖落盘，最后 ~debounceMs 的推进
+  // 可能丢失——跳跃量（缓冲长度）覆盖这个误差。
+  function getEventSeqWatermark() {
+    return data.eventSeqWatermark ?? 0;
+  }
+
+  function setEventSeqWatermark(seq) {
+    if (seq > (data.eventSeqWatermark ?? 0)) {
+      data.eventSeqWatermark = seq;
+      scheduleSave();
+    }
+  }
+
   async function close() {
     if (writeTimer) {
       clearTimeout(writeTimer);
@@ -125,6 +139,8 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     nextSeq,
     getSessionState,
     setSessionState,
+    getEventSeqWatermark,
+    setEventSeqWatermark,
     flush,
     close,
   };

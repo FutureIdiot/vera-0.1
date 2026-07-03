@@ -21,7 +21,15 @@ const serveStatic = createStaticHandler(frontendRoot);
 
 const config = loadConfig(process.env);
 const store = await createStore({ dataPath: config.dataPath, debounceMs: config.store.debounceMs });
-const hub = createEventHub({ bufferSize: config.sse.bufferSize, pingIntervalMs: config.sse.pingIntervalMs });
+// seq 跨重启单调（api-contract.md）：从持久化水位 + 缓冲长度跳跃续增，
+// 保证客户端带上一世的 since 重连必然触发 stream.reset 而不是静默漏事件。
+const seqWatermark = store.getEventSeqWatermark();
+const hub = createEventHub({
+  bufferSize: config.sse.bufferSize,
+  pingIntervalMs: config.sse.pingIntervalMs,
+  initialSeq: seqWatermark > 0 ? seqWatermark + config.sse.bufferSize : 0,
+  onSeqAdvance: (seq) => store.setEventSeqWatermark(seq),
+});
 const agentStates = createAgentStateTracker({ hub });
 
 // provider -> adapter：普通的两成员 map，不做注册表抽象
