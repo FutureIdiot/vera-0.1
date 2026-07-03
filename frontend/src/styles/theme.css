@@ -1,0 +1,294 @@
+/* 唯一的视觉参数来源（AGENTS.md「所有视觉参数走 CSS 变量」/ ground-truth.md 4.3）。
+   Phase 2 不做视觉打磨，这里只保证：没有任何硬编码颜色/尺寸/字体值散落在别处。
+   Phase 4 的 Appearance 配置项（主题、主题色、高亮色、字体、气泡样式…）都应
+   落在这份变量表里，而不是新增散落的样式文件。 */
+
+:root {
+  --vera-color-bg: #ffffff;
+  --vera-color-surface: #f4f4f5;
+  --vera-color-border: #d9d9de;
+  --vera-color-text: #18181b;
+  --vera-color-text-muted: #6b6b73;
+  --vera-color-accent: #2f6fed;
+  --vera-color-accent-text: #ffffff;
+
+  --vera-color-bubble-user-bg: #2f6fed;
+  --vera-color-bubble-user-text: #ffffff;
+  --vera-color-bubble-agent-bg: #f4f4f5;
+  --vera-color-bubble-agent-text: #18181b;
+  --vera-color-bubble-streaming-border: #2f6fed;
+
+  --vera-color-activity-bg: #fbfbfc;
+  --vera-color-activity-text: #6b6b73;
+  --vera-color-activity-border: #e4e4e7;
+
+  --vera-color-approval-bg: #fff8e6;
+  --vera-color-approval-border: #f0c96a;
+  --vera-color-approval-answered-bg: #f4f4f5;
+  --vera-color-approval-answered-border: #d9d9de;
+
+  --vera-color-danger: #d1373f;
+  --vera-color-success: #2a9d5c;
+
+  --vera-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --vera-font-size-base: 15px;
+  --vera-font-size-small: 12px;
+  --vera-font-size-large: 18px;
+  --vera-line-height-base: 1.45;
+
+  --vera-space-xs: 4px;
+  --vera-space-sm: 8px;
+  --vera-space-md: 12px;
+  --vera-space-lg: 20px;
+
+  --vera-bubble-radius: 14px;
+  --vera-bubble-padding: 10px 14px;
+  --vera-bubble-gap: 8px;
+  --vera-bubble-max-width: 80%;
+
+  --vera-window-margin: 12px;
+  --vera-composer-height: 56px;
+  --vera-border-width: 1px;
+  --vera-transition-fast: 120ms ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --vera-color-bg: #17171a;
+    --vera-color-surface: #1f2023;
+    --vera-color-border: #303136;
+    --vera-color-text: #ececef;
+    --vera-color-text-muted: #9a9aa2;
+    --vera-color-accent: #5b8def;
+    --vera-color-accent-text: #0c0c0e;
+
+    --vera-color-bubble-user-bg: #5b8def;
+    --vera-color-bubble-user-text: #0c0c0e;
+    --vera-color-bubble-agent-bg: #26272b;
+    --vera-color-bubble-agent-text: #ececef;
+    --vera-color-bubble-streaming-border: #5b8def;
+
+    --vera-color-activity-bg: #1b1c1f;
+    --vera-color-activity-text: #9a9aa2;
+    --vera-color-activity-border: #303136;
+
+    --vera-color-approval-bg: #332a12;
+    --vera-color-approval-border: #a9822f;
+    --vera-color-approval-answered-bg: #1f2023;
+    --vera-color-approval-answered-border: #303136;
+
+    --vera-color-danger: #f0666d;
+    --vera-color-success: #63d296;
+  }
+}
+
+:root[data-theme="dark"] {
+  --vera-color-bg: #17171a;
+  --vera-color-surface: #1f2023;
+  --vera-color-border: #303136;
+  --vera-color-text: #ececef;
+  --vera-color-text-muted: #9a9aa2;
+  --vera-color-accent: #5b8def;
+  --vera-color-accent-text: #0c0c0e;
+  --vera-color-bubble-user-bg: #5b8def;
+  --vera-color-bubble-user-text: #0c0c0e;
+  --vera-color-bubble-agent-bg: #26272b;
+  --vera-color-bubble-agent-text: #ececef;
+  --vera-color-bubble-streaming-border: #5b8def;
+  --vera-color-activity-bg: #1b1c1f;
+  --vera-color-activity-text: #9a9aa2;
+  --vera-color-activity-border: #303136;
+  --vera-color-approval-bg: #332a12;
+  --vera-color-approval-border: #a9822f;
+  --vera-color-approval-answered-bg: #1f2023;
+  --vera-color-approval-answered-border: #303136;
+  --vera-color-danger: #f0666d;
+  --vera-color-success: #63d296;
+}
+
+:root[data-theme="light"] {
+  --vera-color-bg: #ffffff;
+  --vera-color-surface: #f4f4f5;
+  --vera-color-border: #d9d9de;
+  --vera-color-text: #18181b;
+  --vera-color-text-muted: #6b6b73;
+  --vera-color-accent: #2f6fed;
+  --vera-color-accent-text: #ffffff;
+  --vera-color-bubble-user-bg: #2f6fed;
+  --vera-color-bubble-user-text: #ffffff;
+  --vera-color-bubble-agent-bg: #f4f4f5;
+  --vera-color-bubble-agent-text: #18181b;
+  --vera-color-bubble-streaming-border: #2f6fed;
+  --vera-color-activity-bg: #fbfbfc;
+  --vera-color-activity-text: #6b6b73;
+  --vera-color-activity-border: #e4e4e7;
+  --vera-color-approval-bg: #fff8e6;
+  --vera-color-approval-border: #f0c96a;
+  --vera-color-approval-answered-bg: #f4f4f5;
+  --vera-color-approval-answered-border: #d9d9de;
+  --vera-color-danger: #d1373f;
+  --vera-color-success: #2a9d5c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--vera-color-bg);
+  color: var(--vera-color-text);
+  font-family: var(--vera-font-family);
+  font-size: var(--vera-font-size-base);
+  line-height: var(--vera-line-height-base);
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.vera-timeline {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--vera-window-margin);
+  display: flex;
+  flex-direction: column;
+  gap: var(--vera-bubble-gap);
+}
+
+.vera-item {
+  max-width: var(--vera-bubble-max-width);
+}
+
+.vera-bubble {
+  border-radius: var(--vera-bubble-radius);
+  padding: var(--vera-bubble-padding);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.vera-bubble--user {
+  align-self: flex-end;
+  background: var(--vera-color-bubble-user-bg);
+  color: var(--vera-color-bubble-user-text);
+}
+
+.vera-bubble--agent {
+  align-self: flex-start;
+  background: var(--vera-color-bubble-agent-bg);
+  color: var(--vera-color-bubble-agent-text);
+}
+
+.vera-bubble--streaming {
+  border: var(--vera-border-width) solid var(--vera-color-bubble-streaming-border);
+}
+
+.vera-activity {
+  align-self: flex-start;
+  max-width: var(--vera-bubble-max-width);
+  background: var(--vera-color-activity-bg);
+  border: var(--vera-border-width) solid var(--vera-color-activity-border);
+  color: var(--vera-color-activity-text);
+  border-radius: var(--vera-bubble-radius);
+  padding: var(--vera-space-sm) var(--vera-space-md);
+  font-size: var(--vera-font-size-small);
+}
+
+.vera-approval {
+  align-self: flex-start;
+  max-width: var(--vera-bubble-max-width);
+  background: var(--vera-color-approval-bg);
+  border: var(--vera-border-width) solid var(--vera-color-approval-border);
+  border-radius: var(--vera-bubble-radius);
+  padding: var(--vera-space-md);
+}
+
+.vera-approval--answered {
+  background: var(--vera-color-approval-answered-bg);
+  border-color: var(--vera-color-approval-answered-border);
+  opacity: 0.7;
+}
+
+.vera-approval__prompt {
+  margin: 0 0 var(--vera-space-sm) 0;
+}
+
+.vera-approval__actions {
+  display: flex;
+  gap: var(--vera-space-sm);
+}
+
+.vera-approval__button {
+  font-family: inherit;
+  font-size: var(--vera-font-size-base);
+  border-radius: var(--vera-bubble-radius);
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  padding: var(--vera-space-xs) var(--vera-space-md);
+  background: var(--vera-color-surface);
+  color: var(--vera-color-text);
+  cursor: pointer;
+}
+
+.vera-approval__button--allow {
+  background: var(--vera-color-success);
+  color: var(--vera-color-accent-text);
+  border-color: var(--vera-color-success);
+}
+
+.vera-approval__button--deny {
+  background: var(--vera-color-danger);
+  color: var(--vera-color-accent-text);
+  border-color: var(--vera-color-danger);
+}
+
+.vera-composer {
+  display: flex;
+  align-items: center;
+  gap: var(--vera-space-sm);
+  min-height: var(--vera-composer-height);
+  padding: var(--vera-space-sm) var(--vera-window-margin);
+  border-top: var(--vera-border-width) solid var(--vera-color-border);
+  background: var(--vera-color-surface);
+}
+
+.vera-composer__input {
+  flex: 1;
+  font-family: inherit;
+  font-size: var(--vera-font-size-base);
+  padding: var(--vera-space-sm) var(--vera-space-md);
+  border-radius: var(--vera-bubble-radius);
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  background: var(--vera-color-bg);
+  color: var(--vera-color-text);
+}
+
+.vera-composer__send {
+  font-family: inherit;
+  font-size: var(--vera-font-size-base);
+  border-radius: var(--vera-bubble-radius);
+  border: none;
+  padding: var(--vera-space-sm) var(--vera-space-lg);
+  background: var(--vera-color-accent);
+  color: var(--vera-color-accent-text);
+  cursor: pointer;
+}
+
+.vera-composer__send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.vera-status-bar {
+  font-size: var(--vera-font-size-small);
+  color: var(--vera-color-text-muted);
+  padding: var(--vera-space-xs) var(--vera-window-margin);
+  border-bottom: var(--vera-border-width) solid var(--vera-color-border);
+}

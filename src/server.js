@@ -2,16 +2,22 @@
 // core/ / store/ / api/ / agents/ / spaces/ / adapters/ 里。
 
 import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { loadConfig } from "./core/config.js";
 import { createStore } from "./store/store.js";
 import { createRouter } from "./api/router.js";
 import { createEventHub, handleSseRequest } from "./api/sse.js";
 import { sendJson, sendError } from "./api/http.js";
+import { createStaticHandler } from "./api/static.js";
 import { createAgentStateTracker } from "./agents/agent-state.js";
 import { registerAgentRoutes } from "./agents/routes.js";
 import { registerSpaceRoutes } from "./spaces/routes.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
+
+const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend");
+const serveStatic = createStaticHandler(frontendRoot);
 
 const config = loadConfig(process.env);
 const store = await createStore({ dataPath: config.dataPath, debounceMs: config.store.debounceMs });
@@ -52,7 +58,13 @@ registerSpaceRoutes(router, { store, hub, config, resolveAdapter, agentStates })
 const server = createServer(async (req, res) => {
   try {
     const handled = await router.handle(req, res);
-    if (!handled) sendError(res, 404, "not_found", `no route for ${req.method} ${req.url}`);
+    if (handled) return;
+    // 非 /api/ 路径回退到 frontend/ 静态文件（api-contract.md 系统表）。
+    if (!req.url.startsWith("/api/")) {
+      const served = await serveStatic(req, res);
+      if (served) return;
+    }
+    sendError(res, 404, "not_found", `no route for ${req.method} ${req.url}`);
   } catch (err) {
     sendError(res, 500, "internal", err?.message || "internal error");
   }
