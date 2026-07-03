@@ -35,6 +35,10 @@ async function boot() {
   let space = null;
   let stream = null;
 
+  // agentId -> name，bootstrap 时填充（stream.reset 会重新 bootstrap，新 agent 随之可见）。
+  const agentNameById = new Map();
+  const bubbleCtx = { agentName: (id) => agentNameById.get(id) };
+
   async function handleAnswer(approvalId, answer) {
     try {
       await answerApproval(approvalId, answer);
@@ -44,14 +48,14 @@ async function boot() {
   }
 
   function renderItem(item) {
-    if (item.itemType === "message") return renderMessageBubble(item);
+    if (item.itemType === "message") return renderMessageBubble(item, bubbleCtx);
     if (item.itemType === "activity") return renderActivity(item);
     if (item.itemType === "approval") return renderApprovalCard(item, { onAnswer: handleAnswer });
     return null;
   }
 
   function applyItem(el, item) {
-    if (item.itemType === "message") return applyMessageBubble(el, item);
+    if (item.itemType === "message") return applyMessageBubble(el, item, bubbleCtx);
     if (item.itemType === "activity") return applyActivity(el, item);
     if (item.itemType === "approval") return applyApprovalCard(el, item, { onAnswer: handleAnswer });
   }
@@ -95,6 +99,8 @@ async function boot() {
 
   async function loadInitialData() {
     const bootstrap = await fetchBootstrap();
+    agentNameById.clear();
+    for (const agent of bootstrap.agents ?? []) agentNameById.set(agent.id, agent.name);
     space = bootstrap.spaces[0] ?? null;
     if (!space) {
       statusBar.textContent = "还没有 Space，请先创建一个再刷新页面。";

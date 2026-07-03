@@ -16,6 +16,7 @@
   --vera-color-bubble-user-text: #ffffff;
   --vera-color-bubble-agent-bg: #f4f4f5;
   --vera-color-bubble-agent-text: #18181b;
+  --vera-color-bubble-author-text: #6b6b73;
   --vera-color-bubble-streaming-border: #2f6fed;
 
   --vera-color-activity-bg: #fbfbfc;
@@ -66,6 +67,7 @@
     --vera-color-bubble-user-text: #0c0c0e;
     --vera-color-bubble-agent-bg: #26272b;
     --vera-color-bubble-agent-text: #ececef;
+    --vera-color-bubble-author-text: #9a9aa2;
     --vera-color-bubble-streaming-border: #5b8def;
 
     --vera-color-activity-bg: #1b1c1f;
@@ -94,6 +96,7 @@
   --vera-color-bubble-user-text: #0c0c0e;
   --vera-color-bubble-agent-bg: #26272b;
   --vera-color-bubble-agent-text: #ececef;
+  --vera-color-bubble-author-text: #9a9aa2;
   --vera-color-bubble-streaming-border: #5b8def;
   --vera-color-activity-bg: #1b1c1f;
   --vera-color-activity-text: #9a9aa2;
@@ -118,6 +121,7 @@
   --vera-color-bubble-user-text: #ffffff;
   --vera-color-bubble-agent-bg: #f4f4f5;
   --vera-color-bubble-agent-text: #18181b;
+  --vera-color-bubble-author-text: #6b6b73;
   --vera-color-bubble-streaming-border: #2f6fed;
   --vera-color-activity-bg: #fbfbfc;
   --vera-color-activity-text: #6b6b73;
@@ -189,6 +193,12 @@ body {
 
 .vera-bubble--streaming {
   border: var(--vera-border-width) solid var(--vera-color-bubble-streaming-border);
+}
+
+.vera-bubble__author {
+  font-size: var(--vera-font-size-small);
+  color: var(--vera-color-bubble-author-text);
+  margin-bottom: var(--vera-space-xs);
 }
 
 .vera-activity {
