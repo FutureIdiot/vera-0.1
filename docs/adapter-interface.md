@@ -37,6 +37,9 @@ export function createOpencodeAdapter() {
   requestApproval(req), // -> Promise<answer>。阻塞式提权申请：gateway 生成
                       // Approval 卡片入时间线，resolve 用户的答复；run 结束
                       // 前未答复则 resolve "deny" 并标记 expired
+  persistSessionState(state), // 可选调用：立即持久化会话状态，不等 run 结束。
+                      // 用于"外部会话已创建、但 run 可能中途崩溃"的窗口
+                      // （示例 A 首次 run）。run 正常结束后仍以返回值为准
   signal          // AbortSignal，取消信号
 }
 ```
@@ -96,10 +99,11 @@ export function createOpencodeAdapter() {
 | 接口点 | 映射 |
 |---|---|
 | `sessionState` | `{ "externalSessionId": "ses_xxx" }` |
-| 首次 run | 惰性起 daemon → `POST /api/session` 建会话 → **先通过返回值持久化 id 再跑**（防崩溃重建）|
+| 首次 run | 惰性起 daemon → `POST /api/session` 建会话 → **先 `persistSessionState({externalSessionId})` 再跑**（防 run 中途崩溃丢 id 重建会话）|
 | 每次 run | spawn `opencode run --attach <daemonUrl> -c -s <externalSessionId> …` 短命子进程 |
 | `onDelta` | daemon SSE 的 `message.part.delta`（`field:"text"`）转发 |
-| `onActivity` | `message.part.updated`（tool 部件）→ `phase:"tool"`；`session.status busy` → `phase:"working"` |
+| `onActivity` | `message.part.updated`（tool 部件）→ `phase:"tool"`；`session.status busy` → `phase:"working"`，且用固定 callId 合并为一条原地更新（busy 事件反复触发，不得每次一条）|
+| runner 参数 | `agent.connection.args` 中只识别并透传 `--variant <v>`，其余成员一律不透传（防任意参数注入）|
 | 完成 | SSE `session.idle`；content 优先取 delta 累积值，子进程 stdout 兜底 |
 | 会话失效 | daemon 重启后旧 sessionID 不存在 → 新建会话 + 上报 `session-reset` |
 | `shutdown()` | SIGTERM daemon，5s 后 SIGKILL |

@@ -23,6 +23,12 @@ const DEFAULTS = {
   mock: {
     delayMs: 30,
   },
+  opencode: {
+    binary: "/Users/theta/.opencode/bin/opencode",
+    daemonPort: 0, // 0 = 每次启动随机挑空闲端口
+    idleShutdownMs: 5 * 60 * 1000, // 无在飞 run 后多久回收 daemon
+    watchdogMs: 30 * 60 * 1000, // 单次 run 看门狗（adapter-interface.md 行为规则）
+  },
 };
 
 function num(value, fallback) {
@@ -52,6 +58,12 @@ export function loadConfig(env = process.env) {
     },
     mock: {
       delayMs: num(env.VERA_MOCK_DELAY_MS, DEFAULTS.mock.delayMs),
+    },
+    opencode: {
+      binary: env.VERA_OPENCODE_BIN || DEFAULTS.opencode.binary,
+      daemonPort: num(env.VERA_OPENCODE_DAEMON_PORT, DEFAULTS.opencode.daemonPort),
+      idleShutdownMs: num(env.VERA_OPENCODE_IDLE_SHUTDOWN_MS, DEFAULTS.opencode.idleShutdownMs),
+      watchdogMs: num(env.VERA_OPENCODE_WATCHDOG_MS, DEFAULTS.opencode.watchdogMs),
     },
   };
 }

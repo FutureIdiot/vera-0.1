@@ -11,19 +11,22 @@ import { createAgentStateTracker } from "./agents/agent-state.js";
 import { registerAgentRoutes } from "./agents/routes.js";
 import { registerSpaceRoutes } from "./spaces/routes.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
+import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 
 const config = loadConfig(process.env);
 const store = await createStore({ dataPath: config.dataPath, debounceMs: config.store.debounceMs });
 const hub = createEventHub({ bufferSize: config.sse.bufferSize, pingIntervalMs: config.sse.pingIntervalMs });
 const agentStates = createAgentStateTracker({ hub });
-const mockAdapter = createMockAdapter({ chunkDelayMs: config.mock.delayMs });
 
-// 本次只实现示例 C（mock adapter）；provider -> adapter 的映射先写死这一条，
-// 不预建插件注册表（AGENTS.md「可配置 ≠ 抽象层」），等第二个真实 adapter
-// （OpenCode）落地时再看要不要抽出去。
+// provider -> adapter：普通的两成员 map，不做注册表抽象
+// （AGENTS.md「可配置 ≠ 抽象层」）。
+const adapters = {
+  mock: createMockAdapter({ chunkDelayMs: config.mock.delayMs }),
+  opencode: createOpencodeAdapter({ config: config.opencode }),
+};
+
 function resolveAdapter(agent) {
-  if (agent.provider === "mock") return mockAdapter;
-  return null;
+  return adapters[agent.provider] ?? null;
 }
 
 const router = createRouter();
@@ -60,8 +63,17 @@ server.listen(config.port, () => {
 });
 
 async function shutdown() {
+  for (const adapter of Object.values(adapters)) {
+    try {
+      await adapter.shutdown?.();
+    } catch {
+      // 尽力而为，不阻塞退出
+    }
+  }
   await store.close();
   server.close(() => process.exit(0));
+  // SSE 长连接不主动断，server.close 会永远等；强制掐掉存量连接
+  server.closeAllConnections?.();
 }
 
 process.on("SIGINT", shutdown);

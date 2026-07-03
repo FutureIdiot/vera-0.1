@@ -13,6 +13,9 @@ import { createBubbleStream } from "./bubble-stream.js";
 import { requestApproval as requestApprovalRecord, expirePendingApprovalsForRun } from "./approvals.js";
 
 const abortControllers = new Map(); // runId -> AbortController
+const runQueues = new Map(); // `${agentId}:${spaceId}` -> 队尾 promise。同一
+// (agent, Space) 的外部会话是同一条，并发投递会串线（api-contract.md Run 一节），
+// 因此 adapter 调用按触发顺序串行；Run 记录仍即时创建返回。
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
@@ -50,8 +53,13 @@ export function executeRun({ store, hub, config, agent, space, triggerMessage, a
   const controller = new AbortController();
   abortControllers.set(storedRun.id, controller);
 
-  // 真正的 adapter 交互异步跑，不阻塞 HTTP 响应。
-  void runAsync();
+  // 真正的 adapter 交互异步跑，不阻塞 HTTP 响应；同 (agent, Space) 排队串行。
+  const queueKey = `${agent.id}:${spaceId}`;
+  const tail = (runQueues.get(queueKey) ?? Promise.resolve()).then(runAsync);
+  runQueues.set(queueKey, tail);
+  void tail.finally(() => {
+    if (runQueues.get(queueKey) === tail) runQueues.delete(queueKey);
+  });
 
   async function runAsync() {
     const bubbles = createBubbleStream({ store, hub, config, spaceId, runId: storedRun.id, agentId: agent.id });
@@ -101,6 +109,9 @@ export function executeRun({ store, hub, config, agent, space, triggerMessage, a
       onDelta: (text) => bubbles.delta(text),
       onActivity,
       requestApproval,
+      // 可选回调（adapter-interface.md）：外部会话一建立就立即持久化，
+      // 不等 run 结束，防止 run 中途崩溃丢会话 id 导致重复建会话。
+      persistSessionState: (state) => store.setSessionState(agent.id, spaceId, state),
       signal: controller.signal,
     };
 
