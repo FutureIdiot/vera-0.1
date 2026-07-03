@@ -237,7 +237,7 @@ type: decision        # 枚举可扩展，起步集：project_rule / architectur
 description: 一行钩子——常驻索引只展示这一行
 status: active        # active / archived（过时先归档不删除）
 stains:               # 可选，哑墨（R5）：agentId -> 裸 hex。四不：不注入、不解释、不引用、不作为判断依据
-  agt_x1y2: "#7A8FA6"
+  agt_x1y2: "#7A8FA6"  # 为空时序列化为 `stains: {}`，键不省略
 createdAt: 2026-07-03T00:00:00.000Z
 updatedAt: 2026-07-03T00:00:00.000Z
 ```
@@ -251,7 +251,7 @@ updatedAt: 2026-07-03T00:00:00.000Z
 | Method | Path | 说明 |
 |---|---|---|
 | GET | `/api/memory` | 索引列表 `{ "memories": [{ slug, type, description, status, stains, createdAt, updatedAt }] }`，按 updatedAt 降序。给前端记忆库用，允许含 stains（前端可显示，R5） |
-| POST | `/api/memory` | 手动「保存到记忆」。body `{ "slug", "type", "description", "content", "stains"? }`；gateway 落盘为上述文件格式。slug 已存在 → 409 `conflict`；slug 不合法（非 kebab-case）→ 400 |
+| POST | `/api/memory` | 手动「保存到记忆」。body `{ "slug", "type", "description", "content", "stains"? }`；gateway 落盘为上述文件格式。成功 → 201 `{ "memory": { slug, type, description, status, stains, createdAt, updatedAt } }`（与 GET 列表条目同形）；slug 已存在 → 409 `conflict`；slug 不合法（非 kebab-case）→ 400 |
 
 ## 四、SSE 事件流
 
