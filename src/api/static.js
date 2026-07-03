@@ -53,7 +53,12 @@ export function createStaticHandler(root) {
       }
       const body = await readFile(filePath);
       const contentType = MIME_TYPES[extname(filePath).toLowerCase()] || "application/octet-stream";
-      res.writeHead(200, { "Content-Type": contentType, "Content-Length": body.length });
+      // no-store：防浏览器与 CDN 边缘缓存旧资源（api-contract.md 系统表；Phase 6 换 ETag）。
+      res.writeHead(200, {
+        "Content-Type": contentType,
+        "Content-Length": body.length,
+        "Cache-Control": "no-store",
+      });
       res.end(req.method === "HEAD" ? undefined : body);
       return true;
     } catch (err) {
