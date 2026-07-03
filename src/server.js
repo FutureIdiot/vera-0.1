@@ -13,6 +13,8 @@ import { createStaticHandler } from "./api/static.js";
 import { createAgentStateTracker } from "./agents/agent-state.js";
 import { registerAgentRoutes } from "./agents/routes.js";
 import { registerSpaceRoutes } from "./spaces/routes.js";
+import { createMemoryVault } from "./memory/memory.js";
+import { registerMemoryRoutes } from "./memory/routes.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 
@@ -31,6 +33,10 @@ const hub = createEventHub({
   onSeqAdvance: (seq) => store.setEventSeqWatermark(seq),
 });
 const agentStates = createAgentStateTracker({ hub });
+const memory = createMemoryVault({
+  vaultPath: config.memory.vaultPath,
+  residentIndexMaxLines: config.memory.residentIndexMaxLines,
+});
 
 // provider -> adapter：普通的两成员 map，不做注册表抽象
 // （AGENTS.md「可配置 ≠ 抽象层」）。
@@ -61,7 +67,8 @@ router.get("/api/events", ({ req, res }) => {
 });
 
 registerAgentRoutes(router, { store, agentStates });
-registerSpaceRoutes(router, { store, hub, config, resolveAdapter, agentStates });
+registerSpaceRoutes(router, { store, hub, config, resolveAdapter, agentStates, memory });
+registerMemoryRoutes(router, { memory });
 
 const server = createServer(async (req, res) => {
   try {

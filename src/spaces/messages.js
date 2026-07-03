@@ -27,7 +27,7 @@ function shouldRespond(seat, message) {
   return mode === "default";
 }
 
-export function postMessage({ store, hub, config, resolveAdapter, agentStates, spaceId, body }) {
+export function postMessage({ store, hub, config, resolveAdapter, agentStates, memory, spaceId, body }) {
   const space = getSpaceOrThrow(store, spaceId);
   if (!body?.author || !body?.content) {
     throw new ApiError("invalid_request", "author and content are required");
@@ -55,7 +55,7 @@ export function postMessage({ store, hub, config, resolveAdapter, agentStates, s
     if (!agent) continue;
     const adapter = resolveAdapter(agent);
     if (!adapter) continue;
-    const run = executeRun({ store, hub, config, agent, space, triggerMessage: storedMessage, adapter, agentStates });
+    const run = executeRun({ store, hub, config, agent, space, triggerMessage: storedMessage, adapter, agentStates, memory });
     runs.push(run);
   }
 
