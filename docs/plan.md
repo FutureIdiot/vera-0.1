@@ -74,16 +74,24 @@
 
 **目标**：ground truth 第五节的功能模块成形。UI 从此阶段起认真做，**mobile-first**。
 
-- [ ] Space 管理：创建、配置、在场 agent 席位
-- [ ] 多 agent 共存，广播 / @定向；转达消息带署名且不占 assistant 角色，补发 agent 错过的他人发言（ground truth 2.3 发言归属）
-- [ ] 响应规则：默认 / 静默 / 专注（per-agent per-Space）
-- [ ] Agent State 层（全局可见的活动状态）
-- [ ] Agent/Account 拆分（ground truth 2.2 2026-07-03 修订）：连接类字段与会话上下文挪入 Account，Agent 保留命名+记忆，席位记录驾驶关系；一次迁移改干净，不留双名
-- [ ] Agent 管理界面：增删改、换模型/供应商不换身份；账户即联系人，点开私聊/多选建群（ground truth 五）
-- [ ] 系统配置：数据隔离规则落成配置文件字段；设置页字段以 ground truth 四为唯一清单（含 2026-07-03 补的消息呈现、注入预算；运维参数按其边界注记不进前端）
-- [ ] 前端正式布局：手机竖屏优先，所有视觉参数走 CSS 变量
+> **推进次序（2026-07-04，接 codex 审查意见）**：Phase 4 条目间有硬依赖，按依赖序推进，不并行铺。
+> 1. Agent/Account 拆分是其余一切的地基——prompt 编译器要按 seat 当前驾驶哪个 account 取 model/connection/sessionState，前端联系人管理要拿 accounts 建模。先拆，不让合并模型渗进更多代码（ground-truth.md:28、`src/agents/agents.js:19`）。
+> 2. 多 agent 前，prompt/message 编译层须独立成形。现 `postMessage` 只 fan-out，`run-controller` 只把触发消息交给 adapter，最多首轮前置 resident memory；ground truth 2.3 的"署名注入、不占 assistant 角色、补发错过发言"塞不进 `messages.js` / `run-controller.js`，应抽出清晰的 Space→Agent 视角编译层（ground-truth.md:69、`src/spaces/messages.js:50`、`src/spaces/run-controller.js:64`）。编译层是 4.1 之后、前端之前的纯后端步骤，可 curl/`verify.mjs` 验收，不依赖 UI。
+> 3. 前端当前是合格的 Phase 3 控制台（默认拿第一个 Space、只发 broadcast、状态围绕单条时间线组织），不是 Phase 4 壳子。Space 管理、联系人/群、@定向、mobile-first 正式布局当成正式页面架构做，不在最简页上局部加按钮（`frontend/src/views/space-view.js:100`）。前端重构放最后，用一次性页面架构把 4.2–4.5 已就绪的后端能力收进 UI。
+>
+> 即：`4.1 拆分 → 4.2 编译层 → 4.3 响应规则/AgentState → 4.4 Space 管理 → 4.5 系统配置 → 4.6 前端正式布局`。4.2–4.5 期间所有新增字段用 curl/`verify.mjs` 验收，前端最后一次性重构。
 
-**完成标准**：手机上完成一次真实的多 agent 协作会话（≥2 agents，一次广播 + 一次定向）。
+- [x] **4.1 Agent/Account 拆分**（最先，无 UI 依赖）：契约先行（见 api-contract.md 二「Agent」「Account」「Space」）；`docs` 改 Agent 形状收敛为 `{id, name, createdAt, updatedAt}`，新增 Account 形状（owningAgentId + kind/provider/connection/model），Seat 增 `accountId`（驾驶关系，缺省 = agent 自有 account），`sessionState` 键由 `(agentId, spaceId)` 改 `(accountId, spaceId)`——外部会话随 account 走、记忆随 agent 走。store 启动一次性迁移把旧 agents 记录的连接字段拆出派生 owning account、session-states 键重映射；旧文件留 `.legacy`，一次改干净不留双名（ground truth 2.2 末段）。`resolveAdapter(agent)` 改 `resolveAdapter(account)`，adapter ctx 分开 `agent`/`account`。
+- [ ] **4.2 Speaker view 编译层**：新模块 `src/spaces/view-compiler.js`，输入 `(store, space, agentId, account, triggerMessage)` 输出 prompt 文本；`run-controller.runAsync` 调它替换手拼 promptText，`messages.js` 触发 fan-out 不变。按 ground truth 2.3（2026-07-04 补三条）实现：
+  - **只 inject message，不 inject activity**——思考链/工具链不进任何 agent 的下次 prompt（包括本人，本人工具历史由 adapter sessionState 携带）。这是"发言 ≠ 过程"的边界。Phase 5 的 `fetch_detail`/`fetch_more` 主动调阅是这边的逃生口（按需、带预算），Phase 4 不实现但接口留位。
+  - **群聊视角以声告段注入，不伪装一对一 user 历史轮次**：派生该 agent 上次本人发言（按其最后一次 assistant 气泡的 createdAt）到当前触发之间的他人气泡，聚合成"=== 群内最近发言 ===\n- <name>: <气泡>…"声告段，塞进 `ctx.prompt.text` 头部；CLI 型直送新轮、API 型落在新 user 消息尾部（不进稳定历史）。模型历史里 assistant 永远是自己、user 永远是用户的直接提问，旧群状态每轮过期作废。
+  - **编译层无状态**：每次 run 临时查 `messages.json` 派生 delta，不维护"已投递水位"；幂等。注入段配置上限（最近 N 条/总字数上限，超了提示"更早的见 fetch_detail"）放 `src/core/config.js`，不硬编码。常驻索引块仅随新 (account, Space) 首次注入，逻辑从 run-controller 搬来——它与群聊 delta 同属 prompt 头部但是两段（索引是稳定前缀、群状态是 volatile tail 不混淆）。
+- [ ] **4.3 响应规则收口**：`silent` 的 `respondTo` 字段从 `[P4]` 落地——seat 形 `{agentId, accountId, responseMode, respondTo?, blockAgentIds?}`，`respondTo` 成员为 `"user"` 或 `agt_...`；新增 `blockAgentIds: ["agt_..."]` 屏蔽名单（ground truth 2.3 2026-07-04 补"响应规则统一语义"）。判定逻辑归并进 4.2 编译层（被过滤的事件不进 prompt 段，等价不触发 run；定向 @ 穿透 blockAgentIds 不穿透 silent/focused）。AgentState 层确认 bootstrap/GA 已完整返回（Phase 2–3 已建 tracker，对勾即可）。
+- [ ] **4.4 Space 管理**：`normalizeSeat` 加 `accountId`（缺省取该 agent 自有 account）；API 已支持 create/update，契约补 seat.accountId 语义一句。
+- [ ] **4.5 系统配置**：新增 `GET/PATCH /api/settings`，字段以 ground truth 4.1 为唯一清单（数据隔离规则、记忆整理触发/注入预算、消息呈现等），严格遵守不扩；运维参数仍走 env 不进前端（ground truth 4.1 末段边界注记）。持久化进 `data/settings.json`（store 新集合），config 作启动默认、settings 作运行时覆盖。
+- [ ] **4.6 前端正式布局**（最后，一次性替换最简页）：mobile-first 页面 shell——顶栏（当前 Space 名/状态）+ 抽屉（Space 列表、Agent/联系人、设置入口）+ 主聊天区 + 输入栏；手机竖屏第一公民，桌面宽屏自适应。hash 路由（`#/spaces/:id` 等），无构建步骤约束下不引框架。`views/` 拆 `shell.js` / `space-list.js` / `space-view.js`（重写为聊天主区）/ `agent-contacts.js` / `settings.js`；`components/` 增 `space-switcher.js` / `contact-item.js` / `seat-editor.js` / `composer-modes.js`。composer 支持 @定向（payload `target.type=direct`）。联系人 = account 视图：点开 = 私聊 Space，多选 = 建群聊 Space；私聊群聊后端都是 Space，前端按 `seats.length` 渲染样式。CSS 变量按 ground truth 4.3 全套一次建齐，组件零硬编码。
+
+**完成标准**：手机蜂窝网络下，≥2 agents 的 Space，完成一次广播 + 一次定向，被 @ 的 agent 回复 prompt 含他人署名发言且无误用 assistant 角色；账户即联系人入口可用；任意可配置项在前端可达。`scripts/verify.mjs` 加端到端（建 2 agents 2 accounts → Space 两 seat → broadcast → 两 run 都发 → @ 单方 → 只单方响应 → 被点 agent 的 prompt 含另一 agent 署名发言）。
 
 ## Phase 5 — Memory 与数据层
 
@@ -101,13 +109,48 @@
 
 **完成标准**：agent 在 A Space 获得的长期记忆，整理后在 B Space 可用。
 
+## Phase 5.5 — Agent 联邦（gateway 搬 VPS + agent daemon 远程接入）
+
+**目标**：把当前"gateway + adapter 同机 spawn CLI"形态改成"gateway 在 VPS、agent daemon 在远端、通过 HTTP/SSE 联邦接入"形态。这是 2026-07-04 与 Theta 五问五答定下来的根本架构转向（ground-truth 2.4），不是单纯运维搬迁。
+
+**为什么必须做**：
+- 用户核心需求是"手机随时随地能联系 Mac 上的 agent"。Mac 单机形态下 Mac sleeps / 切网 / 重启就联系不上。
+- cloudflared 边缘漂移假活（2026-07-04 实测，salvage-notes 第 5 条）暴露了 launchd 存活检测治不了"进程假活"，光搬 VPS 不够，还要 systemd watchdog。
+- Agent 跟 gateway 解耦后，agent daemon 在哪台机器都行（Mac / 另一台 VPS / 云函数 / API 型无进程），用户在手机上能跨机器调度 agent 协作。
+
+**契约先行**（已完成，本阶段代码实施前确认对齐）：
+- [x] `docs/ground-truth.md` 2.4 节定稿：4 条决策（gateway 搬 VPS / agent 被动响应 / 离线 @ 跳过 + error activity / 工作流约定冲突协调）+ 心跳退出协议 + 双层认证 + AgentState per-Space + GitHub 单账号分活
+- [x] `docs/adapter-interface.md` 重写为 agent daemon 协议（旧 gateway-spawn 形态移附录 A）
+- [x] `docs/api-contract.md` 加 `/api/agent/*` 路由前缀 + Account.presence/lastSeenAt + AgentState per-Space 扩展态 + `agent.heartbeat` / `run.requested` / `account.presence.updated` 事件 + 离线 @ Activity 规则 + 双层认证说明
+- [x] `docs/reference/vps-tunnel-deploy.md` 重写为 VPS gateway + 远程 agent daemon 部署指南
+
+**代码实施清单**（按依赖序）：
+
+- [ ] **5.5.1 AgentState per-Space 改造**（最浅，先做）：`src/agents/agent-state.js` 跟踪键 `agentId` → `agentId:spaceId`；形状加 `spaceId` + `detail` 字段；`status` 枚举扩到 `idle/thinking/typing/reading/coding/reviewing/on_task/away`；`/api/agent-states` 支持 `?spaceId` / `?agentId` 过滤；契约 + 4.1 已建跟踪器同步改。verify.mjs 加 per-Space 测试。
+- [ ] **5.5.2 Account.presence + 离线 @ 行为**：Account 形状加 `presence` / `lastSeenAt` 字段；`src/agents/accounts.js` 暴露 `setPresence`；`src/spaces/messages.js` 的 `shouldRespond` 加在线判定：offline 则不创建 run，改在 Space 时间线 insert 一条 `phase:"error", label:"agent-offline"` 的 Activity；SSE 加 `account.presence.updated` 事件。verify.mjs 加离线 @ 测试。
+- [ ] **5.5.3 Agent token 体系**：`src/core/agent-tokens.js` 新建——加载 `~/.vera/agent-tokens.json`，校验 Bearer token → 返回 agentId；token 文件格式 `{ "agt_xxx": "<long-random>", … }`，新建 agent 时自动生成一条；gateway 启动加载、不进 repo。
+- [ ] **5.5.4 `/api/agent/*` 路由层**：`src/api/agent-routes.js` 新建——所有 `/api/agent/*` 走 Bearer token 中间件识别身份；`POST /api/agent/login`（返回 agent/account/seats/sessionStates/heartbeatIntervalMs）、`DELETE /api/agent/sessions`、`GET /api/agent/events`（SSE，daemon 单一长连接，复用 hub 但按 agentId 过滤推送 + 加 `agent.heartbeat` 定时帧）、`POST /api/agent/runs` / `PATCH /api/agent/runs/:id` / `POST /api/agent/runs/:id/{delta,messages,activities,approvals}` / `POST /api/agent/sync-state`。
+- [ ] **5.5.5 Run 触发链路改造**：`src/spaces/messages.js` 不再 sync 调 `executeRun`；改成"对每个应该响应的 seat：在线 → 创建 Run 记录（status=running）+ 通过 daemon SSE 通道推 `run.requested` 事件（含编译层 promptText）；离线 → 走 5.5.2 离线 activity 路径"。`run-controller.js` 的 `executeRun` 拆掉，编译层抽出独立模块 `src/spaces/view-compiler.js`（Phase 4.2 本来要做，联邦形态下它直接服务于 `run.requested` 的 promptText 字段）。mock adapter 保留给 verify.mjs gateway 内部一致性测试用。
+- [ ] **5.5.6 `scripts/agent-daemon.js`**：新进程，独立于 gateway。启动读 env（gateway URL / agent token / Service Token / CLI binary path / workspace），`POST /api/agent/login` 拉回 sessionState → `GET /api/agent/events` SSE 订阅 → 收 `run.requested` 后内部走"spawn CLI / 调 API"逻辑（搬运 `src/adapters/opencode-adapter.js` 的 daemon 管理 + runner 子进程逻辑，但 ctx.* 回调改成对 gateway 的 POST）→ 流式输出回 POST → 心跳缺失 3 次后 exit(0)。
+- [ ] **5.5.7 mock daemon + verify.mjs 拆分**：verify.mjs 加一段端到端协议测试——起一个 mock daemon 子进程，对 `/api/agent/*` 全协议走一遍（login → run.requested → delta → activity → message → run completed → sync-state → logout）；gateway 内部一致性测试保留旧 mock adapter 路径。
+- [ ] **5.5.8 VPS 部署落地**：按 `docs/reference/vps-tunnel-deploy.md` 顺序：VPS 初始化 → 数据 rsync → systemd units（gateway / cloudflared / watchdog timer）→ Service Token 在 Cloudflare 面板配 → 验证。
+- [ ] **5.5.9 本机清理**：`tmux kill-session vera-gateway`、`launchctl unload com.cloudflare.cloudflared`；本机 `~/.vera/` 与 `~/.cloudflared/` 留冷备份不删；本机起 agent daemon 验证 Mac → VPS → 手机端到端通。
+
+**完成标准**：
+1. `scripts/verify.mjs` 全过（含 mock daemon 端到端协议测试 + 离线 @ error activity + per-Space AgentState + 心跳缺失 daemon 自杀）
+2. VPS 上 gateway + cloudflared + watchdog systemd unit 全部 active
+3. 手机蜂窝网络下 @ 在线 agent（daemon 在 Mac）→ 流式回复正常到达；@ 离线 agent → 时间线一行 error 提示 + 不创建 Run
+4. 重启 VPS gateway → Mac daemon 自动重连 + sessionState 取回 + 后续消息零 session-reset
+5. 停 VPS gateway → Mac daemon 在 ~45s 内 exit(0)，不反复撞网关；恢复 gateway 后手动起 daemon 重新登录正常
+
 ## Phase 6 — 收尾与扩展
 
-- [ ] Claude Code adapter（`--resume` 会话连续）、Codex adapter
+- [ ] Claude Code adapter（`--resume` 会话连续性）—— 联邦形态下等于实现 `scripts/agent-daemon.js` 的 Claude Code 适配层（`adapter-interface.md` 示例 B）
+- [ ] Codex adapter —— 同上，示例 B 的变体
 - [ ] Skill 配置（per-agent 导入/加载/卸载）
 - [ ] Appearance 全套配置项
 - [ ] Capacitor APK 打包
-- [ ] gateway launchd 常驻 + 崩溃自愈（搬运旧 scripts 经验）
+- [ ] ~~gateway launchd 常驻 + 崩溃自愈（搬运旧 scripts 经验）~~ —— **提前到 Phase 5.5，形态改为 VPS systemd + agent daemon launchd/systemd 双层**
 
 **完成标准**：ground truth 第四节可配置项清单逐项对勾。
 

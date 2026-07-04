@@ -71,6 +71,54 @@ Vera是单用户、自部署的多agent协作空间。
 - **群聊视角的注入形态**（2026-07-04补）：其他成员的气泡以"群内最近发言"这一明确声告的上下文段注入下次 prompt，**不伪装成一对一对话的 user 历史轮次**——模型在自己的历史里看到的 assistant 永远是自己、user 永远是用户的直接提问，群状态是每轮临时刷新的 volatile context（符合缓存纪律"动态信息注入尾部"）。编译层在该 agent 上次发言之后到当前触发之间派生这段 delta，无状态（不维护"已投递水位"）。CLI 与 API 型 adapter 共享同一份编译层输出（`ctx.prompt.text`），各自翻译成自己的协议帧：CLI 复用的外部 session 已携带稳定历史 + 本轮投递新 delta；API 每次 run 重建 messages 数组，但同样只把本人气泡放为 assistant、用户直接提问放为 user，旧群状态不进稳定历史，本轮群状态只落在新 user 消息尾部。
 - **响应规则的统一语义**（2026-07-04补）：silent / focused / 屏蔽某 agent，本质都是"过滤进入该 agent 群聊视角 prompt 段的事件流"——被过滤的事件不进 prompt 段，等价于不触发该 agent 的 run（不进 → 不响应）。`silent` 的来源过滤靠 `respondTo`、屏蔽某 agent 靠 seat 上的 `blockAgentIds`（Phase 4.3 落地）。
 
+### 2.4 Agent 联邦（2026-07-04 定稿）
+
+**核心形态**：Vera gateway 与每个 agent **进程独立、位置独立、生命周期独立**。gateway 在 VPS 上 7×24 常驻，作为消息中枢 + 状态库；agent daemon 在任意机器（本机 Mac / 另一台 VPS / 云函数 / API 型无进程）上常驻或按需上线，**通过 HTTPS + 双层 token 主动连入 gateway**。Gateway 不 spawn 任何 agent 进程。
+
+**形态决策（与 Theta 四问四答对齐）**：
+
+1. **Gateway 搬 VPS**。Vera 中枢不在本机，根治"本机 sleeps / 切网 / cloudflared 边缘漂移就让 vera 失联"。
+2. **Agent 只监听、被动响应**：agent daemon SSE 订阅 gateway，gateway 的反馈即 prompt——没有 prompt agent 不动。CLI 进程由 daemon 在 agent 那一侧自己 spawn 并保活，gateway 不知道也不关心 CLI 在哪。
+3. **离线被 @ 直接跳过**：发一条 `phase:"error"` 的 Activity 进时间线作离线提示（不发明新 itemType），前端 Agent 信息页可看 presence=offline。下次 agent 上线不补发漏过的 @（无副作用历史）。
+4. **多 agent 同时干活冲突由工作流约定**：Vera 不做锁。用户指派一个 agent 负责分配任务 + 验收 + commit；GitHub 用一个 vera 机器账号，issue 描述/label 标指派对象（`@agent-X` + label `agent=x`），agent 自己 `gh issue/PR/commit`。Vera 只做决策对话。
+
+**Account 字段扩张**（联邦形态必需）：
+
+| 字段 | 说明 |
+|------|------|
+| presence | `online` / `offline`，agent daemon 与 gateway 是否在通信（二态） |
+| lastSeenAt | 上次心跳或 SSE 收到时刻 |
+| sessionState 归属 | 仍在 gateway 持久化（`/api/agent/sync-state` 备份），agent daemon 在线时本地持有最新副本 |
+| connection.command | **从 Account 形状里移除**——gateway 不 spawn，CLI 路径是 agent daemon 的事 |
+| kind/provider/model | 保留，但只对 agent daemon 自己有意义（决定怎么 spawn/调 API），gateway 只是元信息 |
+
+**心跳与退出协议（防 token 烧穿）**：
+
+- **gateway → agent**：每 15s（可配 `agentDaemon.heartbeatIntervalMs`）在 agent SSE 通道发 `agent.heartbeat` 事件。复用 SSE keepalive 之外的额外帧。
+- **agent 失联判定**：daemon 连续 3 次未收到心跳（~45s）→ 立即停所有在飞 run、不再消耗 token、`exit(0)`。launchd/systemd 设 `SuccessfulExit=false` 不自动拉起。
+- **gateway 挂了**：所有 agent 各自在心跳缺失后被自杀，**不存在 agent 反复撞 gateway 烧 token 场景**；唯一可能烧的是"心跳缺失瞬间正在跑的那一条 run"，损失被框死在毫秒到几毛钱。
+- **daemon 主动下线**：`DELETE /api/agent/sessions` 显式登出，gateway 把 Account.presence 置 offline 并保留 lastSeenAt。
+- **未来 `missionMode` 扩展位**：gateway 给 agent 发特殊 prompt "你被授权做 X 直到 gateway 恢复" → daemon 进入 mission 模式，心跳缺失不自杀，按任务自己跑完为止。MVP 不做，接口留位（`daemon.missionMode = false`）。
+
+**双层认证**（外部 + 身份）：
+
+- **外部**：Cloudflare Access Service Token（`CF-Access-Client-Id` / `CF-Access-Client-Secret` 头），所有 agent 复用一对，过 Cloudflare 那道门不走邮件 OTP。Zero Trust 面板只放行 `vera.futureidiot.com/api/agent/*` 路径前缀。
+- **身份**：Vera agent token（长随机串，VPS 上 `~/.vera/agent-tokens.json`，gateway 启动加载校验），per-agent 一条，daemon 请求带 `Authorization: Bearer <token>` 通过 `/api/agent/*` 时 gateway 识别"我是 agt_xxx 在说话"。Service Token 泄漏不会越权——还得有 agent token 才能冒充具体 agent。
+
+**AgentState 改 per-Space**（联邦形态必需的精化）：
+
+- 同一 agent 同时在多个 Space 有 run 时，每个 Space 各自的状态独立，前端按"当前 Space"取数。
+- AgentState 形状：`{ agentId, spaceId, status, detail, lastActiveAt }`，扩展态枚举：`idle` / `thinking` / `typing` / `reading` / `coding` / `reviewing` / `on_task` / `away`。
+- 状态由 agent daemon 自己声明（它最清楚 opencode 此刻在 think / tool / final typing），gateway 不猜，agent 说啥显示啥。
+- Account.presence 与 AgentState 正交：presence 是 agent daemon ↔ gateway 的通信二态，AgentState 是该 agent 在某 Space 内的细颗粒工作相。
+
+**GitHub 单账号分活方案**（联邦期间代码协作的政治约定，不进 Vera 实现）：
+
+- 所有 agent 用同一个 vera 机器 GitHub 账号提交、开 issue、开 PR。
+- 分配任务：issue 标 `label: agent=X` + 正文 `@agent-X 你来`；`gh issue list --label agent=X` 取活。
+- 收尾：commit message 带 `Closes #N`，merge PR 自动关 issue。
+- Vera 只做决策对话（谁干啥、验收意见）；GitHub 只做活和 PR 流。两者职责不混。
+
 ---
 
 ## 三、数据层
