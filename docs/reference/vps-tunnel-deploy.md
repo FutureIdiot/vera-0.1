@@ -3,12 +3,31 @@
 > 形态定稿于 2026-07-04（见 `docs/ground-truth.md` 2.4）。本文档是部署唯一真相。
 > 旧形态（Mac 跑 gateway + Mac 上 cloudflared 把本机反推出去）作废，原因见末尾「历史教训」。旧 Mac CLI 同机 spawn 形态作废，新形态见 `docs/adapter-interface.md` 正文。
 
+## 部署者替换值清单
+
+本文档以 Theta 的真实部署为示例。换人部署时，下列值必须**全部**替换为你自己的。表格「正文占位符」一列对应后续正文中出现的占位符，便于检索定位。
+
+| 值名 | Theta 的实际值（示例） | 正文占位符 | 在哪改 | 说明 |
+|---|---|---|---|---|
+| Tunnel UUID | `26bb24d1-5b7a-4bca-b4b0-8454cd15f32b` | `<your-tunnel-uuid>` | `~/.cloudflared/config.yml` 的 `tunnel:` 字段 + credentials 文件名 | Cloudflare 面板 `cloudflared tunnel create` 时生成 |
+| Tunnel 名称 | `vera` | — | `~/.cloudflared/config.yml` + cloudflared 启动参数 + systemd unit ExecStart | `cloudflared tunnel create <name>` 自取 |
+| 域名 | `vera.futureidiot.com` | `<your-domain>` | `~/.cloudflared/config.yml` ingress + Cloudflare DNS + Access app | 你的域名 |
+| Access team | `plain-silence-4358` | `<your-access-team>` | Cloudflare Zero Trust 面板 | 创建 team 时定 |
+| Access 邮件 OTP 地址 | Theta 的邮箱 | — | Cloudflare Access app 的 policy | 你的邮箱 |
+| Service Token 名称 | `vera-agent-daemon` | — | Cloudflare Zero Trust → Service Tokens | 自取 |
+| Service Token ID | （不写真实值）`<生成时面板显示一次>` | `<service-token-id>` | daemon env 文件 `~/.vera/daemon/agt_<id>.env` 的 `CF_ACCESS_CLIENT_ID` | 面板生成，secret 只显示一次 |
+| Service Token Secret | `<生成时面板显示一次>` | `<service-token-secret>` | daemon env 文件 `~/.vera/daemon/agt_<id>.env` 的 `CF_ACCESS_CLIENT_SECRET` | 面板生成 |
+| GitHub 机器账号 | `<你的 vera 机器账号>` | — | GitHub | 所有 agent 共用一个提交账号 |
+| VPS SSH IP / 用户 | `<你的 VPS IP>` / `theta` | — | 本文档示例命令 | 你的 VPS |
+
+> 路径 `/home/theta`、`/Users/theta` 是部署用户家目录示例（文档开头已说明"以部署用户 theta 示例"），不是个人值，保留。
+
 ## 0. 目标形态
 
 ```
 Phone/Browser (任意网络)
-  └─► https://vera.futureidiot.com
-        └─► Cloudflare Access（邮件 OTP，team plain-silence-4358）
+  └─► https://<your-domain>
+        └─► Cloudflare Access（邮件 OTP，team <your-access-team>）
               └─► cloudflared dial-out（VPS 进程，systemd 守护 + watchdog）
                     └─► http://127.0.0.1:3210   Vera gateway（VPS 进程，systemd 守护）
                           - 消息中枢 + 状态库 + vault + secrets
@@ -39,7 +58,7 @@ Agent daemon (各 agent 上线时跑；位置任意)
 ## 1. 前置条件
 
 - 一台 VPS，规格下限 2 vCPU / 2 GB RAM / 20 GB SSD（gateway ~80MB、cloudflared ~50MB、systemd ~100MB；agent daemon 不在 VPS 上，不占 VPS 资源）。
-- 域名已托管 Cloudflare，且已创建 tunnel `vera`、Access app 已配 `vera.futureidiot.com` 邮件 OTP（Phase 3 已就位，本次搬迁不动 DNS / Access）。
+- 域名已托管 Cloudflare，且已创建 tunnel `vera`、Access app 已配 `<your-domain>` 邮件 OTP（Phase 3 已就位，本次搬迁不动 DNS / Access）。
 - 本机有 SSH 私钥能登 VPS、`rsync` 可用。
 - VPS OS：systemd Linux（Debian 11+ / Ubuntu 22.04+ / 类似）。
 
@@ -90,7 +109,7 @@ cloudflared --version
 
 去 Cloudflare Zero Trust 面板：
 1. **Access → Service Tokens → Create Service Token**，取名 `vera-agent-daemon`，保存生成的 `CF-Access-Client-Id` / `CF-Access-Client-Secret` 一对（secret 只显示一次）。
-2. **Access → Applications → Edit `vera.futureidiot.com`**，加一条规则：
+2. **Access → Applications → Edit `<your-domain>`**，加一条规则：
    - Path：`/api/agent/*`
    - Action：Allow
    - Include：Service Token is `vera-agent-daemon`
@@ -129,12 +148,12 @@ cat /home/theta/.cloudflared/config.yml
 `config.yml` 保留 `protocol: http2`：
 
 ```yaml
-tunnel: 26bb24d1-5b7a-4bca-b4b0-8454cd15f32b
-credentials-file: /home/theta/.cloudflared/26bb24d1-5b7a-4bca-b4b0-8454cd15f32b.json
+tunnel: <your-tunnel-uuid>
+credentials-file: /home/theta/.cloudflared/<your-tunnel-uuid>.json
 protocol: http2
 
 ingress:
-  - hostname: vera.futureidiot.com
+  - hostname: <your-domain>
     service: http://127.0.0.1:3210
     originRequest:
       http2Origin: false
@@ -275,7 +294,7 @@ git pull
 # 3. 写 daemon 配置（不进 repo，单独放 ~/.vera/daemon/<agentId>.env）
 mkdir -p ~/.vera/daemon
 cat > ~/.vera/daemon/agt_<your-id>.env <<'EOF'
-VERA_GATEWAY_URL=https://vera.futureidiot.com
+VERA_GATEWAY_URL=https://<your-domain>
 VERA_AGENT_TOKEN=<your-vera-agent-token>           # gateway 颁发
 CF_ACCESS_CLIENT_ID=<service-token-id>             # Cloudflare 颁发
 CF_ACCESS_CLIENT_SECRET=<service-token-secret>
@@ -359,7 +378,7 @@ sudo journalctl -u vera-agent-daemon@agt_<id>.service -f
 
 ### 5.3 API 型 agent
 
-API 型 agent 无 CLI 进程，daemon 是个轻量 Node 脚本，可跑在任何能访问 `https://vera.futureidiot.com` 的环境（云函数、另一台 VPS、甚至本机）。它只在收到 `run.requested` 时调供应商 API。部署同 5.2，差异：daemon 内部不 spawn CLI、`VERA_AGENT_KIND=api` + `VERA_SECRET_REF=<key 名>` 指向 VPS 上的 `~/.vera/secrets.json`。
+API 型 agent 无 CLI 进程，daemon 是个轻量 Node 脚本，可跑在任何能访问 `https://<your-domain>` 的环境（云函数、另一台 VPS、甚至本机）。它只在收到 `run.requested` 时调供应商 API。部署同 5.2，差异：daemon 内部不 spawn CLI、`VERA_AGENT_KIND=api` + `VERA_SECRET_REF=<key 名>` 指向 VPS 上的 `~/.vera/secrets.json`。
 
 ## 6. 验证
 
@@ -386,7 +405,7 @@ node scripts/agent-daemon.js --config ~/.vera/daemon/agt_<id>.env
 
 ### 6.3 浏览器真机端到端
 
-1. 手机蜂窝网络下打开 `https://vera.futureidiot.com`，过 Access 登录
+1. 手机蜂窝网络下打开 `https://<your-domain>`，过 Access 登录
 2. 进 Space，发条消息 @ 在线的 agent
 3. 看 agent 状态从 `idle` 变 `thinking` / `typing` / `coding` 等
 4. 看流式逐字到气泡、看 Activity 入时间线

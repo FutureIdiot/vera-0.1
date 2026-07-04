@@ -36,6 +36,11 @@ const DEFAULTS = {
     vaultPath: "~/.vera/memory", // Obsidian 兼容 vault，仓库外（api-contract.md Memory 一节）
     residentIndexMaxLines: 25, // 常驻索引截断行数
   },
+  agentDaemon: {
+    heartbeatIntervalMs: 15000, // gateway 在 agent SSE 通道上发 agent.heartbeat 的间隔
+    tokensPath: "~/.vera/agent-tokens.json", // agent token 文件（身份层 token，{ "agt_xxx": "<long-random>" }）
+    sessionTimeoutMs: 45000, // daemon 多久没心跳 gateway 把 Account.presence 置 offline
+  },
 };
 
 function num(value, fallback) {
@@ -84,6 +89,11 @@ export function loadConfig(env = process.env) {
     memory: {
       vaultPath: expandHome(env.VERA_MEMORY_VAULT_PATH || DEFAULTS.memory.vaultPath),
       residentIndexMaxLines: num(env.VERA_MEMORY_INDEX_MAX_LINES, DEFAULTS.memory.residentIndexMaxLines),
+    },
+    agentDaemon: {
+      heartbeatIntervalMs: num(env.VERA_AGENT_HEARTBEAT_INTERVAL_MS, DEFAULTS.agentDaemon.heartbeatIntervalMs),
+      tokensPath: expandHome(env.VERA_AGENT_TOKENS_PATH || DEFAULTS.agentDaemon.tokensPath),
+      sessionTimeoutMs: num(env.VERA_AGENT_SESSION_TIMEOUT_MS, DEFAULTS.agentDaemon.sessionTimeoutMs),
     },
   };
 }
