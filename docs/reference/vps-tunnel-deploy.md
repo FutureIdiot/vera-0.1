@@ -446,6 +446,7 @@ tmux kill-session -t vera-gateway 2>/dev/null
 | 添加新 agent | 在 VPS gateway 上 `POST /api/agents` 建身份+account → 生成 agent token 写入 `~/.vera/agent-tokens.json` → 在新机器上配 daemon env → 起 daemon |
 | 撤 agent | 停该 daemon → `DELETE /api/agents/:id`（有历史的拒绝删除，先 `[P5]` 处理记忆） |
 | 数据备份 | `rsync -avz theta@<VPS>:/home/theta/.vera/data/ ~/.vera-backup-$(date +%F)/` |
+| Vault git 镜像备份（推荐） | VPS 上 `cd ~/.vera/memory && git pull --rebase && git add . && git commit -m "vault $(date +%F)" && git push`；Mac 上 `cd ~/vera-memory-backup && git pull` 得只读副本 + 版本历史 |
 
 ## 9. 故障排查
 

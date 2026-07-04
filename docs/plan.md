@@ -98,6 +98,8 @@
 **目标**：ground truth 第三节的三层数据落地。设计依据：`memory-hook.md`——以《修订：文件库架构》（R1–R6）为准，按第 16 节 MVP 顺序推进。
 
 > 提前量（2026-07-03，与 Theta 确认）：**最小闭环提前落地**——vault 骨架 + 文件格式 + 常驻索引会话首消息注入 + agent 文件工具直读直写 + 手动保存入口（API），形状已收编进 api-contract.md「Memory（最小闭环）」。目的：Phase 3–4「边用边修」阶段长期记忆已可用。检索注入、派生权重、dream 不提前，仍按本阶段推进。
+>
+> **Vault 位置策略**（2026-07-04，与 Theta 确认 + 联邦形态对齐）：vault 热数据**只在 VPS**（`/home/theta/.vera/memory/`，联邦后 gateway 跑在 VPS），所有 agent daemon 通过 Vera memory API 远程读写，本地不再有"原版"——避免双写冲突/双读漂移，保持 single source of truth。**备份走 git 镜像**：把 VPS vault init 成 git repo，每次整理后 `git push` 到一个私有 GitHub repo；Mac 上 `git pull` 即得只读备份，还能看版本历史（Obsidian vault 全 markdown，git 友好）。rsync 冷备份作次要手段（崩了需要快速回滚时用），不替代 git 镜像的版本维度。Phase 3-4 期间 vault 还在本机 Mac `~/.vera/memory/`，Phase 5.5 联邦落地时随数据 rsync 一起搬 VPS，搬完即切 git 镜像备份流。
 
 - [~] 动工前：memory-hook.md 术语/API 对齐契约（按文档头部整合注记），形状收编进 api-contract.md（最小闭环部分已收编；其余 `/api/memory/*` 届时再补）
 - [~] 文件库（Obsidian 兼容 vault）+ Raw Event 留 store + 手动"保存到记忆"入口（R1–R2，MVP Step 1–3）（vault + 手动保存提前做；Raw Event 溯源链留本阶段）
