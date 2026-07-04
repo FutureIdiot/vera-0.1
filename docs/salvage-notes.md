@@ -53,6 +53,23 @@
 - `install-launch-agent.mjs` / `uninstall-launch-agent.mjs`（launchd 常驻 + 崩溃自愈）、`verify-gateway.mjs`：Phase 6 时搬运参考。
 - 子进程管理细节：`timer.unref()` 防止定时器阻塞 gateway 退出；`process.on("exit")` + SIGINT/SIGTERM 三处挂关停钩子。
 
+### 5. cloudflared 边缘漂移假活（2026-07-04 实测）★
+
+**症状**：浏览器访问 `vera.futureidiot.com` 返回 Cloudflare 错误页 **1033**（"Edge IP restricted" / tunnel 没注册到任何边缘）。本机 `curl 127.0.0.1:3210/api/health` 正常 200，cloudflared 进程 `pgrep` 在跑不退。launchd 看进程存活所以不重启。
+
+**根因**：Cloudflare 边缘区域会漂移——7月3日 13:14 前连东京 NRT 边缘（198.18.0.96/97 是 cloudflared 内部对边缘的虚拟 IP），之后区域切走但 cloudflared 一直 dial 旧虚拟 IP 超时、不退出（log 里满屏 `dial tcp 198.18.0.x:7844: i/o timeout` + `there are no free edge addresses left to resolve to`）。Tunnel UUID 没变、DNS 没变，但 tunnel 后端没注册到任何边缘 → Cloudflare 给浏览器 1033。
+
+**手动恢复**：`launchctl kickstart -k gui/$(id -u)/com.cloudflare.cloudflared` 强杀重启 cloudflared，4 条 http2 连接立刻注册到新边缘（本次是 LAX），恢复。
+
+**永久防治**：
+- launchd 的 `KeepAlive` 看进程是否**存活**，不看是否**健康**——任何「连上才健康」的服务（cloudflared、ssh tunnel、frpc、wg-quick）都需要**外部探活 + 主动重启**，不能只依赖存活检测。
+- Phase 5.5 VPS 部署里用 systemd `Restart=always` + 一个 2 分钟 `cloudflared-watchdog.timer`（跑 `cloudflared tunnel info vera` 看连接数，0 就 `systemctl restart cloudflared`）把这个收敛到分钟级。
+- VPS 网络稳定且 7×24 不睡眠，本身漂移概率比 Mac 低，叠加 watchdog 双保险。
+
+**相关坑**：
+- `protocol: http2` 必须显式配。cloudflared 默认会先尝试 quic/UDP 7844，UDP 7844 被中间网络屏蔽时会卡在 `dial udp 198.18.0.x:7844: i/o timeout`。HTTP/2 走 TCP 443 出去，被屏蔽概率低。
+- 浏览器报 1033 ≠ 本机 gateway 挂。先看本机 127.0.0.1 直接 curl gateway 健康（200 → gateway 活），再 `cloudflared tunnel info <name>` 看连接数（0 → 边缘断了，重启 cloudflared）。两步排查法此后所有 1033 类故障都对。
+
 ## 二、实测环境事实（会漂移，用前核对）
 
 - opencode 协议实测版本 1.17.9；协议若变，失败模式是 fallback，不是崩溃。

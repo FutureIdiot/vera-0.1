@@ -45,8 +45,8 @@ const adapters = {
   opencode: createOpencodeAdapter({ config: config.opencode }),
 };
 
-function resolveAdapter(agent) {
-  return adapters[agent.provider] ?? null;
+function resolveAdapter(account) {
+  return adapters[account.provider] ?? null;
 }
 
 const router = createRouter();
@@ -56,6 +56,7 @@ router.get("/api/health", ({ res }) => sendJson(res, 200, { app: "vera", ok: tru
 router.get("/api/bootstrap", ({ res }) => {
   sendJson(res, 200, {
     agents: store.list("agents").map(({ _seq, ...rest }) => rest),
+    accounts: store.list("accounts").map(({ _seq, ...rest }) => rest),
     spaces: store.list("spaces").map(({ _seq, ...rest }) => rest),
     agentStates: agentStates.list(),
     seq: hub.currentSeq(),

@@ -13,8 +13,8 @@ import { createBubbleStream } from "./bubble-stream.js";
 import { requestApproval as requestApprovalRecord, expirePendingApprovalsForRun } from "./approvals.js";
 
 const abortControllers = new Map(); // runId -> AbortController
-const runQueues = new Map(); // `${agentId}:${spaceId}` -> 队尾 promise。同一
-// (agent, Space) 的外部会话是同一条，并发投递会串线（api-contract.md Run 一节），
+const runQueues = new Map(); // `${accountId}:${spaceId}` -> 队尾 promise。同一
+// (account, Space) 的外部会话是同一条，并发投递会串线（api-contract.md Run 一节），
 // 因此 adapter 调用按触发顺序串行；Run 记录仍即时创建返回。
 
 function stripInternal({ _seq, ...rest }) {
@@ -34,7 +34,7 @@ export function cancelRun(runId) {
   return true;
 }
 
-export function executeRun({ store, hub, config, agent, space, triggerMessage, adapter, agentStates, memory }) {
+export function executeRun({ store, hub, config, agent, account, space, triggerMessage, adapter, agentStates, memory }) {
   const spaceId = space.id;
   const run = {
     id: newRunId(),
@@ -53,8 +53,8 @@ export function executeRun({ store, hub, config, agent, space, triggerMessage, a
   const controller = new AbortController();
   abortControllers.set(storedRun.id, controller);
 
-  // 真正的 adapter 交互异步跑，不阻塞 HTTP 响应；同 (agent, Space) 排队串行。
-  const queueKey = `${agent.id}:${spaceId}`;
+  // 真正的 adapter 交互异步跑，不阻塞 HTTP 响应；同 (account, Space) 排队串行。
+  const queueKey = `${account.id}:${spaceId}`;
   const tail = (runQueues.get(queueKey) ?? Promise.resolve()).then(runAsync);
   runQueues.set(queueKey, tail);
   void tail.finally(() => {
@@ -62,10 +62,10 @@ export function executeRun({ store, hub, config, agent, space, triggerMessage, a
   });
 
   async function runAsync() {
-    // 常驻索引只在该 (agent, Space) 尚无已持久化 sessionState 时前置注入
+    // 常驻索引只在该 (account, Space) 尚无已持久化 sessionState 时前置注入
     // （即将开启全新外部会话）——api-contract.md「常驻索引注入」：只随新会话
     // 换代，不逐条消息刷新。已有 sessionState 的后续消息不重复注入。
-    const priorSessionState = store.getSessionState(agent.id, spaceId);
+    const priorSessionState = store.getSessionState(account.id, spaceId);
     const residentBlock = priorSessionState === null ? await memory?.residentIndex() : null;
     const promptText = residentBlock ? `${residentBlock}\n\n${triggerMessage.content}` : triggerMessage.content;
 
@@ -95,7 +95,7 @@ export function executeRun({ store, hub, config, agent, space, triggerMessage, a
         phase: evt?.phase,
         label: evt?.label,
         detail,
-        toolStatus: evt?.toolStatus ?? null,
+        toolStatus: evt.toolStatus ?? null,
         createdAt: now,
         updatedAt: now,
       };
@@ -110,6 +110,7 @@ export function executeRun({ store, hub, config, agent, space, triggerMessage, a
 
     const ctx = {
       agent,
+      account,
       prompt: { text: promptText },
       sessionState: priorSessionState,
       workspacePath: process.cwd(),
@@ -118,7 +119,7 @@ export function executeRun({ store, hub, config, agent, space, triggerMessage, a
       requestApproval,
       // 可选回调（adapter-interface.md）：外部会话一建立就立即持久化，
       // 不等 run 结束，防止 run 中途崩溃丢会话 id 导致重复建会话。
-      persistSessionState: (state) => store.setSessionState(agent.id, spaceId, state),
+      persistSessionState: (state) => store.setSessionState(account.id, spaceId, state),
       signal: controller.signal,
     };
 
@@ -127,7 +128,7 @@ export function executeRun({ store, hub, config, agent, space, triggerMessage, a
     try {
       const result = await adapter.run(ctx);
       bubbles.finish(result?.content);
-      store.setSessionState(agent.id, spaceId, result?.sessionState ?? null);
+      store.setSessionState(account.id, spaceId, result?.sessionState ?? null);
     } catch (err) {
       bubbles.finish();
       if (err instanceof AdapterError) {

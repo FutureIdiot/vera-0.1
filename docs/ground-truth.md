@@ -67,6 +67,9 @@ Vera是单用户、自部署的多agent协作空间。
 - Agent获得用户授权后可发起对其他agent的调度
 - 用户拥有最终决策权
 - **群聊的发言归属**（2026-07-03补）：每个agent的会话里只有自己的话是"自己说的"（assistant角色）；用户和其他agent的发言注入时必须带署名、以对方发言的形式呈现（不得用assistant角色转达别人的话），否则模型重放历史会把全群发言当成自己说的。触发某agent时，把它上次发言之后错过的其他参与者消息一并转达。（Phase 4多agent广播的前置规则；Phase 2–3单响应者下gateway只传触发消息，agent看不到其他agent的发言，属已知欠缺）
+- **发言与过程的边界**（2026-07-04补）：Message（气泡）是对外发言，是 agent 在 Space 内唯一能被其他成员看见的输出，经编译层署名注入他人的下次 prompt；Activity（思考链/工具链）只服务于同期观察的用户，**不进任何 agent 的下次 prompt**——包括 agent 本人（其工具历史由 adapter 自身的 sessionState 携带，gateway 不二次注入；其他 agent 想要细节只能靠 Phase 5 的 `fetch_detail`/`fetch_more` 主动调阅，按需、带预算，不是默认注入）。这是"时间线对用户全展开、prompt 层只看气泡"的产品语义边界。
+- **群聊视角的注入形态**（2026-07-04补）：其他成员的气泡以"群内最近发言"这一明确声告的上下文段注入下次 prompt，**不伪装成一对一对话的 user 历史轮次**——模型在自己的历史里看到的 assistant 永远是自己、user 永远是用户的直接提问，群状态是每轮临时刷新的 volatile context（符合缓存纪律"动态信息注入尾部"）。编译层在该 agent 上次发言之后到当前触发之间派生这段 delta，无状态（不维护"已投递水位"）。CLI 与 API 型 adapter 共享同一份编译层输出（`ctx.prompt.text`），各自翻译成自己的协议帧：CLI 复用的外部 session 已携带稳定历史 + 本轮投递新 delta；API 每次 run 重建 messages 数组，但同样只把本人气泡放为 assistant、用户直接提问放为 user，旧群状态不进稳定历史，本轮群状态只落在新 user 消息尾部。
+- **响应规则的统一语义**（2026-07-04补）：silent / focused / 屏蔽某 agent，本质都是"过滤进入该 agent 群聊视角 prompt 段的事件流"——被过滤的事件不进 prompt 段，等价于不触发该 agent 的 run（不进 → 不响应）。`silent` 的来源过滤靠 `respondTo`、屏蔽某 agent 靠 seat 上的 `blockAgentIds`（Phase 4.3 落地）。
 
 ---
 

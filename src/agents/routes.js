@@ -2,6 +2,7 @@
 
 import { asHandler, readJsonBody, sendJson, sendNoContent } from "../api/http.js";
 import { listAgents, createAgent, updateAgent, deleteAgent } from "./agents.js";
+import { listAccounts, createAccount, updateAccount, deleteAccount } from "./accounts.js";
 
 export function registerAgentRoutes(router, { store, agentStates }) {
   router.get(
@@ -15,9 +16,9 @@ export function registerAgentRoutes(router, { store, agentStates }) {
     "/api/agents",
     asHandler(async ({ req, res }) => {
       const body = await readJsonBody(req);
-      const agent = createAgent(store, body);
+      const { agent, account } = createAgent(store, body);
       agentStates.ensure(agent.id);
-      sendJson(res, 201, { agent });
+      sendJson(res, 201, { agent, account });
     }),
   );
 
@@ -42,6 +43,39 @@ export function registerAgentRoutes(router, { store, agentStates }) {
     "/api/agent-states",
     asHandler(async ({ res }) => {
       sendJson(res, 200, { agentStates: agentStates.list() });
+    }),
+  );
+
+  router.get(
+    "/api/accounts",
+    asHandler(async ({ res, query }) => {
+      sendJson(res, 200, { accounts: listAccounts(store, { agentId: query.get("agentId") || undefined }) });
+    }),
+  );
+
+  router.post(
+    "/api/agents/:id/accounts",
+    asHandler(async ({ req, res, params }) => {
+      const body = await readJsonBody(req);
+      const account = createAccount(store, params.id, body);
+      sendJson(res, 201, { account });
+    }),
+  );
+
+  router.patch(
+    "/api/accounts/:id",
+    asHandler(async ({ req, res, params }) => {
+      const body = await readJsonBody(req);
+      const account = updateAccount(store, params.id, body);
+      sendJson(res, 200, { account });
+    }),
+  );
+
+  router.delete(
+    "/api/accounts/:id",
+    asHandler(async ({ res, params }) => {
+      deleteAccount(store, params.id);
+      sendNoContent(res);
     }),
   );
 }

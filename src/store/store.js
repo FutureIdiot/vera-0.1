@@ -19,10 +19,10 @@
 // 时序的场景；对外输出前调用方需自行剥离（各 domain 模块的 stripInternal）。
 // 这是 store 唯一知道的“排序”概念，store 本身不理解 itemType/timeline 语义。
 
-import { readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
+import { copyFile, readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-const COLLECTIONS = ["agents", "spaces", "messages", "activities", "approvals", "runs"];
+const COLLECTIONS = ["agents", "accounts", "spaces", "messages", "activities", "approvals", "runs"];
 
 // 内存键 -> 目录内文件名
 const FILE_NAMES = {
@@ -59,6 +59,20 @@ async function fileExists(path) {
   } catch {
     return false;
   }
+}
+
+function deriveOwningAccountId(agentId) {
+  const suffix = String(agentId || "").startsWith("agt_") ? String(agentId).slice(4) : String(agentId || "unknown");
+  return `acc_${suffix.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+}
+
+function hasLegacyAgentConnection(agent) {
+  return ["kind", "provider", "connection", "model"].some((key) => Object.prototype.hasOwnProperty.call(agent, key));
+}
+
+function stripAgentConnection(agent) {
+  const { kind, provider, connection, model, ...identity } = agent;
+  return identity;
 }
 
 export async function createStore({ dataPath, debounceMs = 200 } = {}) {
@@ -117,6 +131,99 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     for (const key of Object.keys(FILE_NAMES)) dirty.add(key);
   }
 
+  async function backupExistingSplitFiles(keys) {
+    for (const key of keys) {
+      const path = fileFor(key);
+      if (!(await fileExists(path))) continue;
+      const legacyPath = `${path}.legacy`;
+      if (await fileExists(legacyPath)) continue;
+      await copyFile(path, legacyPath);
+    }
+  }
+
+  async function migrateAgentAccountsIfNeeded({ backupSplitFiles = false } = {}) {
+    const needsAgentStrip = data.agents.some(hasLegacyAgentConnection);
+    const owningAccountByAgent = new Map(data.accounts.map((account) => [account.owningAgentId, account]));
+    const agentsNeedingAccount = data.agents.filter((agent) => !owningAccountByAgent.has(agent.id));
+    const seatsNeedAccount = data.spaces.some((space) => (space.seats ?? []).some((seat) => !seat.accountId));
+    const sessionKeys = Object.keys(data.sessionStates);
+    const sessionKeysNeedRemap = sessionKeys.some((key) => {
+      const [first] = key.split(":");
+      return first?.startsWith("agt_");
+    });
+
+    if (!needsAgentStrip && agentsNeedingAccount.length === 0 && !seatsNeedAccount && !sessionKeysNeedRemap) {
+      return;
+    }
+
+    if (backupSplitFiles) {
+      await backupExistingSplitFiles(["agents", "accounts", "spaces", "sessionStates", "meta"]);
+    }
+
+    const accountIdByAgent = new Map();
+    for (const account of data.accounts) {
+      if (!accountIdByAgent.has(account.owningAgentId)) accountIdByAgent.set(account.owningAgentId, account.id);
+    }
+
+    const usedAccountIds = new Set(data.accounts.map((account) => account.id));
+    function accountIdForAgent(agentId) {
+      if (accountIdByAgent.has(agentId)) return accountIdByAgent.get(agentId);
+      let id = deriveOwningAccountId(agentId);
+      let n = 2;
+      while (usedAccountIds.has(id)) {
+        id = `${deriveOwningAccountId(agentId)}_${n}`;
+        n += 1;
+      }
+      usedAccountIds.add(id);
+      accountIdByAgent.set(agentId, id);
+      return id;
+    }
+
+    const now = new Date().toISOString();
+    for (const agent of data.agents) {
+      if (accountIdByAgent.has(agent.id)) continue;
+      data.accounts.push({
+        id: accountIdForAgent(agent.id),
+        owningAgentId: agent.id,
+        name: `${agent.name ?? agent.id}${agent.provider ? ` ${agent.provider}` : ""} account`,
+        kind: agent.kind ?? null,
+        provider: agent.provider ?? null,
+        connection: agent.connection ?? {},
+        model: agent.model ?? "",
+        createdAt: agent.createdAt ?? now,
+        updatedAt: agent.updatedAt ?? agent.createdAt ?? now,
+      });
+    }
+
+    data.agents = data.agents.map(stripAgentConnection);
+
+    data.spaces = data.spaces.map((space) => ({
+      ...space,
+      seats: (space.seats ?? []).map((seat) => ({
+        ...seat,
+        accountId: seat.accountId ?? accountIdForAgent(seat.agentId),
+      })),
+    }));
+
+    const remappedSessionStates = {};
+    for (const [key, value] of Object.entries(data.sessionStates)) {
+      const [first, ...rest] = key.split(":");
+      const spaceId = rest.join(":");
+      if (first?.startsWith("agt_") && spaceId) {
+        remappedSessionStates[`${accountIdForAgent(first)}:${spaceId}`] = value;
+      } else {
+        remappedSessionStates[key] = value;
+      }
+    }
+    data.sessionStates = remappedSessionStates;
+
+    markDirty("agents");
+    markDirty("accounts");
+    markDirty("spaces");
+    markDirty("sessionStates");
+    await flush();
+  }
+
   // 旧单文件（全集合混存一个 JSON）灌进内存结构
   function adoptLegacy(parsed) {
     for (const name of COLLECTIONS) {
@@ -138,6 +245,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
   // 从旧单文件内容整体重建分文件（迁移 a/b 与崩溃回灌共用）
   async function rebuildFromLegacy(parsed) {
     adoptLegacy(parsed);
+    await migrateAgentAccountsIfNeeded();
     markAllDirty();
     await flush();
   }
@@ -197,6 +305,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
         data._seq = meta._seq ?? 0;
         data.eventSeqWatermark = meta.eventSeqWatermark ?? 0;
       }
+      await migrateAgentAccountsIfNeeded({ backupSplitFiles: true });
     }
   } else if (await fileExists(siblingLegacyPath)) {
     // 崩溃回灌的更早中间态：迁移 a 在 rename 之后、mkdir 之前崩溃，
@@ -254,17 +363,28 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     return true;
   }
 
-  function sessionKey(agentId, spaceId) {
-    return `${agentId}:${spaceId}`;
+  function sessionKey(accountId, spaceId) {
+    return `${accountId}:${spaceId}`;
   }
 
-  function getSessionState(agentId, spaceId) {
-    return data.sessionStates[sessionKey(agentId, spaceId)] ?? null;
+  function getSessionState(accountId, spaceId) {
+    return data.sessionStates[sessionKey(accountId, spaceId)] ?? null;
   }
 
-  function setSessionState(agentId, spaceId, sessionState) {
-    data.sessionStates[sessionKey(agentId, spaceId)] = sessionState;
+  function setSessionState(accountId, spaceId, sessionState) {
+    data.sessionStates[sessionKey(accountId, spaceId)] = sessionState;
     markDirty("sessionStates");
+  }
+
+  function clearSessionStatesForAccount(accountId) {
+    let changed = false;
+    for (const key of Object.keys(data.sessionStates)) {
+      if (key.startsWith(`${accountId}:`)) {
+        delete data.sessionStates[key];
+        changed = true;
+      }
+    }
+    if (changed) markDirty("sessionStates");
   }
 
   // SSE seq 水位（api-contract.md「seq 跨重启单调」）：hub 每次 publish 后回写，
@@ -298,6 +418,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     nextSeq,
     getSessionState,
     setSessionState,
+    clearSessionStatesForAccount,
     getEventSeqWatermark,
     setEventSeqWatermark,
     flush,

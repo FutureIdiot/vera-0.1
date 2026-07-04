@@ -11,6 +11,7 @@ function makeId(prefix) {
 }
 
 export const newAgentId = () => makeId("agt");
+export const newAccountId = () => makeId("acc");
 export const newSpaceId = () => makeId("spc");
 export const newMessageId = () => makeId("msg");
 export const newRunId = () => makeId("run");

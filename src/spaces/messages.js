@@ -3,6 +3,7 @@
 
 import { newMessageId } from "../core/id.js";
 import { ApiError } from "../core/errors.js";
+import { getOwningAccount } from "../agents/accounts.js";
 import { getSpaceOrThrow } from "./spaces.js";
 import { executeRun } from "./run-controller.js";
 
@@ -18,7 +19,7 @@ function isAddressedTo(message, agentId) {
 // - default：广播消息都响应；定向消息只有被点名的 agent 响应
 // - focused：只响应 @ 自己（即定向消息里包含自己）
 // - silent：只响应指定来源的 @（respondTo 过滤字段是 [P4]，本阶段未实现，
-//   先按“只响应定向”处理，等价于 focused，等 respondTo 落地后再细化）
+//   先按"只响应定向"处理，等价于 focused，等 respondTo 落地后再细化）
 function shouldRespond(seat, message) {
   if (message.target.type === "direct") {
     return isAddressedTo(message, seat.agentId);
@@ -53,9 +54,17 @@ export function postMessage({ store, hub, config, resolveAdapter, agentStates, m
     if (!shouldRespond(seat, message)) continue;
     const agent = store.find("agents", seat.agentId);
     if (!agent) continue;
-    const adapter = resolveAdapter(agent);
+
+    // 解析 account：seat 有 accountId 则直接用，否则 fallback 到 agent 的自有 account
+    let account = seat.accountId ? store.find("accounts", seat.accountId) : null;
+    if (!account) {
+      account = getOwningAccount(store, seat.agentId);
+    }
+    if (!account) continue;
+
+    const adapter = resolveAdapter(account);
     if (!adapter) continue;
-    const run = executeRun({ store, hub, config, agent, space, triggerMessage: storedMessage, adapter, agentStates, memory });
+    const run = executeRun({ store, hub, config, agent, account, space, triggerMessage: storedMessage, adapter, agentStates, memory });
     runs.push(run);
   }
 

@@ -14,7 +14,7 @@ import net from "node:net";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -62,19 +62,28 @@ function getFreePort() {
   });
 }
 
+async function fileExistsAt(path) {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
 // ---- 全局状态：子进程句柄、端口、临时目录、已开 SSE 连接（结束时统一清理）----
 let child = null;
 let port = null;
 let dataDir = null;
 const openSseHandles = [];
 
-function httpRequest(method, path, body) {
+function httpRequest(method, path, body, portOverride) {
   return new Promise((resolve, reject) => {
+    const usePort = portOverride ?? port;
     const payload = body !== undefined ? JSON.stringify(body) : null;
     const req = http.request(
       {
         host: "127.0.0.1",
-        port,
+        port: usePort,
         path,
         method,
         headers: payload
@@ -263,10 +272,11 @@ async function main() {
   });
 
   let bootstrap;
-  await check("a. GET /api/bootstrap returns agents/spaces/agentStates/seq shape", async () => {
+  await check("a. GET /api/bootstrap returns agents/accounts/spaces/agentStates/seq shape", async () => {
     const { status, json } = await httpRequest("GET", "/api/bootstrap");
     assertEqual(status, 200);
     assert(Array.isArray(json.agents), "agents should be an array");
+    assert(Array.isArray(json.accounts), "accounts should be an array (4.1)");
     assert(Array.isArray(json.spaces), "spaces should be an array");
     assert(Array.isArray(json.agentStates), "agentStates should be an array");
     assert(typeof json.seq === "number", "seq should be a number");
@@ -276,9 +286,12 @@ async function main() {
   // 从 bootstrap 时刻的 seq 开始订阅，这样后续所有实时事件都会被这条持久连接捕获。
   const sse = await connectSse({ since: bootstrap?.seq ?? 0 });
 
-  // ---- b. Agent CRUD ----
+  // ---- b. Agent/Account 拆分（Phase 4.1）----
+  // 契约（api-contract.md 4.1 修订）：Agent 只保留身份 {id,name,createdAt,updatedAt}；
+  // 连接类字段（kind/provider/connection/model）落到自动派生的 owning account。
   let agent;
-  await check("b. POST /api/agents creates a mock-provider agent", async () => {
+  let owningAccount;
+  await check("b. POST /api/agents returns { agent, account } 并把连接字段从 agent 剥到 account", async () => {
     const { status, json } = await httpRequest("POST", "/api/agents", {
       name: "VerifyMock",
       kind: "cli",
@@ -288,15 +301,127 @@ async function main() {
     });
     assertEqual(status, 201);
     assert(json.agent?.id?.startsWith("agt_"), "agent id should have agt_ prefix");
-    assertEqual(json.agent.model, "mock-v1");
+    // 4.1 收敛：agent 不再携带连接字段
+    assert(
+      !("kind" in json.agent) && !("provider" in json.agent) && !("connection" in json.agent) && !("model" in json.agent),
+      "agent must not carry kind/provider/connection/model (4.1)",
+    );
+    assertEqual(json.agent.name, "VerifyMock");
+    // connection 类字段应进 account
+    assert(json.account?.id?.startsWith("acc_"), "account id should have acc_ prefix");
+    assertEqual(json.account.owningAgentId, json.agent.id);
+    assertEqual(json.account.kind, "cli");
+    assertEqual(json.account.provider, "mock");
+    assertEqual(json.account.model, "mock-v1");
+    agent = json.agent;
+    owningAccount = json.account;
+  });
+
+  await check("b. PATCH /api/agents/:id 只改 name，连接字段不走此接口", async () => {
+    const { status, json } = await httpRequest("PATCH", `/api/agents/${agent.id}`, { name: "VerifyMock2", model: "ignored" });
+    assertEqual(status, 200);
+    assertEqual(json.agent.name, "VerifyMock2");
+    assert(
+      !("model" in json.agent) && !("provider" in json.agent),
+      "PATCH /api/agents must not surface connection fields",
+    );
     agent = json.agent;
   });
 
-  await check("b. PATCH /api/agents/:id changes model", async () => {
-    const { status, json } = await httpRequest("PATCH", `/api/agents/${agent.id}`, { model: "mock-v2" });
+  await check("b. GET /api/accounts lists the auto-derived owning account", async () => {
+    const { status, json } = await httpRequest("GET", "/api/accounts");
     assertEqual(status, 200);
-    assertEqual(json.agent.model, "mock-v2");
-    agent = json.agent;
+    assert(Array.isArray(json.accounts));
+    assert(json.accounts.some((a) => a.id === owningAccount.id), "owning account should be in the list");
+  });
+
+  await check("b. GET /api/accounts?agentId=... 按拥有者过滤", async () => {
+    const { status, json } = await httpRequest("GET", `/api/accounts?agentId=${agent.id}`);
+    assertEqual(status, 200);
+    assertEqual(json.accounts.length, 1);
+    assertEqual(json.accounts[0].owningAgentId, agent.id);
+  });
+
+  await check("b. PATCH /api/accounts/:id 改 model（换模型改 account 不改 agent 身份）", async () => {
+    const { status, json } = await httpRequest("PATCH", `/api/accounts/${owningAccount.id}`, { model: "mock-v2" });
+    assertEqual(status, 200);
+    assertEqual(json.account.model, "mock-v2");
+    assertEqual(json.account.id, owningAccount.id);
+    owningAccount = json.account;
+  });
+
+  let secondAccount;
+  await check("b. POST /api/agents/:id/accounts 为同一 agent 增加第二条 account", async () => {
+    const { status, json } = await httpRequest("POST", `/api/agents/${agent.id}/accounts`, {
+      name: "VerifyMock 第二账户",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "",
+    });
+    assertEqual(status, 201);
+    assert(json.account?.id?.startsWith("acc_"));
+    assert(json.account.id !== owningAccount.id, "second account must be a different id");
+    assertEqual(json.account.owningAgentId, agent.id);
+    secondAccount = json.account;
+  });
+
+  await check("b. DELETE /api/accounts/:id 不可删唯一 owning account（409），删多余 account 成功（204）", async () => {
+    // 先删第二个（agent 名下还有 owning 共两条，应成功）
+    const delSecond = await httpRequest("DELETE", `/api/accounts/${secondAccount.id}`);
+    assertEqual(delSecond.status, 204);
+    // 再删唯一剩的 owning account，应当 409 拒绝
+    const sole = await httpRequest("DELETE", `/api/accounts/${owningAccount.id}`);
+    assertEqual(sole.status, 409);
+    assertEqual(sole.json.error.code, "conflict");
+  });
+
+  await check("b. 多 agent 同 Space 共享同一 account：外部会话随 account 走不随 agent 走", async () => {
+    // 建第二个 agent，再开一个 Space：seatA 是 agent（用 owningAccount），seatB 是
+    // agent2 驾驶同一个 owningAccount（开别人的账户做别人的项目，ground truth 2.2）。
+    // 一次 broadcast 触发两 run，都用 owningAccount → 共享同一条 (account, Space)
+    // sessionState → mock counter 必须接龙递增，证明 session 键已从 (agentId,spaceId)
+    // 改为 (accountId,spaceId)。
+    const agent2Resp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMock2b",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-spare",
+    });
+    assertEqual(agent2Resp.status, 201);
+    const agent2 = agent2Resp.json.agent;
+
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "driving-space",
+      seats: [
+        { agentId: agent.id, accountId: owningAccount.id, responseMode: "default" },
+        { agentId: agent2.id, accountId: owningAccount.id, responseMode: "default" },
+      ],
+    });
+    assertEqual(spaceResp.status, 201);
+    const driveSpace = spaceResp.json.space;
+
+    const post = await httpRequest("POST", `/api/spaces/${driveSpace.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "broadcast" },
+      content: "driving continuity check",
+    });
+    assertEqual(post.status, 201);
+    assertEqual(post.json.runs.length, 2, "two seats both default mode -> two runs");
+
+    // 等两个 run 都结束，把它们的 reply Message 内容拼起来
+    const runIds = post.json.runs.map((r) => r.id);
+    const waitOne = (rid) => sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === rid, 10000);
+    const [end1, end2] = await Promise.all(runIds.map(waitOne));
+    assertEqual(end1.data.run.status, "completed");
+    assertEqual(end2.data.run.status, "completed");
+
+    const allReplies = sse.events
+      .filter((e) => e.type === "message.completed" && [end1, end2].some((en) => en.data.run.replyMessageIds.includes(e.data.message.id)))
+      .map((e) => e.data.message.content)
+      .join(" ");
+    assert(/回声第 1 次/.test(allReplies) && /回声第 2 次/.test(allReplies), `expected mock counter to chain 1->2 across both runs sharing one account; got: ${allReplies}`);
   });
 
   // ---- c. Space 创建与 seats ----
@@ -504,6 +629,294 @@ async function main() {
     const page1Ids = new Set(page1.json.items.map((i) => i.id));
     for (const item of page2.json.items) {
       assert(!page1Ids.has(item.id), `page2 item ${item.id} should not repeat page1`);
+    }
+  });
+
+  // ---- k. v0 → v1 一次性迁移（Phase 4.1 启动迁移）----
+  // 旧 agent 记录里内嵌 kind/provider/connection/model；store 启动时拆出派生
+  // owning account、session-states 键 ${agentId}:${spaceId} 重映射为
+  // ${accountId}:${spaceId}。旧文件留 .legacy，幂等（api-contract.md
+  // 「v0/v1 兼容说明」）。
+  await check("k. v0 -> v1 启动迁移：agent 连接字段拆到 account、session-states 键重映射", async () => {
+    const migDataDir = await mkdtemp(join(tmpdir(), "vera-migrate-"));
+    const legacyStorePath = join(migDataDir, "store.json");
+    const AGENT_ID = "agt_legacy01";
+    const SPACE_ID = "spc_legacy01";
+    const ISO = "2026-06-01T00:00:00.000Z";
+    const legacyPayload = {
+      _seq: 42,
+      eventSeqWatermark: 0,
+      agents: [
+        {
+          id: AGENT_ID,
+          name: "Legacy",
+          createdAt: ISO,
+          updatedAt: ISO,
+          kind: "cli",
+          provider: "mock",
+          connection: { command: "/bin/true" },
+          model: "mock-v1",
+        },
+      ],
+      spaces: [
+        {
+          id: SPACE_ID,
+          name: "legacy space",
+          topic: "",
+          createdAt: ISO,
+          seats: [{ agentId: AGENT_ID, responseMode: "default" }],
+        },
+      ],
+      messages: [],
+      activities: [],
+      approvals: [],
+      runs: [],
+      sessionStates: { [`${AGENT_ID}:${SPACE_ID}`]: { count: 7 } },
+    };
+    await writeFile(legacyStorePath, JSON.stringify(legacyPayload, null, 2), "utf8");
+
+    const migPort = await getFreePort();
+    const migChild = spawn(process.execPath, [join(repoRoot, "src/server.js")], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        PORT: String(migPort),
+        VERA_DATA_PATH: migDataDir,
+        VERA_MEMORY_VAULT_PATH: join(migDataDir, "memory"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let migLog = "";
+    migChild.stdout.on("data", (d) => (migLog += d.toString()));
+    migChild.stderr.on("data", (d) => (migLog += d.toString()));
+
+    try {
+      // 等健康
+      const start = Date.now();
+      let healthy = false;
+      while (Date.now() - start < 8000) {
+        try {
+          const { status, json } = await httpRequest("GET", "/api/health", undefined, migPort);
+          if (status === 200 && json?.ok) {
+            healthy = true;
+            break;
+          }
+        } catch {
+          /* keep polling */
+        }
+        await sleep(100);
+      }
+      assert(healthy, `migration gateway did not become healthy: ${migLog}`);
+
+      // bootstrap 后 agents/accounts/spaces 形状应满足新契约
+      const bs = await httpRequest("GET", "/api/bootstrap", undefined, migPort);
+      assertEqual(bs.status, 200);
+      const legAgent = bs.json.agents[0];
+      assertEqual(legAgent.id, AGENT_ID);
+      assert(
+        !("kind" in legAgent) &&
+          !("provider" in legAgent) &&
+          !("connection" in legAgent) &&
+          !("model" in legAgent),
+        "legacy agent must be stripped of connection fields",
+      );
+      assertEqual(bs.json.accounts.length, 1, "exactly one owning account derived from legacy agent");
+      const account = bs.json.accounts[0];
+      assertEqual(account.owningAgentId, AGENT_ID);
+      assertEqual(account.provider, "mock");
+      assertEqual(account.model, "mock-v1");
+      assertEqual(account.kind, "cli");
+
+      // seat.accountId 应被回填为派生 account 的 id
+      const space = bs.json.spaces[0];
+      assertEqual(space.id, SPACE_ID);
+      assertEqual(space.seats[0].accountId, account.id, "seat.accountId should backfill to derived owning account");
+
+      // session-states 键重映射：post 消息后 mock 计数器应从 7 续到 8
+      const post = await httpRequest(
+        "POST",
+        `/api/spaces/${SPACE_ID}/messages`,
+        { author: { type: "user" }, target: { type: "broadcast" }, content: "legacy continuity check" },
+        migPort,
+      );
+      assertEqual(post.status, 201);
+      assert(Array.isArray(post.json.runs) && post.json.runs.length === 1);
+
+      let legacyMsg = null;
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const tl = await httpRequest("GET", `/api/spaces/${SPACE_ID}/timeline?limit=50`, undefined, migPort);
+        const found = tl.json.items.find(
+          (i) => i.itemType === "message" && i.runId === post.json.runs[0].id && i.author?.type === "agent",
+        );
+        if (found && found.status === "completed") {
+          legacyMsg = found;
+          break;
+        }
+        await sleep(100);
+      }
+      assert(legacyMsg, "legacy run did not complete in time");
+      assert(
+        /回声第 8 次/.test(legacyMsg.content),
+        `expected mock counter to continue from 7 -> 8 after remap, got: ${legacyMsg.content}`,
+      );
+
+      // 旧 store.json 应已改名 .legacy（分文件形态已就位）
+      const legacyStill = await fileExistsAt(legacyStorePath);
+      const legacyRenamed = await fileExistsAt(`${legacyStorePath}.legacy`);
+      assert(!legacyStill && legacyRenamed, "legacy store.json should be renamed to .legacy");
+    } finally {
+      await new Promise((resolve) => {
+        const t = setTimeout(() => {
+          migChild.kill("SIGKILL");
+          resolve();
+        }, 2000);
+        migChild.once("exit", () => {
+          clearTimeout(t);
+          resolve();
+        });
+        migChild.kill("SIGTERM");
+      });
+      await rm(migDataDir, { recursive: true, force: true });
+    }
+  });
+
+  await check("k. v0 分文件 → v1 启动迁移：备份旧 agents/spaces/session-states 等分文件为 .legacy", async () => {
+    // 真实生产路径：Phase 2 起就用分文件 data/，但旧 agents.json 还内嵌
+    // kind/provider/connection/model。4.1 binary 启动应检测到、备份分文件为
+    // .legacy（可回滚）、改写为 v1 形态（agent 已收口 + 派生 account + 重映射
+    // session-states + seat.accountId 回填）。
+    const migDir = await mkdtemp(join(tmpdir(), "vera-migrate-split-"));
+    const AGENT_ID = "agt_split01";
+    const SPACE_ID = "spc_split01";
+    const ISO = "2026-06-01T00:00:00.000Z";
+    const splitFiles = {
+      "agents.json": [
+        {
+          id: AGENT_ID,
+          name: "SplitLegacy",
+          createdAt: ISO,
+          updatedAt: ISO,
+          kind: "cli",
+          provider: "mock",
+          connection: { command: "/bin/true" },
+          model: "mock-v1",
+        },
+      ],
+      "accounts.json": [],
+      "spaces.json": [
+        {
+          id: SPACE_ID,
+          name: "split space",
+          topic: "",
+          createdAt: ISO,
+          seats: [{ agentId: AGENT_ID, responseMode: "default" }],
+        },
+      ],
+      "session-states.json": { [`${AGENT_ID}:${SPACE_ID}`]: { count: 3 } },
+      "meta.json": { _seq: 9, eventSeqWatermark: 0 },
+      "messages.json": [],
+      "activities.json": [],
+      "approvals.json": [],
+      "runs.json": [],
+    };
+    for (const [name, content] of Object.entries(splitFiles)) {
+      await writeFile(join(migDir, name), JSON.stringify(content, null, 2), "utf8");
+    }
+
+    const migPort = await getFreePort();
+    const migChild = spawn(process.execPath, [join(repoRoot, "src/server.js")], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        PORT: String(migPort),
+        VERA_DATA_PATH: migDir,
+        VERA_MEMORY_VAULT_PATH: join(migDir, "memory"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let migLog = "";
+    migChild.stdout.on("data", (d) => (migLog += d.toString()));
+    migChild.stderr.on("data", (d) => (migLog += d.toString()));
+
+    try {
+      const start = Date.now();
+      let healthy = false;
+      while (Date.now() - start < 8000) {
+        try {
+          const { status, json } = await httpRequest("GET", "/api/health", undefined, migPort);
+          if (status === 200 && json?.ok) {
+            healthy = true;
+            break;
+          }
+        } catch {
+          /* keep polling */
+        }
+        await sleep(100);
+      }
+      assert(healthy, `split migration gateway did not become healthy: ${migLog}`);
+
+      const bs = await httpRequest("GET", "/api/bootstrap", undefined, migPort);
+      assertEqual(bs.status, 200);
+      // agent 收口
+      const legAgent = bs.json.agents[0];
+      assertEqual(legAgent.id, AGENT_ID);
+      assert(
+        !("kind" in legAgent) && !("provider" in legAgent) && !("connection" in legAgent) && !("model" in legAgent),
+        "split legacy agent must be stripped",
+      );
+      // account 派生
+      assertEqual(bs.json.accounts.length, 1);
+      const account = bs.json.accounts[0];
+      assertEqual(account.owningAgentId, AGENT_ID);
+      assertEqual(account.provider, "mock");
+      assertEqual(account.model, "mock-v1");
+      // seat.accountId 回填
+      assertEqual(bs.json.spaces[0].seats[0].accountId, account.id);
+
+      // 分文件被备份为 .legacy（agents / accounts / spaces / session-states / meta）
+      assert(await fileExistsAt(join(migDir, "agents.json.legacy")), "agents.json.legacy backup missing");
+      assert(await fileExistsAt(join(migDir, "session-states.json.legacy")), "session-states.json.legacy backup missing");
+      assert(await fileExistsAt(join(migDir, "spaces.json.legacy")), "spaces.json.legacy backup missing");
+
+      // session-states 已重映射到 acc_xxx:spc 一侧：post 消息跑一次 run，counter 从 3 -> 4
+      const post = await httpRequest(
+        "POST",
+        `/api/spaces/${SPACE_ID}/messages`,
+        { author: { type: "user" }, target: { type: "broadcast" }, content: "split continuity" },
+        migPort,
+      );
+      assertEqual(post.status, 201);
+      assert(post.json.runs.length === 1);
+
+      let legacyMsg = null;
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const tl = await httpRequest("GET", `/api/spaces/${SPACE_ID}/timeline?limit=50`, undefined, migPort);
+        const found = tl.json.items.find(
+          (i) => i.itemType === "message" && i.runId === post.json.runs[0].id && i.author?.type === "agent",
+        );
+        if (found && found.status === "completed") {
+          legacyMsg = found;
+          break;
+        }
+        await sleep(100);
+      }
+      assert(legacyMsg, "split legacy run did not complete in time");
+      assert(/回声第 4 次/.test(legacyMsg.content), `expected counter continue 3 -> 4; got: ${legacyMsg.content}`);
+    } finally {
+      await new Promise((resolve) => {
+        const t = setTimeout(() => {
+          migChild.kill("SIGKILL");
+          resolve();
+        }, 2000);
+        migChild.once("exit", () => {
+          clearTimeout(t);
+          resolve();
+        });
+        migChild.kill("SIGTERM");
+      });
+      await rm(migDir, { recursive: true, force: true });
     }
   });
 

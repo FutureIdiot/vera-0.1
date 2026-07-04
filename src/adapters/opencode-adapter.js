@@ -84,8 +84,8 @@ export function createOpencodeAdapter({ config }) {
   let inFlight = 0;
   let idleTimer = null;
 
-  function resolveBinary(agent) {
-    const command = agent?.connection?.command;
+  function resolveBinary(account) {
+    const command = account?.connection?.command;
     if (command && (command.split("/").pop() || "") === "opencode") return command;
     return defaultBinary;
   }
@@ -290,11 +290,11 @@ export function createOpencodeAdapter({ config }) {
     return id;
   }
 
-  function buildRunnerArgs(handle, agent, sessionId, promptText) {
+  function buildRunnerArgs(handle, account, sessionId, promptText) {
     const args = ["run", "--attach", handle.baseUrl, "-u", "opencode", "-p", handle.password];
-    const model = String(agent?.model || "").trim();
+    const model = String(account?.model || "").trim();
     if (model) args.push("-m", model);
-    const connArgs = Array.isArray(agent?.connection?.args) ? agent.connection.args : [];
+    const connArgs = Array.isArray(account?.connection?.args) ? account.connection.args : [];
     const variantIdx = connArgs.indexOf("--variant");
     if (variantIdx >= 0 && connArgs[variantIdx + 1]) args.push("--variant", String(connArgs[variantIdx + 1]));
     // -s 必须显式传，否则 opencode 用"本项目最后一个会话"，并发会串线（salvage-notes）
@@ -304,7 +304,7 @@ export function createOpencodeAdapter({ config }) {
   }
 
   async function run(ctx) {
-    const { agent, prompt, sessionState, workspacePath, onDelta, onActivity, persistSessionState, signal } = ctx;
+    const { agent, account, prompt, sessionState, workspacePath, onDelta, onActivity, persistSessionState, signal } = ctx;
     if (signal?.aborted) throw new AdapterError("cancelled", "aborted before start");
 
     clearIdleTimer();
@@ -315,7 +315,7 @@ export function createOpencodeAdapter({ config }) {
     let sessionId = null;
 
     try {
-      const binary = resolveBinary(agent);
+      const binary = resolveBinary(account);
       const handle = await ensureDaemon(binary);
       // 等 poller 连上再投递，避免漏事件；等不到也继续（子进程退出 + stdout 兜底）
       await Promise.race([handle.pollerConnected, sleep(POLLER_CONNECT_WAIT_MS)]);
@@ -386,7 +386,7 @@ export function createOpencodeAdapter({ config }) {
       });
 
       // 短命 runner 子进程驱动 LLM loop
-      const runnerArgs = buildRunnerArgs(handle, agent, sessionId, prompt.text);
+      const runnerArgs = buildRunnerArgs(handle, account, sessionId, prompt.text);
       child = spawnProcess(handle.binary, runnerArgs, {
         cwd: workspacePath || process.cwd(),
         stdio: ["ignore", "pipe", "pipe"],

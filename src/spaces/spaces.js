@@ -10,6 +10,7 @@ function stripInternal({ _seq, ...rest }) {
 function normalizeSeat(seat) {
   const normalized = {
     agentId: seat.agentId,
+    accountId: seat.accountId ?? null,
     responseMode: seat.responseMode ?? "default",
   };
   if (seat.respondTo) normalized.respondTo = seat.respondTo; // [P4]
