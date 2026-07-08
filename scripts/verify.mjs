@@ -376,12 +376,13 @@ async function main() {
     assertEqual(sole.json.error.code, "conflict");
   });
 
-  await check("b. 多 agent 同 Space 共享同一 account：外部会话随 account 走不随 agent 走", async () => {
-    // 建第二个 agent，再开一个 Space：seatA 是 agent（用 owningAccount），seatB 是
-    // agent2 驾驶同一个 owningAccount（开别人的账户做别人的项目，ground truth 2.2）。
-    // 一次 broadcast 触发两 run，都用 owningAccount → 共享同一条 (account, Space)
-    // sessionState → mock counter 必须接龙递增，证明 session 键已从 (agentId,spaceId)
-    // 改为 (accountId,spaceId)。
+  await check("b. 多 agent 同 Space 各自驾驶 own account：sessionState 按 (accountId, spaceId) 隔离", async () => {
+    // 4.4 起 Seat 不再携带 accountId（账户归属改登录级或默认 owning account，见
+    // ground truth 2.2 修订 / api-contract Seat 段）。两个 agent 各自驾驶自己的
+    // owning account → 不同的 (accountId, spaceId) sessionState → mock counter
+    // 各自从 1 开始（不接龙），验证 agent 默认走自己的 owning account、sessionState
+    // 按 account 隔离。（4.1 的"共享同一 account"场景在 4.4 后不再经 seat.accountId
+    // 实现——多 agent 共用 account 改由联邦 daemon 登录声明，Phase 4 期间不测。）
     const agent2Resp = await httpRequest("POST", "/api/agents", {
       name: "VerifyMock2b",
       kind: "cli",
@@ -395,33 +396,42 @@ async function main() {
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "driving-space",
       seats: [
-        { agentId: agent.id, accountId: owningAccount.id, responseMode: "default" },
-        { agentId: agent2.id, accountId: owningAccount.id, responseMode: "default" },
+        { agentId: agent.id, responseMode: "default" },
+        { agentId: agent2.id, responseMode: "default" },
       ],
     });
     assertEqual(spaceResp.status, 201);
     const driveSpace = spaceResp.json.space;
+    // 4.4 形状确认：seats 不含 accountId
+    for (const seat of driveSpace.seats) {
+      assert(!("accountId" in seat), "seat should not carry accountId after 4.4 strip");
+    }
 
     const post = await httpRequest("POST", `/api/spaces/${driveSpace.id}/messages`, {
       author: { type: "user" },
       target: { type: "broadcast" },
-      content: "driving continuity check",
+      content: "driving isolation check",
     });
     assertEqual(post.status, 201);
     assertEqual(post.json.runs.length, 2, "two seats both default mode -> two runs");
 
-    // 等两个 run 都结束，把它们的 reply Message 内容拼起来
+    // 等两个 run 都结束，按 agentId 分组取 reply 内容
     const runIds = post.json.runs.map((r) => r.id);
     const waitOne = (rid) => sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === rid, 10000);
     const [end1, end2] = await Promise.all(runIds.map(waitOne));
     assertEqual(end1.data.run.status, "completed");
     assertEqual(end2.data.run.status, "completed");
 
-    const allReplies = sse.events
-      .filter((e) => e.type === "message.completed" && [end1, end2].some((en) => en.data.run.replyMessageIds.includes(e.data.message.id)))
-      .map((e) => e.data.message.content)
-      .join(" ");
-    assert(/回声第 1 次/.test(allReplies) && /回声第 2 次/.test(allReplies), `expected mock counter to chain 1->2 across both runs sharing one account; got: ${allReplies}`);
+    for (const en of [end1, end2]) {
+      const content = sse.events
+        .filter((e) => e.type === "message.completed" && en.data.run.replyMessageIds.includes(e.data.message.id))
+        .map((e) => e.data.message.content)
+        .join(" ");
+      assert(
+        /回声第 1 次/.test(content),
+        `agent ${en.data.run.agentId} should start counter at 1 (own account isolation); got: ${content}`,
+      );
+    }
   });
 
   // ---- c. Space 创建与 seats ----
@@ -748,10 +758,13 @@ async function main() {
       assertEqual(account.model, "mock-v1");
       assertEqual(account.kind, "cli");
 
-      // seat.accountId 应被回填为派生 account 的 id
+      // 4.4 反迁移：seat.accountId 应被剥掉（4.1 backfill 的旧值一次性清理）
       const space = bs.json.spaces[0];
       assertEqual(space.id, SPACE_ID);
-      assertEqual(space.seats[0].accountId, account.id, "seat.accountId should backfill to derived owning account");
+      assert(
+        !("accountId" in space.seats[0]),
+        "seat should not carry accountId after 4.4 strip",
+      );
 
       // session-states 键重映射：post 消息后 mock 计数器应从 7 续到 8
       const post = await httpRequest(
@@ -892,8 +905,8 @@ async function main() {
       assertEqual(account.owningAgentId, AGENT_ID);
       assertEqual(account.provider, "mock");
       assertEqual(account.model, "mock-v1");
-      // seat.accountId 回填
-      assertEqual(bs.json.spaces[0].seats[0].accountId, account.id);
+      // 4.4 反迁移：seat.accountId 应被剥掉
+      assert(!("accountId" in bs.json.spaces[0].seats[0]), "seat should not carry accountId after 4.4 strip");
 
       // 分文件被备份为 .legacy（agents / accounts / spaces / session-states / meta）
       assert(await fileExistsAt(join(migDir, "agents.json.legacy")), "agents.json.legacy backup missing");
@@ -1204,6 +1217,435 @@ updatedAt: 2026-07-08T00:00:00.000Z
       newAgentReply.includes("可用 fetch_detail 主动调阅"),
       `expected truncation hint in newAgent reply, got: ${newAgentReply}`,
     );
+  });
+
+  // ---- m. 响应规则收口 + Seat 去 accountId 反迁移（Phase 4.3 + 4.4）----
+  // 4.3：silent 的 respondTo 落地 + blockAgentIds 声告段过滤；定向 @ 一律穿透
+  // silent/focused/blockAgentIds（用户最终决策权）。4.4：seat 形不再携带 accountId。
+
+  await check("m.1 silent 默认（respondTo=null）：广播不响应、定向 @ 响应", async () => {
+    const agentS1Resp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockS1",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentS1Resp.status, 201);
+    const agentS1 = agentS1Resp.json.agent;
+    // 4.4 形状确认：bootstrap 后 seat 不含 accountId
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "m1-space",
+      seats: [{ agentId: agentS1.id, responseMode: "silent" }],
+    });
+    assertEqual(spaceResp.status, 201);
+    const m1Space = spaceResp.json.space;
+    assert(
+      !("accountId" in m1Space.seats[0]),
+      "m.1 seat should not carry accountId after 4.4 strip",
+    );
+
+    // broadcast → silent 默认不响应
+    const bc = await httpRequest("POST", `/api/spaces/${m1Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "broadcast" },
+      content: "m.1 broadcast",
+    });
+    assertEqual(bc.status, 201);
+    assertEqual(bc.json.runs.length, 0, "silent 默认不应响应 broadcast");
+
+    // direct @ → 响应（定向穿透 silent）
+    const dc = await httpRequest("POST", `/api/spaces/${m1Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agentS1.id] },
+      content: "m.1 direct @",
+    });
+    assertEqual(dc.status, 201);
+    assertEqual(dc.json.runs.length, 1, "silent 默认应响应 direct @");
+    assertEqual(dc.json.runs[0].agentId, agentS1.id);
+    await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === dc.json.runs[0].id, 10000);
+  });
+
+  await check("m.2 silent + respondTo=['user']：user 广播响应、agent 广播不响应、direct @ 响应", async () => {
+    const agentS2Resp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockS2",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentS2Resp.status, 201);
+    const agentS2 = agentS2Resp.json.agent;
+    const agentS2bResp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockS2b",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentS2bResp.status, 201);
+    const agentS2b = agentS2bResp.json.agent;
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "m2-space",
+      seats: [
+        { agentId: agentS2.id, responseMode: "silent", respondTo: ["user"] },
+        { agentId: agentS2b.id, responseMode: "focused" },
+      ],
+    });
+    assertEqual(spaceResp.status, 201);
+    const m2Space = spaceResp.json.space;
+    assertEqual(m2Space.seats[0].respondTo[0], "user", "respondTo should persist on seat");
+
+    // 场景1：user broadcast → agentS2 响应（respondTo 含 user），agentS2b 不响应（focused）
+    const bc1 = await httpRequest("POST", `/api/spaces/${m2Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "broadcast" },
+      content: "m.2 user broadcast",
+    });
+    assertEqual(bc1.status, 201);
+    assertEqual(bc1.json.runs.length, 1, "silent+respondTo=['user'] 应响应 user broadcast");
+    assertEqual(bc1.json.runs[0].agentId, agentS2.id);
+    await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === bc1.json.runs[0].id, 10000);
+
+    // 场景2：agentS2b broadcast → agentS2 不响应（respondTo 不含 agentS2b），agentS2b 自问自答跳过
+    const bc2 = await httpRequest("POST", `/api/spaces/${m2Space.id}/messages`, {
+      author: { type: "agent", agentId: agentS2b.id },
+      target: { type: "broadcast" },
+      content: "m.2 agent broadcast",
+    });
+    assertEqual(bc2.status, 201);
+    assertEqual(bc2.json.runs.length, 0, "silent+respondTo=['user'] 不应响应 agent broadcast");
+
+    // 场景3：direct @agentS2 → 响应（定向穿透 silent）
+    const dc = await httpRequest("POST", `/api/spaces/${m2Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agentS2.id] },
+      content: "m.2 direct @",
+    });
+    assertEqual(dc.status, 201);
+    assertEqual(dc.json.runs.length, 1, "silent+respondTo=['user'] 应响应 direct @");
+    assertEqual(dc.json.runs[0].agentId, agentS2.id);
+    await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === dc.json.runs[0].id, 10000);
+  });
+
+  await check("m.3 focused：广播不响应、定向 @ 响应", async () => {
+    const agentF3Resp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockF3",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentF3Resp.status, 201);
+    const agentF3 = agentF3Resp.json.agent;
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "m3-space",
+      seats: [{ agentId: agentF3.id, responseMode: "focused" }],
+    });
+    assertEqual(spaceResp.status, 201);
+    const m3Space = spaceResp.json.space;
+
+    // broadcast → focused 不响应
+    const bc = await httpRequest("POST", `/api/spaces/${m3Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "broadcast" },
+      content: "m.3 broadcast",
+    });
+    assertEqual(bc.status, 201);
+    assertEqual(bc.json.runs.length, 0, "focused 不应响应 broadcast");
+
+    // direct @ → 响应（定向穿透 focused）
+    const dc = await httpRequest("POST", `/api/spaces/${m3Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agentF3.id] },
+      content: "m.3 direct @",
+    });
+    assertEqual(dc.status, 201);
+    assertEqual(dc.json.runs.length, 1, "focused 应响应 direct @");
+    assertEqual(dc.json.runs[0].agentId, agentF3.id);
+    await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === dc.json.runs[0].id, 10000);
+  });
+
+  await check("m.4 blockAgentIds：声告段过滤 + 不影响 shouldRespond + direct @ 穿透", async () => {
+    const agentXResp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockX",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentXResp.status, 201);
+    const agentX = agentXResp.json.agent;
+    const agentYResp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockY",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentYResp.status, 201);
+    const agentY = agentYResp.json.agent;
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "m4-space",
+      seats: [
+        { agentId: agentX.id, responseMode: "default" },
+        { agentId: agentY.id, responseMode: "default", blockAgentIds: [agentX.id] },
+      ],
+    });
+    assertEqual(spaceResp.status, 201);
+    const m4Space = spaceResp.json.space;
+    assertEqual(m4Space.seats[1].blockAgentIds[0], agentX.id, "blockAgentIds should persist on seat");
+
+    // 步骤1：direct @agentX → X reply1（建立 X 气泡作为 Y 的候选源）
+    const post1 = await httpRequest("POST", `/api/spaces/${m4Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agentX.id] },
+      content: "m.4 msg1 @X",
+    });
+    assertEqual(post1.status, 201);
+    assertEqual(post1.json.runs.length, 1);
+    assertEqual(post1.json.runs[0].agentId, agentX.id);
+    const end1 = await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === post1.json.runs[0].id, 10000);
+    assertEqual(end1.data.run.status, "completed");
+
+    // 阳性对照：timeline 有 X 的 reply 气泡（X 的气泡确实存在，只是不进 Y 的声告段）
+    const tl = await httpRequest("GET", `/api/spaces/${m4Space.id}/timeline?limit=50`);
+    assertEqual(tl.status, 200);
+    const hasXReply = tl.json.items.some(
+      (i) => i.itemType === "message" && i.author?.type === "agent" && i.author?.agentId === agentX.id,
+    );
+    assert(hasXReply, "timeline should contain X's reply bubble (positive control)");
+
+    // 步骤2：direct @agentY → Y 跑（定向穿透，blockAgentIds 不影响 shouldRespond）
+    const post2 = await httpRequest("POST", `/api/spaces/${m4Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agentY.id] },
+      content: "m.4 msg2 @Y",
+    });
+    assertEqual(post2.status, 201);
+    assertEqual(post2.json.runs.length, 1, "direct @Y should create run (blockAgentIds does not block shouldRespond)");
+    assertEqual(post2.json.runs[0].agentId, agentY.id);
+    const end2 = await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === post2.json.runs[0].id, 10000);
+    assertEqual(end2.data.run.status, "completed");
+    const yReply = sse.events
+      .filter((e) => e.type === "message.completed" && end2.data.run.replyMessageIds.includes(e.data.message.id))
+      .map((e) => e.data.message.content)
+      .join(" ");
+    // Y 的声告段应过滤掉 X 的气泡（blockAgentIds 生效）
+    assert(
+      !yReply.includes(`- ${agentX.name}: `),
+      `Y's reply should not contain X's signature (blockAgentIds filters announcement), got: ${yReply}`,
+    );
+    // Y 的声告段应含 user msg1（未被 block）
+    assert(
+      yReply.includes("- 用户: "),
+      `Y's reply should contain user signature (user bubbles not blocked), got: ${yReply}`,
+    );
+
+    // 步骤3：user broadcast → X 和 Y 都跑（blockAgentIds 不影响 shouldRespond，broadcast 仍触发 Y）
+    const post3 = await httpRequest("POST", `/api/spaces/${m4Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "broadcast" },
+      content: "m.4 msg3 broadcast",
+    });
+    assertEqual(post3.status, 201);
+    assertEqual(post3.json.runs.length, 2, "broadcast should trigger both X and Y (blockAgentIds does not affect shouldRespond)");
+    await Promise.all(
+      post3.json.runs.map((r) => sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === r.id, 10000)),
+    );
+  });
+
+  // ---- n. 系统配置（Phase 4.5）----
+  // GET/PATCH /api/settings，字段白名单按 ground truth 4.1 / api-contract.md「配置 [P4]」。
+  await check("n.1 GET /api/settings 返回合并视图含所有白名单 key + 默认值", async () => {
+    const { status, json } = await httpRequest("GET", "/api/settings");
+    assertEqual(status, 200);
+    const s = json.settings;
+    assertEqual(typeof s, "object");
+    assert(!Array.isArray(s), "settings should be an object not array");
+    const expectedKeys = [
+      "isolation.memory",
+      "isolation.files",
+      "isolation.agentState",
+      "memory.digestTrigger",
+      "memory.digestSchedule",
+      "memory.injectionBudgetResidentLines",
+      "presentation.bubbleBoundaryPattern",
+      "presentation.bubbleMinLength",
+      "presentation.bubbleMaxLength",
+    ];
+    for (const key of expectedKeys) {
+      assert(Object.prototype.hasOwnProperty.call(s, key), `settings should include key ${key}`);
+    }
+    // 默认值与 config 派生一致
+    assertEqual(s["isolation.memory"], "isolated");
+    assertEqual(s["isolation.files"], "isolated");
+    assertEqual(s["isolation.agentState"], "globalVisible");
+    assertEqual(s["memory.digestTrigger"], "scheduled");
+    assertEqual(s["memory.digestSchedule"], "0 3 * * *");
+    assertEqual(s["memory.injectionBudgetResidentLines"], 25);
+    assertEqual(s["presentation.bubbleBoundaryPattern"], "\\n\\s*\\n");
+    assertEqual(s["presentation.bubbleMinLength"], 1);
+    assertEqual(s["presentation.bubbleMaxLength"], 800);
+  });
+
+  await check("n.2 PATCH 部分覆盖 enum 字段 -> 200 且后续 GET 反映新值", async () => {
+    const patch = await httpRequest("PATCH", "/api/settings", {
+      settings: { "isolation.memory": "globalReadable" },
+    });
+    assertEqual(patch.status, 200);
+    assertEqual(patch.json.settings["isolation.memory"], "globalReadable");
+    // 未覆盖字段保持默认
+    assertEqual(patch.json.settings["isolation.files"], "isolated");
+
+    const get = await httpRequest("GET", "/api/settings");
+    assertEqual(get.status, 200);
+    assertEqual(get.json.settings["isolation.memory"], "globalReadable");
+  });
+
+  await check("n.3 PATCH 未知 key -> 400 invalid_request；enum 无效值 -> 400；无副作用", async () => {
+    const unknown = await httpRequest("PATCH", "/api/settings", {
+      settings: { "not.a.real.key": "whatever" },
+    });
+    assertEqual(unknown.status, 400);
+    assertEqual(unknown.json.error.code, "invalid_request");
+
+    const badEnum = await httpRequest("PATCH", "/api/settings", {
+      settings: { "isolation.memory": "bogusValue" },
+    });
+    assertEqual(badEnum.status, 400);
+    assertEqual(badEnum.json.error.code, "invalid_request");
+
+    const badNumber = await httpRequest("PATCH", "/api/settings", {
+      settings: { "presentation.bubbleMaxLength": "not-a-number" },
+    });
+    assertEqual(badNumber.status, 400);
+    assertEqual(badNumber.json.error.code, "invalid_request");
+
+    const badShape = await httpRequest("PATCH", "/api/settings", {
+      notSettings: { "isolation.memory": "globalReadable" },
+    });
+    assertEqual(badShape.status, 400);
+    assertEqual(badShape.json.error.code, "invalid_request");
+
+    // 无效 PATCH 不改原值（n.2 设的 globalReadable 保留）
+    const get = await httpRequest("GET", "/api/settings");
+    assertEqual(get.json.settings["isolation.memory"], "globalReadable");
+  });
+
+  await check("n.4 重启 gateway 后 setting 仍存在（settings.json 防抖落盘）", async () => {
+    const migDir = await mkdtemp(join(tmpdir(), "vera-settings-persist-"));
+    const migPort1 = await getFreePort();
+    const child1 = spawn(process.execPath, [join(repoRoot, "src/server.js")], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        PORT: String(migPort1),
+        VERA_DATA_PATH: migDir,
+        VERA_MEMORY_VAULT_PATH: join(migDir, "memory"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let log1 = "";
+    child1.stdout.on("data", (d) => (log1 += d.toString()));
+    child1.stderr.on("data", (d) => (log1 += d.toString()));
+
+    try {
+      const start = Date.now();
+      let healthy = false;
+      while (Date.now() - start < 8000) {
+        try {
+          const { status, json } = await httpRequest("GET", "/api/health", undefined, migPort1);
+          if (status === 200 && json?.ok) {
+            healthy = true;
+            break;
+          }
+        } catch {
+          /* keep polling */
+        }
+        await sleep(100);
+      }
+      assert(healthy, `settings persist gateway#1 did not become healthy: ${log1}`);
+
+      // PATCH 两个字段覆盖默认
+      const patchResp = await httpRequest(
+        "PATCH",
+        "/api/settings",
+        { settings: { "memory.digestTrigger": "manual", "presentation.bubbleMaxLength": 1200 } },
+        migPort1,
+      );
+      assertEqual(patchResp.status, 200);
+      assertEqual(patchResp.json.settings["memory.digestTrigger"], "manual");
+      assertEqual(patchResp.json.settings["presentation.bubbleMaxLength"], 1200);
+
+      // 优雅关闭让 shutdown flush 落盘
+      await new Promise((resolve) => {
+        const t = setTimeout(() => {
+          child1.kill("SIGKILL");
+          resolve();
+        }, 3000);
+        child1.once("exit", () => {
+          clearTimeout(t);
+          resolve();
+        });
+        child1.kill("SIGTERM");
+      });
+
+      // 起第二个 gateway，同一数据目录
+      const migPort2 = await getFreePort();
+      const child2 = spawn(process.execPath, [join(repoRoot, "src/server.js")], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          PORT: String(migPort2),
+          VERA_DATA_PATH: migDir,
+          VERA_MEMORY_VAULT_PATH: join(migDir, "memory"),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let log2 = "";
+      child2.stdout.on("data", (d) => (log2 += d.toString()));
+      child2.stderr.on("data", (d) => (log2 += d.toString()));
+
+      try {
+        const start2 = Date.now();
+        let healthy2 = false;
+        while (Date.now() - start2 < 8000) {
+          try {
+            const { status, json } = await httpRequest("GET", "/api/health", undefined, migPort2);
+            if (status === 200 && json?.ok) {
+              healthy2 = true;
+              break;
+            }
+          } catch {
+            /* keep polling */
+          }
+          await sleep(100);
+        }
+        assert(healthy2, `settings persist gateway#2 did not become healthy: ${log2}`);
+
+        const get = await httpRequest("GET", "/api/settings", undefined, migPort2);
+        assertEqual(get.status, 200);
+        assertEqual(get.json.settings["memory.digestTrigger"], "manual");
+        assertEqual(get.json.settings["presentation.bubbleMaxLength"], 1200);
+        // 未覆盖字段仍是默认
+        assertEqual(get.json.settings["isolation.memory"], "isolated");
+      } finally {
+        await new Promise((resolve) => {
+          const t = setTimeout(() => {
+            child2.kill("SIGKILL");
+            resolve();
+          }, 2000);
+          child2.once("exit", () => {
+            clearTimeout(t);
+            resolve();
+          });
+          child2.kill("SIGTERM");
+        });
+      }
+    } finally {
+      await rm(migDir, { recursive: true, force: true });
+    }
   });
 
   console.log("");

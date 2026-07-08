@@ -7,13 +7,17 @@ function stripInternal({ _seq, ...rest }) {
   return rest;
 }
 
+// seat 形（ground-truth.md 2.2 / 2.3）：{agentId, responseMode, respondTo?, blockAgentIds?}。
+// 4.4 起 Seat 不再携带 accountId（账户归属改为登录级联邦或默认 owning account，
+// 见 docs/ground-truth.md 2.2 修订 / api-contract Seat 段）。即使传入也丢弃。
+// respondTo / blockAgentIds 缺省不强制写入（保持 seat 形干净），有值才写。
 function normalizeSeat(seat) {
   const normalized = {
     agentId: seat.agentId,
-    accountId: seat.accountId ?? null,
     responseMode: seat.responseMode ?? "default",
   };
-  if (seat.respondTo) normalized.respondTo = seat.respondTo; // [P4]
+  if (seat.respondTo) normalized.respondTo = seat.respondTo;
+  if (seat.blockAgentIds && seat.blockAgentIds.length > 0) normalized.blockAgentIds = seat.blockAgentIds;
   return normalized;
 }
 

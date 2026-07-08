@@ -11,21 +11,42 @@ function stripInternal({ _seq, ...rest }) {
   return rest;
 }
 
+// responseMode（ground-truth.md 2.3 / api-contract.md Space 一节）：
+// - default：广播消息都响应；定向消息只有被点名的 agent 响应
+// - focused：只响应 @ 自己（即定向消息里包含自己），广播一律忽略
+// - silent：只响应指定来源的 @（respondTo 过滤）；广播也看 respondTo——来源在
+//   名单内才响应；respondTo 缺省（null）时等价"只响应定向 @"，与 Phase 2-3 现状
+//   一致。silent+respondTo=["user"] 即只接收用户的广播 + 所有人定向 @。
+//
+// 定向 @ 一律穿透 silent/focused/blockAgentIds（用户最终决策权，ground truth
+// 2.3）：`target.type==="direct" && target.agentIds.includes(seat.agentId)` 即
+// 响应，不看 respondTo/blockAgentIds/responseMode。
+//
+// 来源判定：message.author.type === "user" 视为 "user"；author.type === "agent"
+// 且 author.agentId 在 respondTo 名单内才放行；否则不放行。
 function isAddressedTo(message, agentId) {
   return message.target.type === "direct" && Array.isArray(message.target.agentIds) && message.target.agentIds.includes(agentId);
 }
 
-// responseMode（ground-truth.md 2.3 / api-contract.md Space 一节）：
-// - default：广播消息都响应；定向消息只有被点名的 agent 响应
-// - focused：只响应 @ 自己（即定向消息里包含自己）
-// - silent：只响应指定来源的 @（respondTo 过滤字段是 [P4]，本阶段未实现，
-//   先按"只响应定向"处理，等价于 focused，等 respondTo 落地后再细化）
+function isAllowedByRespondTo(seat, message) {
+  const respondTo = seat.respondTo ?? null;
+  if (!respondTo || respondTo.length === 0) return false; // silent 缺省 = 只响应定向 @
+  if (message.author?.type === "user") return respondTo.includes("user");
+  if (message.author?.type === "agent") return respondTo.includes(message.author.agentId);
+  return false;
+}
+
 function shouldRespond(seat, message) {
+  // 定向 @ 一律穿透——用户最终决策权
   if (message.target.type === "direct") {
     return isAddressedTo(message, seat.agentId);
   }
+  // 广播
   const mode = seat.responseMode ?? "default";
-  return mode === "default";
+  if (mode === "default") return true;
+  if (mode === "focused") return false;
+  if (mode === "silent") return isAllowedByRespondTo(seat, message);
+  return false;
 }
 
 export function postMessage({ store, hub, config, resolveAdapter, agentStates, memory, spaceId, body }) {
@@ -55,11 +76,9 @@ export function postMessage({ store, hub, config, resolveAdapter, agentStates, m
     const agent = store.find("agents", seat.agentId);
     if (!agent) continue;
 
-    // 解析 account：seat 有 accountId 则直接用，否则 fallback 到 agent 的自有 account
-    let account = seat.accountId ? store.find("accounts", seat.accountId) : null;
-    if (!account) {
-      account = getOwningAccount(store, seat.agentId);
-    }
+    // 解析 account：4.4 起 Seat 不再携带 accountId（账户归属改登录级或默认 owning
+    // account，见 ground-truth 2.2 修订）。统一走 getOwningAccount。
+    const account = getOwningAccount(store, seat.agentId);
     if (!account) continue;
 
     const adapter = resolveAdapter(account);

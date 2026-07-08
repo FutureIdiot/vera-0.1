@@ -39,11 +39,17 @@ function findLastOwnMarker(messages, agentId) {
 
 // 候选筛选：marker 之后（严格大于；同毫秒按 _seq）且 createdAt 严格小于触发消息（排除
 // 触发自身）的他人气泡。排除该 agent 的自我气泡。Activity / Approval 不读，硬边界。
-function pickCandidates({ messages, marker, agentId, triggerMessage }) {
+// blockAgentIds（seat 上）过滤声告段候选——被 block 的 agent 气泡不进段，等价于对它
+// 单向静默（ground truth 2.3「响应规则统一语义」/ api-contract Space 段）。marker 仍
+// 是该 agent 最后自我发言（不受 blockAgentIds 影响）；定向 @ 穿透 blockAgentIds 是
+// messages.js 那层判定（run 仍创建），编译层这层只过滤声告段。
+function pickCandidates({ messages, marker, agentId, triggerMessage, blockAgentIds }) {
+  const blocked = Array.isArray(blockAgentIds) && blockAgentIds.length > 0 ? new Set(blockAgentIds) : null;
   const candidates = [];
   for (const m of messages) {
     if (m.id === triggerMessage.id) continue; // 双保险，排除触发自身
     if (m.author?.type === "agent" && m.author?.agentId === agentId) continue; // 排除自我气泡
+    if (blocked && m.author?.type === "agent" && blocked.has(m.author.agentId)) continue; // blockAgentIds 过滤
     if (marker) {
       const c = compareCreated(m, marker);
       if (c <= 0) continue; // 必须 > marker
@@ -111,7 +117,12 @@ function buildGroupDelta({ kept, truncated, config, store, agentId }) {
   return [header, ...lines].join("\n");
 }
 
-export async function compilePrompt({ store, space, agent, account, triggerMessage, memory, config }) {
+export async function compilePrompt({ store, space, seat, agent, account, triggerMessage, memory, config }) {
+  // seat 可由调用方传入（messages.js 已知当前 seat），也可由编译层自己从 space.seats
+  // 找——run-controller 不传 seat 时走后者。blockAgentIds 来自 seat。
+  const resolvedSeat = seat ?? (space?.seats ?? []).find((s) => s.agentId === agent.id) ?? null;
+  const blockAgentIds = resolvedSeat?.blockAgentIds ?? null;
+
   const priorSessionState = store.getSessionState(account.id, space.id);
 
   // 常驻索引块：仅 (account, Space) 尚无 sessionState（即将开启全新外部会话）时注入。
@@ -121,7 +132,7 @@ export async function compilePrompt({ store, space, agent, account, triggerMessa
   // 群聊声告段：从 store 临时派生，幂等。
   const spaceMessages = store.list("messages").filter((m) => m.spaceId === space.id);
   const marker = findLastOwnMarker(spaceMessages, agent.id);
-  const candidates = pickCandidates({ messages: spaceMessages, marker, agentId: agent.id, triggerMessage });
+  const candidates = pickCandidates({ messages: spaceMessages, marker, agentId: agent.id, triggerMessage, blockAgentIds });
   const { kept, truncated } = applyLimits({
     candidates,
     maxMessages: config.viewCompiler.groupDeltaMaxMessages,

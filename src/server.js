@@ -15,6 +15,8 @@ import { registerAgentRoutes } from "./agents/routes.js";
 import { registerSpaceRoutes } from "./spaces/routes.js";
 import { createMemoryVault } from "./memory/memory.js";
 import { registerMemoryRoutes } from "./memory/routes.js";
+import { createSettingsStore } from "./core/settings-store.js";
+import { registerSettingsRoutes } from "./api/settings-routes.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 
@@ -70,6 +72,10 @@ router.get("/api/events", ({ req, res }) => {
 registerAgentRoutes(router, { store, agentStates });
 registerSpaceRoutes(router, { store, hub, config, resolveAdapter, agentStates, memory });
 registerMemoryRoutes(router, { memory });
+// 系统设置（Phase 4.5）：独立 settings.json 模块，不进 store.js（避免与 4.3+4.4 并行分支冲突）。
+// boot 顺序：store → hub/agentStates/memory → settingsStore → 路由注册。
+const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
+registerSettingsRoutes(router, { settingsStore });
 
 const server = createServer(async (req, res) => {
   try {
@@ -99,6 +105,7 @@ async function shutdown() {
     }
   }
   await store.close();
+  await settingsStore?.close();
   server.close(() => process.exit(0));
   // SSE 长连接不主动断，server.close 会永远等；强制掐掉存量连接
   server.closeAllConnections?.();

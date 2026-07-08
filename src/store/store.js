@@ -145,14 +145,18 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     const needsAgentStrip = data.agents.some(hasLegacyAgentConnection);
     const owningAccountByAgent = new Map(data.accounts.map((account) => [account.owningAgentId, account]));
     const agentsNeedingAccount = data.agents.filter((agent) => !owningAccountByAgent.has(agent.id));
-    const seatsNeedAccount = data.spaces.some((space) => (space.seats ?? []).some((seat) => !seat.accountId));
+    // 4.4 起 Seat 不再携带 accountId。4.1 曾把 seat.accountId backfill 进所有 spaces；
+    // 这里检测是否还有 seats 上残留 accountId 字段，有则触发一次性剥离（反迁移）。
+    const seatsNeedAccountIdStripped = data.spaces.some((space) =>
+      (space.seats ?? []).some((seat) => Object.prototype.hasOwnProperty.call(seat, "accountId")),
+    );
     const sessionKeys = Object.keys(data.sessionStates);
     const sessionKeysNeedRemap = sessionKeys.some((key) => {
       const [first] = key.split(":");
       return first?.startsWith("agt_");
     });
 
-    if (!needsAgentStrip && agentsNeedingAccount.length === 0 && !seatsNeedAccount && !sessionKeysNeedRemap) {
+    if (!needsAgentStrip && agentsNeedingAccount.length === 0 && !seatsNeedAccountIdStripped && !sessionKeysNeedRemap) {
       return;
     }
 
@@ -197,11 +201,15 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
 
     data.agents = data.agents.map(stripAgentConnection);
 
+    // 4.4 反迁移：剥掉 seats 上的 accountId 字段（4.1 backfill 的旧值一次性清理）。
+    // accountId === undefined 在 JSON 序列化时会被丢掉，seats 里不再有该字段。
+    // session-states 键不动——仍按 (accountId, spaceId)，accountId 默认来自
+    // deriveOwningAccountId(seat.agentId)。
     data.spaces = data.spaces.map((space) => ({
       ...space,
-      seats: (space.seats ?? []).map((seat) => ({
-        ...seat,
-        accountId: seat.accountId ?? accountIdForAgent(seat.agentId),
+      seats: (space.seats ?? []).map(({ accountId, ...seatRest }) => ({
+        ...seatRest,
+        accountId: undefined,
       })),
     }));
 
