@@ -95,6 +95,8 @@ Account = 供应商连接 + 项目/会话上下文，随账户不随 agent。
 
 **Speaker view 编译层输出契约**（ground truth 2.3「群聊视角注入形态」）：触发某 agent 的 run 时，gateway 的编译层（`src/spaces/view-compiler.js`，Phase 4.2）从 `messages.json` 临时派生 `ctx.prompt.text`——该 agent 上次本人发言（找其最后一次 assistant 气泡的 createdAt）之后到当前触发之间的他人 message 气泡，按时间穿插聚合成署名声告段（不伪装一对一 user 历史轮次）；Activity 不进任何 prompt（ground truth 2.3 发言与过程边界）。`silent/focused/blockAgentIds` 统一在此层过滤：被过滤的气泡不进段，等价于不触发 run。编译层无状态——每次 run 临时查 store 派生，不维护"已投递水位"。CLI 与 API adapter 共享同一份 promptText 输出，各自翻译成协议帧（见 adapter-interface.md「编译层契约」）。
 
+**prompt.text 物理拼装顺序**：`[常驻索引块]?\n\n[群聊声告段]?\n\n[触发消息正文]`，三段以 `\n\n` 分隔，缺哪段哪段连同其后的空行一起省略，不留前导/尾部空行；最终 text 永远至少含触发消息正文（非空字符串）。常驻索引块与群聊声告段是**两段严格分开的头部**：常驻索引是稳定前缀（仅在该 (account, Space) 尚无 sessionState 即首次新会话时注入一次，换代时不逐条刷新），群聊声告是每轮刷新的 volatile 段（仅在该 agent 上次本人发言之后到当前触发之间存在他人气泡时出现；无候选则整段连同 header 省略）。群聊声告段内格式固定 `=== 群内最近发言 ===\n- <署名>: <气泡正文>\n…`，署名取 `config.viewCompiler.groupDeltaUserLabel`（用户）或 agent.name（agent）；段内条数/总字符数达上限时从最早开始截断，发生截断时在 header 行后插一行 `config.viewCompiler.groupDeltaOmittedHint`。配置项默认值见 `src/core/config.js` 的 `viewCompiler` 节点：`groupDeltaMaxMessages: 20`、`groupDeltaMaxChars: 4000`、`groupDeltaHeader: "=== 群内最近发言 ==="`、`groupDeltaUserLabel: "用户"`、`groupDeltaOmittedHint: "（更早的发言数量已达上限，可用 fetch_detail 主动调阅）"`，env 对应 `VERA_VIEW_COMPILER_GROUP_DELTA_*`。
+
 ### Message
 
 ```json

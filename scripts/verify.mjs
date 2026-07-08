@@ -14,7 +14,7 @@ import net from "node:net";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { mkdtemp, rm, writeFile, stat } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, stat, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -548,8 +548,19 @@ async function main() {
 
   let approvalId;
   let approveRunId;
+  let hApproveSpace;
   await check("h. '!!approve' trigger word raises approval.requested", async () => {
-    const { status, json } = await httpRequest("POST", `/api/spaces/${space.id}/messages`, {
+    // 用独立 space：编译层（Phase 4.2）会把同 space 历史 user msg 注入声告段，
+    // 若同 space 之前发过含 "!!error" 的消息，声告段会带上 "!!error" 让 mock 误
+    // 触发 provider_error。新 space 无历史 → 声告段为空 → prompt.text 只含 trigger，
+    // 与 4.1 前行为一致；测试意图（trigger 含 "!!approve" 触发 approval）不变。
+    const sp = await httpRequest("POST", "/api/spaces", {
+      name: "h-approve-space",
+      seats: [{ agentId: agent.id, responseMode: "default" }],
+    });
+    assertEqual(sp.status, 201);
+    hApproveSpace = sp.json.space;
+    const { status, json } = await httpRequest("POST", `/api/spaces/${hApproveSpace.id}/messages`, {
       author: { type: "user" },
       target: { type: "broadcast" },
       content: "deploy it !!approve",
@@ -579,7 +590,14 @@ async function main() {
 
   // ---- i. 取消在飞 run ----
   await check("i. POST /api/runs/:id/cancel cancels an in-flight run", async () => {
-    const { status, json } = await httpRequest("POST", `/api/spaces/${space.id}/messages`, {
+    // 独立 space：避免声告段带入历史触发词污染 mock 行为（同 h-approve 注释）。
+    const sp = await httpRequest("POST", "/api/spaces", {
+      name: "i-cancel-space",
+      seats: [{ agentId: agent.id, responseMode: "default" }],
+    });
+    assertEqual(sp.status, 201);
+    const cancelSpace = sp.json.space;
+    const { status, json } = await httpRequest("POST", `/api/spaces/${cancelSpace.id}/messages`, {
       author: { type: "user" },
       target: { type: "broadcast" },
       content: "long running task for cancel test",
@@ -609,7 +627,10 @@ async function main() {
 
   // ---- j. timeline 分页 + 三种 itemType ----
   await check("j. GET timeline includes message/activity/approval itemTypes", async () => {
-    const { status, json } = await httpRequest("GET", `/api/spaces/${space.id}/timeline?limit=500`);
+    // 用 hApproveSpace：那里跑过一次完整的 !!approve run，含 message + activity +
+    // approval 三种 itemType。verify-space 没有 approval（h-approve 改独立 space 后
+    // approval 不在那里），j.pagination 那条仍用 verify-space 验分页不重复。
+    const { status, json } = await httpRequest("GET", `/api/spaces/${hApproveSpace.id}/timeline?limit=500`);
     assertEqual(status, 200);
     assert(Array.isArray(json.items), "timeline response should have items array");
     const types = new Set(json.items.map((i) => i.itemType));
@@ -918,6 +939,271 @@ async function main() {
       });
       await rm(migDir, { recursive: true, force: true });
     }
+  });
+
+  // ---- l. Speaker view 编译层（Phase 4.2）----
+  // 编译层契约（ground truth 2.3 / api-contract.md「Speaker view 编译层输出契约」）：
+  // 群聊声告段从 messages.json 临时派生、每轮刷新、无状态；Activity 永不进 prompt；
+  // 常驻索引块仅随新 (account, Space) 首次注入。mock adapter 把 prompt.text 原样 echo
+  // 进回复（mock-adapter.js line 55），所以断言走"agent reply content 里能否看到
+  // 编译层拼出的片段"。
+
+  let agentB;
+  let l1Space;
+  let l1AgentBReplyContent = null;
+
+  await check("l.1 群聊声告段：被 @ 的 agentB echo reply 含他人署名", async () => {
+    // 建 agentB（default），在 l1Space 加 agent + agentB 两个 seat。
+    const agentBResp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockB",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentBResp.status, 201);
+    agentB = agentBResp.json.agent;
+
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "l1-space",
+      seats: [
+        { agentId: agent.id, responseMode: "default" },
+        { agentId: agentB.id, responseMode: "default" },
+      ],
+    });
+    assertEqual(spaceResp.status, 201);
+    l1Space = spaceResp.json.space;
+
+    // 先发 direct @agent 的 user msg（agent 跑，agentB 不响应）
+    const l1UserMsg1Content = "l.1 第一条用户消息 @agent";
+    const post1 = await httpRequest("POST", `/api/spaces/${l1Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agent.id] },
+      content: l1UserMsg1Content,
+    });
+    assertEqual(post1.status, 201);
+    assertEqual(post1.json.runs.length, 1, "only @agent should respond to direct @agent");
+    assertEqual(post1.json.runs[0].agentId, agent.id);
+
+    // 等 agent 完成 reply1
+    const runEnded1 = await sse.waitFor(
+      (e) => e.type === "run.ended" && e.data.run.id === post1.json.runs[0].id,
+      10000,
+    );
+    assertEqual(runEnded1.data.run.status, "completed");
+
+    // 再发 direct @agentB 的 user msg → agentB 跑
+    const post2 = await httpRequest("POST", `/api/spaces/${l1Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agentB.id] },
+      content: "l.1 第二条 @agentB 触发",
+    });
+    assertEqual(post2.status, 201);
+    assertEqual(post2.json.runs.length, 1, "only @agentB should respond to direct @agentB");
+    assertEqual(post2.json.runs[0].agentId, agentB.id);
+
+    const runEnded2 = await sse.waitFor(
+      (e) => e.type === "run.ended" && e.data.run.id === post2.json.runs[0].id,
+      10000,
+    );
+    assertEqual(runEnded2.data.run.status, "completed");
+    const replyIds2 = runEnded2.data.run.replyMessageIds;
+    l1AgentBReplyContent = sse.events
+      .filter((e) => e.type === "message.completed" && replyIds2.includes(e.data.message.id))
+      .map((e) => e.data.message.content)
+      .join(" ");
+
+    // agentB 从未说过话，marker=null，delta=全部他人 bubbles < 触发 = [user-msg1, agent reply1]
+    // 1. 含 "=== 群内最近发言 ==="
+    assert(
+      l1AgentBReplyContent.includes("=== 群内最近发言 ==="),
+      `expected group delta header in agentB reply, got: ${l1AgentBReplyContent}`,
+    );
+    // 2. 含 "- 用户: " 且后接 user-msg1 正文片段
+    assert(
+      l1AgentBReplyContent.includes(`- 用户: ${l1UserMsg1Content}`),
+      `expected user signature with msg1 content, got: ${l1AgentBReplyContent}`,
+    );
+    // 3. 含 "- " + agent.name + ": " 且后接 agent reply1 正文的可识别子串（如 "回声第 N 次"）
+    const sig = `- ${agent.name}: `;
+    const sigIdx = l1AgentBReplyContent.indexOf(sig);
+    assert(sigIdx !== -1, `expected agent ${agent.name} signature line, got: ${l1AgentBReplyContent}`);
+    const afterSig = l1AgentBReplyContent.slice(sigIdx + sig.length);
+    assert(/回声第 \d+ 次/.test(afterSig), `expected echo counter after agent signature, got: ${afterSig}`);
+  });
+
+  await check("l.2 Activity 不进 prompt：agentB echo reply 不含 '5 passed'，timeline 有该 activity", async () => {
+    // 紧接 l.1：mock 的 run 会发一条 phase:tool label:bash detail 含 "5 passed" 的
+    // activity（mock-adapter.js line 71–72），createdAt 介于两条触发之间。断言
+    // agentB 的 echo reply 不含 "5 passed"。阳性对照：timeline GET 确认该 activity 存在。
+    assert(l1AgentBReplyContent, "l.1 must have captured agentB reply content first");
+    assert(
+      !l1AgentBReplyContent.includes("5 passed"),
+      `agentB echo reply must not contain '5 passed' (Activity must not leak into prompt), got: ${l1AgentBReplyContent}`,
+    );
+
+    const tl = await httpRequest("GET", `/api/spaces/${l1Space.id}/timeline?limit=500`);
+    assertEqual(tl.status, 200);
+    const hasActivity = tl.json.items.some(
+      (i) => i.itemType === "activity" && (i.detail ?? "").includes("5 passed"),
+    );
+    assert(hasActivity, `timeline should contain an activity with '5 passed' detail (positive control)`);
+  });
+
+  await check("l.3 常驻索引块仅首次注入", async () => {
+    // 预埋：在 VERA_MEMORY_VAULT_PATH 下 writeFile 一个 decision-test.md，
+    // frontmatter 含 type/description/status:active。
+    const vaultPath = join(dataDir, "memory");
+    await mkdir(vaultPath, { recursive: true });
+    const decisionFile = `---
+type: decision
+description: 测试常驻索引注入
+status: active
+stains: {}
+createdAt: 2026-07-08T00:00:00.000Z
+updatedAt: 2026-07-08T00:00:00.000Z
+---
+
+测试正文
+`;
+    await writeFile(join(vaultPath, "decision-test.md"), decisionFile, "utf8");
+
+    // 建专用 agent+space
+    const agentCResp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockC",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentCResp.status, 201);
+    const agentC = agentCResp.json.agent;
+
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "l3-space",
+      seats: [{ agentId: agentC.id, responseMode: "default" }],
+    });
+    assertEqual(spaceResp.status, 201);
+    const l3Space = spaceResp.json.space;
+
+    // 第一条 broadcast → run echo reply 含 "Vera 记忆库常驻索引" 且含 "[[decision-test]]"
+    const post1 = await httpRequest("POST", `/api/spaces/${l3Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "broadcast" },
+      content: "l.3 第一条 broadcast",
+    });
+    assertEqual(post1.status, 201);
+    const runEnded1 = await sse.waitFor(
+      (e) => e.type === "run.ended" && e.data.run.id === post1.json.runs[0].id,
+      10000,
+    );
+    assertEqual(runEnded1.data.run.status, "completed");
+    const reply1 = sse.events
+      .filter((e) => e.type === "message.completed" && runEnded1.data.run.replyMessageIds.includes(e.data.message.id))
+      .map((e) => e.data.message.content)
+      .join(" ");
+    assert(/Vera 记忆库常驻索引/.test(reply1), `first reply should contain resident index header, got: ${reply1}`);
+    assert(/\[\[decision-test\]\]/.test(reply1), `first reply should contain [[decision-test]], got: ${reply1}`);
+
+    // 第二条 broadcast → run echo reply 不含 "Vera 记忆库常驻索引"（已存在 sessionState 不再注入）
+    const post2 = await httpRequest("POST", `/api/spaces/${l3Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "broadcast" },
+      content: "l.3 第二条 broadcast",
+    });
+    assertEqual(post2.status, 201);
+    const runEnded2 = await sse.waitFor(
+      (e) => e.type === "run.ended" && e.data.run.id === post2.json.runs[0].id,
+      10000,
+    );
+    assertEqual(runEnded2.data.run.status, "completed");
+    const reply2 = sse.events
+      .filter((e) => e.type === "message.completed" && runEnded2.data.run.replyMessageIds.includes(e.data.message.id))
+      .map((e) => e.data.message.content)
+      .join(" ");
+    assert(
+      !/Vera 记忆库常驻索引/.test(reply2),
+      `second reply should NOT contain resident index header (sessionState already set), got: ${reply2}`,
+    );
+  });
+
+  await check("l.4 上限截断 hint 出现", async () => {
+    // 构造 30 条以上 user message + 5 条以上 agent reply，触发从未发言的新 agent 的 run，
+    // 断言其 echo reply 含 "可用 fetch_detail 主动调阅"。
+    // 实现路径：新 space 双 seat（agent=default 跑 broadcast，newAgent=focused 只响应 direct @）。
+    // 5 次 broadcast 产出 5 user msg + 5 agent reply；25 次 direct @ 不存在 agent 产出 25 user msg
+    // 不触发 run。最后 direct @ newAgent 触发，candidates = 5 broadcast + 10 agent reply 气泡
+    // + 25 direct = 40 > 20 条上限，截断 hint 出现。
+    const newAgentResp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockD",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(newAgentResp.status, 201);
+    const newAgent = newAgentResp.json.agent;
+
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "l4-space",
+      seats: [
+        { agentId: agent.id, responseMode: "default" },
+        { agentId: newAgent.id, responseMode: "focused" },
+      ],
+    });
+    assertEqual(spaceResp.status, 201);
+    const l4Space = spaceResp.json.space;
+
+    // 5 次 broadcast（agent 跑，newAgent focused 不响应）
+    const broadcastRunIds = [];
+    for (let i = 0; i < 5; i += 1) {
+      const post = await httpRequest("POST", `/api/spaces/${l4Space.id}/messages`, {
+        author: { type: "user" },
+        target: { type: "broadcast" },
+        content: `l.4 broadcast 消息编号 ${i} ${"x".repeat(40)}`,
+      });
+      assertEqual(post.status, 201);
+      assertEqual(post.json.runs.length, 1, "only default-mode agent should respond to broadcast");
+      broadcastRunIds.push(post.json.runs[0].id);
+    }
+    // 等 5 个 run 都结束
+    await Promise.all(
+      broadcastRunIds.map((rid) => sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === rid, 15000)),
+    );
+
+    // 25 次 direct @ 不存在 agent（不触发 run，只创建 user msg）
+    for (let i = 0; i < 25; i += 1) {
+      const post = await httpRequest("POST", `/api/spaces/${l4Space.id}/messages`, {
+        author: { type: "user" },
+        target: { type: "direct", agentIds: ["agt_nonexistent"] },
+        content: `l.4 direct 消息编号 ${i}`,
+      });
+      assertEqual(post.status, 201);
+      assertEqual(post.json.runs.length, 0, "direct @ nonexistent agent should not trigger run");
+    }
+
+    // direct @ newAgent → newAgent 跑（从未发言，marker=null）
+    const triggerPost = await httpRequest("POST", `/api/spaces/${l4Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [newAgent.id] },
+      content: "l.4 触发 newAgent",
+    });
+    assertEqual(triggerPost.status, 201);
+    assertEqual(triggerPost.json.runs.length, 1);
+
+    const runEnded = await sse.waitFor(
+      (e) => e.type === "run.ended" && e.data.run.id === triggerPost.json.runs[0].id,
+      10000,
+    );
+    assertEqual(runEnded.data.run.status, "completed");
+    const newAgentReply = sse.events
+      .filter((e) => e.type === "message.completed" && runEnded.data.run.replyMessageIds.includes(e.data.message.id))
+      .map((e) => e.data.message.content)
+      .join(" ");
+    assert(
+      newAgentReply.includes("可用 fetch_detail 主动调阅"),
+      `expected truncation hint in newAgent reply, got: ${newAgentReply}`,
+    );
   });
 
   console.log("");

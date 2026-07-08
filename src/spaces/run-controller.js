@@ -11,6 +11,7 @@ import { newRunId, newActivityId } from "../core/id.js";
 import { AdapterError } from "../core/errors.js";
 import { createBubbleStream } from "./bubble-stream.js";
 import { requestApproval as requestApprovalRecord, expirePendingApprovalsForRun } from "./approvals.js";
+import { compilePrompt } from "./view-compiler.js";
 
 const abortControllers = new Map(); // runId -> AbortController
 const runQueues = new Map(); // `${accountId}:${spaceId}` -> 队尾 promise。同一
@@ -65,9 +66,11 @@ export function executeRun({ store, hub, config, agent, account, space, triggerM
     // 常驻索引只在该 (account, Space) 尚无已持久化 sessionState 时前置注入
     // （即将开启全新外部会话）——api-contract.md「常驻索引注入」：只随新会话
     // 换代，不逐条消息刷新。已有 sessionState 的后续消息不重复注入。
-    const priorSessionState = store.getSessionState(account.id, spaceId);
-    const residentBlock = priorSessionState === null ? await memory?.residentIndex() : null;
-    const promptText = residentBlock ? `${residentBlock}\n\n${triggerMessage.content}` : triggerMessage.content;
+    // 群聊声告段（ground truth 2.3）也在编译层一起拼好——编译层无状态，每轮
+    // 临时查 messages 派生 delta。
+    const { text: promptText, sessionState: priorSessionState } = await compilePrompt({
+      store, space, agent, account, triggerMessage, memory, config,
+    });
 
     const bubbles = createBubbleStream({ store, hub, config, spaceId, runId: storedRun.id, agentId: agent.id });
     const activityIndex = new Map(); // callId -> activity id

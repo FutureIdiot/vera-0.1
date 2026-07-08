@@ -36,6 +36,15 @@ const DEFAULTS = {
     vaultPath: "~/.vera/memory", // Obsidian 兼容 vault，仓库外（api-contract.md Memory 一节）
     residentIndexMaxLines: 25, // 常驻索引截断行数
   },
+  // Speaker view 编译层（ground truth 2.3 / api-contract.md「Speaker view 编译层输出契约」）：
+  // 群聊声告段从 messages.json 临时派生，每轮刷新、无状态。下列参数硬性约束段上限与署名呈现。
+  viewCompiler: {
+    groupDeltaMaxMessages: 20, // 单次声告段最大条数（超出从最早开始截断）
+    groupDeltaMaxChars: 4000, // 单次声告段累计字符上限（同上）
+    groupDeltaHeader: "=== 群内最近发言 ===",
+    groupDeltaUserLabel: "用户",
+    groupDeltaOmittedHint: "（更早的发言数量已达上限，可用 fetch_detail 主动调阅）",
+  },
   agentDaemon: {
     heartbeatIntervalMs: 15000, // gateway 在 agent SSE 通道上发 agent.heartbeat 的间隔
     tokensPath: "~/.vera/agent-tokens.json", // agent token 文件（身份层 token，{ "agt_xxx": "<long-random>" }）
@@ -89,6 +98,13 @@ export function loadConfig(env = process.env) {
     memory: {
       vaultPath: expandHome(env.VERA_MEMORY_VAULT_PATH || DEFAULTS.memory.vaultPath),
       residentIndexMaxLines: num(env.VERA_MEMORY_INDEX_MAX_LINES, DEFAULTS.memory.residentIndexMaxLines),
+    },
+    viewCompiler: {
+      groupDeltaMaxMessages: num(env.VERA_VIEW_COMPILER_GROUP_DELTA_MAX_MESSAGES, DEFAULTS.viewCompiler.groupDeltaMaxMessages),
+      groupDeltaMaxChars: num(env.VERA_VIEW_COMPILER_GROUP_DELTA_MAX_CHARS, DEFAULTS.viewCompiler.groupDeltaMaxChars),
+      groupDeltaHeader: env.VERA_VIEW_COMPILER_GROUP_DELTA_HEADER || DEFAULTS.viewCompiler.groupDeltaHeader,
+      groupDeltaUserLabel: env.VERA_VIEW_COMPILER_GROUP_DELTA_USER_LABEL || DEFAULTS.viewCompiler.groupDeltaUserLabel,
+      groupDeltaOmittedHint: env.VERA_VIEW_COMPILER_GROUP_DELTA_OMITTED_HINT || DEFAULTS.viewCompiler.groupDeltaOmittedHint,
     },
     agentDaemon: {
       heartbeatIntervalMs: num(env.VERA_AGENT_HEARTBEAT_INTERVAL_MS, DEFAULTS.agentDaemon.heartbeatIntervalMs),
