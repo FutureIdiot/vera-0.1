@@ -67,7 +67,7 @@ CF-Access-Client-Secret: <service-token-secret>
   "agent": { …Agent… },
   "account": { …Account… },
   "seats": [
-    { "spaceId": "spc_…", "agentId": "agt_…", "accountId": "acc_…", "responseMode": "default", "respondTo": ["user"], "blockAgentIds": [] }
+    { "spaceId": "spc_…", "agentId": "agt_…", "responseMode": "default", "respondTo": ["user"], "blockAgentIds": [] }
   ],
   "sessionStates": {
     "acc_…:spc_…": <opaque>

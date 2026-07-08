@@ -43,10 +43,11 @@ Vera是单用户、自部署的多agent协作空间。
 | 位置 | API → 供应商 + Key；CLI → 供应商 + 调用路径 |
 | 模型名 | 当前使用的底层模型 |
 | 会话/项目上下文 | 供应商侧的会话连续性与项目数据，随账户不随agent |
+| 密钥授权 | `authorizedAgentIds`：该账户授权哪些 agent 使用其明文密钥/key（默认仅 `[owningAgentId]`）。不在名单的 agent 拿不到该账户的明文 key → 无法以该账户的供应商身份通信。CLI 型 key 不由 Vera 持有，此字段对 CLI 型不生效——CLI key 的物理边界靠 agent daemon 所在机器的访问控制。Phase 5.5 落地 |
 
 **说明：**
 - 每个agent注册时自带一个账户，日常一对一使用
-- 必要时一个agent可登录别人的账户管理其项目：项目/会话上下文随账户走，记忆随驾驶的agent走；换驾驶员开新会话，记忆索引按驾驶者注入（不产生双份注入，无token浪费）
+- **agent 当前驾驶哪个 account 由 agent daemon 登录时声明**（联邦形态 ground truth 2.4）。日常=自己那个 owning account；要换账户驾驶=daemon 重登一次显式声明新的 account。**不再按 Space 覆盖**：Seat 形状不再携带 `accountId` 字段，账户归属是登录级而非 Space 级。记忆随 agent 身份走（不随 account 走）；供应商侧会话上下文随 account 走，切账户开新外部会话。要授权别的 agent 使用某 account，在该 account 的 `authorizedAgentIds` 名单里加它（见上"密钥授权"行）
 - 换Key、换供应商、换模型改的是账户，agent身份与记忆不变
 - CLI供应商示例：Claude Code、Codex、OpenCode等；调用路径示例：build路径、`opencode go`
 - 命名纪律：Account与Agent是两个不同概念各占一名，不是同一事物的别名（旧repo的accounts↔agents双名教训）。Phase 2–3的实现两者合在一条agent记录里，拆分随Phase 4落地
@@ -104,6 +105,7 @@ Vera是单用户、自部署的多agent协作空间。
 
 - **外部**：Cloudflare Access Service Token（`CF-Access-Client-Id` / `CF-Access-Client-Secret` 头），所有 agent 复用一对，过 Cloudflare 那道门不走邮件 OTP。Zero Trust 面板只放行 `vera.futureidiot.com/api/agent/*` 路径前缀。
 - **身份**：Vera agent token（长随机串，VPS 上 `~/.vera/agent-tokens.json`，gateway 启动加载校验），per-agent 一条，daemon 请求带 `Authorization: Bearer <token>` 通过 `/api/agent/*` 时 gateway 识别"我是 agt_xxx 在说话"。Service Token 泄漏不会越权——还得有 agent token 才能冒充具体 agent。
+- **密钥授权闸门**（Phase 5.5）：daemon 用 agent token 向 gateway 换取自己驾驶的 account 的明文密钥时，gateway 按两层判定：*(1)* token 映射的 agentId 是否在目标 account 的 `authorizedAgentIds` 名单里（默认只含 owningAgentId），不在则 403；*(2)* CLI 型 account 不经此闸——key 在 daemon 所在机器的供应商认证文件里，Vera 不持有。这条闸门让"agent 之间能否互相使用对方的账户"完全由用户在前端配置名单决定，daemon 无路径越权。
 
 **AgentState 改 per-Space**（联邦形态必需的精化）：
 

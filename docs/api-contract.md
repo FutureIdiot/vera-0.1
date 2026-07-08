@@ -59,12 +59,14 @@ Account = 供应商连接 + 项目/会话上下文，随账户不随 agent。
   "model": "zai/glm-5.2",
   "presence": "offline",
   "lastSeenAt": "2026-07-04T10:58:00.000Z",
+  "authorizedAgentIds": ["agt_x1y2"],
   "createdAt": "…",
   "updatedAt": "…"
 }
 ```
 
-- `owningAgentId`：该账户的主人 agent；驾驶他人账户时 seat 上的 `accountId` 指向别人的 account，但 `run` 仍记 `agentId`（记忆随驾驶者走，外部会话随被驾驶的 account 走）。
+- `owningAgentId`：该账户的主人 agent。**agent 当前驾驶哪个 account 由 agent daemon 登录时显式声明**（联邦形态 ground truth 2.4）；默认走自己的 owning account，要换账户=daemon 重登一次。**Seat 不再携带 `accountId` 字段**（账户归属是登录级而非 Space 级，见 Space 段）。`run` 仍记 `agentId`（记忆随 agent 身份走，外部会话随被驾驶的 account 走）。
+- `authorizedAgentIds: ["agt_…"]` `[P5.5]`：授权哪些 agent 以明文密钥使用该账户与供应商通信（默认仅 `[owningAgentId]`）。CLI 型账户 key 不经 gateway 持有故不适用。daemon 用 agent token 向 gateway 换 key 时 gateway 按 `agentId ∩ authorizedAgentIds` 判定，不在名单的 token 拿不到 key（403）。在前端配置此名单=用户决定哪些 agent 可互用哪些账户。
 - `kind: "cli"` 时 `connection.command/args` 有效；`kind: "api"` 时 `connection.secretRef` 有效。
 - `model` 为空串 = 使用该供应商默认模型（CLI 型 adapter 不传 `-m` 类参数）。
 - secret 永不出现在响应里；`connection` 里只用 `secretRef` 引用 `~/.vera/secrets.json` 中的键名。
@@ -72,6 +74,8 @@ Account = 供应商连接 + 项目/会话上下文，随账户不随 agent。
 - **联邦形态遗留说明**：`connection.command` 字段在 ground truth 2.4 联邦形态下从语义上已无意义（gateway 不 spawn CLI，路径是 agent daemon 的事），但 v1 形状保留以兼容 4.1 已落代码；Phase 5.5 联邦实现时该字段不再被任何代码读取，可在前端管理界面隐藏。
 
 **v0 / v1 兼容说明（仅限 Phase 4 一次迁移）**：v0 agent 记录里内嵌的 `kind/provider/connection/model` 由 store 启动时迁移到新建的 owning account；v0 的 `session-states.json` 键 `${agentId}:${spaceId}` 重映射为 `${accountId}:${spaceId}`（用各 agent 的自有 account）。迁移幂等，旧文件留 `.legacy`。此后 Agent 与 Account 是两条独立路径，不再有"内嵌字段"形态。
+
+**v1 → Seat 去 accountId 一次性迁移（Phase 4.4）**：4.1 落地的 `seat.accountId` 字段废弃——账户归属改为 daemon 登录级（联邦）或 owning account（Phase 4 期间）。store 启动时清理所有 spaces 下 seats 上的 `accountId` 字段，session-states 键**不动**（仍按 `(accountId, spaceId)`，默认 accountId = 派生 owning account id）。4.1 那条 backfill `seat.accountId` 的迁移逻辑同时撤掉。
 
 ### Space
 
@@ -81,15 +85,15 @@ Account = 供应商连接 + 项目/会话上下文，随账户不随 agent。
   "name": "vera-dev",
   "topic": "Vera 0.0.1 开发",
   "seats": [
-    { "agentId": "agt_x1y2", "accountId": "acc_a1b2", "responseMode": "default" }
+    { "agentId": "agt_x1y2", "responseMode": "default" }
   ],
   "createdAt": "…"
 }
 ```
 
 - `seat.agentId`：在该 Space 上以哪个身份出席。
-- `seat.accountId`：该席位当前驾驶哪个 account。缺省 = 该 agent 的**自有 account**（日常一对一形态）；指向别人的 account 即"开别人的账户做别人的项目"。
 - `seat.responseMode`（per-agent per-Space，ground truth 2.3）：`default`（都响应）/ `silent`（只响应指定来源的 @）/ `focused`（只响应 @自己）。定向 @ 到的 agent 一律响应，不受 responseMode 影响。
+- **Seat 不携带 `accountId`**（Phase 4.4 调整）：agent 驾驶哪个 account 是登录级决定（联邦 daemon login 声明，见 Account 段）或默认 owning account（Phase 4 期间），不再 per-Space 覆盖。
 - `silent` 的来源过滤字段 `respondTo: ["user", "agt_..."]` 挂在 seat 上（成员为 `"user"` 或 `agt_` id）；Phase 4 落地，落地前 silent 对定向 @ 等价 focused。
 - `seat.blockAgentIds: ["agt_…"]`（Phase 4.3，可选）：屏蔽名单——名单里 agent 的气泡不进该 agent 的群聊视角 prompt 段，等价于对它单向静默。定向 @ 仍穿透屏蔽（用户拥有最终决策权，ground truth 2.3）。
 
