@@ -46,7 +46,9 @@ test("persists split files to the data dir and reloads on next createStore call"
   await withTempDataDir(async (dataPath) => {
     const store = await createStore({ dataPath, debounceMs: 10 });
     store.insert("spaces", { id: "spc_1", name: "vera-dev" });
-    store.setSessionState("agt_1", "spc_1", { count: 7 });
+    // session-states 键按 (accountId, spaceId) 存（4.1 起），用 acc_ 前缀避免
+    // 触发启动迁移把 agt_ 键重映射到 acc_。
+    store.setSessionState("acc_1", "spc_1", { count: 7 });
     store.setEventSeqWatermark(123);
     await store.close(); // flush
 
@@ -58,7 +60,7 @@ test("persists split files to the data dir and reloads on next createStore call"
     const found = reloaded.find("spaces", "spc_1");
     assert.ok(found, "space should survive reload");
     assert.equal(found.name, "vera-dev");
-    assert.deepEqual(reloaded.getSessionState("agt_1", "spc_1"), { count: 7 });
+    assert.deepEqual(reloaded.getSessionState("acc_1", "spc_1"), { count: 7 });
     assert.equal(reloaded.getEventSeqWatermark(), 123);
     await reloaded.close();
   });
@@ -114,7 +116,9 @@ test("migration a: dataPath pointing at a legacy single file becomes a split dir
     // 老数据完整迁入
     assert.equal(store.find("agents", "agt_old").name, "Iota");
     assert.equal(store.find("messages", "msg_old").content, "老数据");
-    assert.deepEqual(store.getSessionState("agt_old", "spc_x"), { externalSessionId: "ses_legacy" });
+    // 4.1 起 session-states 键按 (accountId, spaceId) 存，启动迁移把 agt_old
+    // 重映射到派生 account id acc_old（deriveOwningAccountId）。
+    assert.deepEqual(store.getSessionState("acc_old", "spc_x"), { externalSessionId: "ses_legacy" });
     assert.equal(store.getEventSeqWatermark(), 42);
     assert.equal(store.insert("runs", { id: "run_new" })._seq, 6, "_seq 从旧值继续");
 

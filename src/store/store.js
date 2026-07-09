@@ -5,9 +5,13 @@
 // 防 memory、profile 等数据增长后混存一个大 JSON。脏跟踪按文件：只重写发生
 // 变化的文件（插一条 message 只写 messages.json + meta.json）。
 //
-// 旧单文件形态启动时自动迁移（只发生一次，legacy 文件保留不删）：
-//   a. dataPath 指向已存在的文件 → 改名 <path>.legacy → 原路径建目录 → 写分文件
-//   b. dataPath 是目录且内有 store.json → 写分文件 → 改名 store.json.legacy
+// 迁移拆分在 src/store/migrations/：
+//   - legacy-single-file.mjs：旧单文件 → 分文件的根级骨架（a/b 两类入口 +
+//     崩溃回灌）；详见该模块顶部注释
+//   - agent-account.mjs：分文件数据形状迁移（4.1 agent 连接字段拆 account +
+//     session-states 键重映射；4.4 seat.accountId 剥离）；详见该模块顶部注释
+// 本文件只保留读写层（集合内存结构 + flush）+ 启动加载协调（按检测结果调用
+// 上述两模块的入口）。
 //
 // 崩溃安全：meta.json 在 flush 中最后写，它的存在即「分文件形态完整」的标记。
 //   - 迁移 a 在 rename 之后、分文件写完之前崩溃 → 重启时目录内无 meta.json
@@ -19,8 +23,20 @@
 // 时序的场景；对外输出前调用方需自行剥离（各 domain 模块的 stripInternal）。
 // 这是 store 唯一知道的“排序”概念，store 本身不理解 itemType/timeline 语义。
 
-import { copyFile, readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  readJsonIfExists,
+  fileExists,
+  adoptLegacyIntoData,
+  detectLegacySingleFile,
+  renameLegacyAside,
+} from "./migrations/legacy-single-file.mjs";
+import {
+  needsMigration,
+  migrateAgentAccountsAndSeats,
+  backupSplitFilesAsLegacy,
+} from "./migrations/agent-account.mjs";
 
 const COLLECTIONS = ["agents", "accounts", "spaces", "messages", "activities", "approvals", "runs"];
 
@@ -37,44 +53,6 @@ function emptyData() {
   return data;
 }
 
-async function readJsonIfExists(path) {
-  let raw;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return null;
-    throw err;
-  }
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    // 响亮失败，且报错带上是哪个文件坏了（裸 SyntaxError 无从排查）
-    throw new Error(`store 文件损坏（JSON 解析失败）：${path}：${err.message}`);
-  }
-}
-
-async function fileExists(path) {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function deriveOwningAccountId(agentId) {
-  const suffix = String(agentId || "").startsWith("agt_") ? String(agentId).slice(4) : String(agentId || "unknown");
-  return `acc_${suffix.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-}
-
-function hasLegacyAgentConnection(agent) {
-  return ["kind", "provider", "connection", "model"].some((key) => Object.prototype.hasOwnProperty.call(agent, key));
-}
-
-function stripAgentConnection(agent) {
-  const { kind, provider, connection, model, ...identity } = agent;
-  return identity;
-}
-
 export async function createStore({ dataPath, debounceMs = 200 } = {}) {
   if (!dataPath) throw new Error("createStore requires dataPath");
 
@@ -83,6 +61,8 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
   let writeTimer = null;
 
   const fileFor = (key) => join(dataPath, FILE_NAMES[key]);
+  const storeJsonPath = join(dataPath, "store.json");
+  const siblingLegacyPath = `${dataPath}.legacy`; // 迁移 a 的让位文件
 
   function serialize(key) {
     if (key === "meta") return { _seq: data._seq, eventSeqWatermark: data.eventSeqWatermark };
@@ -123,7 +103,11 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
   }
 
   function markDirty(key) {
-    dirty.add(key);
+    if (Array.isArray(key)) {
+      for (const k of key) dirty.add(k);
+    } else {
+      dirty.add(key);
+    }
     scheduleSave();
   }
 
@@ -131,197 +115,72 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     for (const key of Object.keys(FILE_NAMES)) dirty.add(key);
   }
 
-  async function backupExistingSplitFiles(keys) {
-    for (const key of keys) {
-      const path = fileFor(key);
-      if (!(await fileExists(path))) continue;
-      const legacyPath = `${path}.legacy`;
-      if (await fileExists(legacyPath)) continue;
-      await copyFile(path, legacyPath);
-    }
-  }
-
-  async function migrateAgentAccountsIfNeeded({ backupSplitFiles = false } = {}) {
-    const needsAgentStrip = data.agents.some(hasLegacyAgentConnection);
-    const owningAccountByAgent = new Map(data.accounts.map((account) => [account.owningAgentId, account]));
-    const agentsNeedingAccount = data.agents.filter((agent) => !owningAccountByAgent.has(agent.id));
-    // 4.4 起 Seat 不再携带 accountId。4.1 曾把 seat.accountId backfill 进所有 spaces；
-    // 这里检测是否还有 seats 上残留 accountId 字段，有则触发一次性剥离（反迁移）。
-    const seatsNeedAccountIdStripped = data.spaces.some((space) =>
-      (space.seats ?? []).some((seat) => Object.prototype.hasOwnProperty.call(seat, "accountId")),
-    );
-    const sessionKeys = Object.keys(data.sessionStates);
-    const sessionKeysNeedRemap = sessionKeys.some((key) => {
-      const [first] = key.split(":");
-      return first?.startsWith("agt_");
-    });
-
-    if (!needsAgentStrip && agentsNeedingAccount.length === 0 && !seatsNeedAccountIdStripped && !sessionKeysNeedRemap) {
-      return;
-    }
-
-    if (backupSplitFiles) {
-      await backupExistingSplitFiles(["agents", "accounts", "spaces", "sessionStates", "meta"]);
-    }
-
-    const accountIdByAgent = new Map();
-    for (const account of data.accounts) {
-      if (!accountIdByAgent.has(account.owningAgentId)) accountIdByAgent.set(account.owningAgentId, account.id);
-    }
-
-    const usedAccountIds = new Set(data.accounts.map((account) => account.id));
-    function accountIdForAgent(agentId) {
-      if (accountIdByAgent.has(agentId)) return accountIdByAgent.get(agentId);
-      let id = deriveOwningAccountId(agentId);
-      let n = 2;
-      while (usedAccountIds.has(id)) {
-        id = `${deriveOwningAccountId(agentId)}_${n}`;
-        n += 1;
-      }
-      usedAccountIds.add(id);
-      accountIdByAgent.set(agentId, id);
-      return id;
-    }
-
-    const now = new Date().toISOString();
-    for (const agent of data.agents) {
-      if (accountIdByAgent.has(agent.id)) continue;
-      data.accounts.push({
-        id: accountIdForAgent(agent.id),
-        owningAgentId: agent.id,
-        name: `${agent.name ?? agent.id}${agent.provider ? ` ${agent.provider}` : ""} account`,
-        kind: agent.kind ?? null,
-        provider: agent.provider ?? null,
-        connection: agent.connection ?? {},
-        model: agent.model ?? "",
-        createdAt: agent.createdAt ?? now,
-        updatedAt: agent.updatedAt ?? agent.createdAt ?? now,
-      });
-    }
-
-    data.agents = data.agents.map(stripAgentConnection);
-
-    // 4.4 反迁移：剥掉 seats 上的 accountId 字段（4.1 backfill 的旧值一次性清理）。
-    // accountId === undefined 在 JSON 序列化时会被丢掉，seats 里不再有该字段。
-    // session-states 键不动——仍按 (accountId, spaceId)，accountId 默认来自
-    // deriveOwningAccountId(seat.agentId)。
-    data.spaces = data.spaces.map((space) => ({
-      ...space,
-      seats: (space.seats ?? []).map(({ accountId, ...seatRest }) => ({
-        ...seatRest,
-        accountId: undefined,
-      })),
-    }));
-
-    const remappedSessionStates = {};
-    for (const [key, value] of Object.entries(data.sessionStates)) {
-      const [first, ...rest] = key.split(":");
-      const spaceId = rest.join(":");
-      if (first?.startsWith("agt_") && spaceId) {
-        remappedSessionStates[`${accountIdForAgent(first)}:${spaceId}`] = value;
-      } else {
-        remappedSessionStates[key] = value;
-      }
-    }
-    data.sessionStates = remappedSessionStates;
-
-    markDirty("agents");
-    markDirty("accounts");
-    markDirty("spaces");
-    markDirty("sessionStates");
-    await flush();
-  }
-
-  // 旧单文件（全集合混存一个 JSON）灌进内存结构
-  function adoptLegacy(parsed) {
-    for (const name of COLLECTIONS) {
-      if (Array.isArray(parsed[name])) data[name] = parsed[name];
-    }
-    if (parsed.sessionStates && typeof parsed.sessionStates === "object") {
-      data.sessionStates = parsed.sessionStates;
-    }
-    data._seq = parsed._seq ?? 0;
-    data.eventSeqWatermark = parsed.eventSeqWatermark ?? 0;
-  }
-
-  // ---- 启动加载 + 一次性迁移 ----
-  const pathStat = await stat(dataPath).catch((err) => {
-    if (err.code === "ENOENT") return null;
-    throw err;
-  });
-
-  // 从旧单文件内容整体重建分文件（迁移 a/b 与崩溃回灌共用）
+  // 旧单文件内容 → adopt 进内存 → 跑 agent/account 数据形状迁移 → 全集合落盘。
+  // 迁移 a/b 与崩溃回灌（detectLegacySingleFile 检测出的三类 mode）共用本函数。
   async function rebuildFromLegacy(parsed) {
-    adoptLegacy(parsed);
-    await migrateAgentAccountsIfNeeded();
+    adoptLegacyIntoData(data, parsed, COLLECTIONS);
+    if (needsMigration({ data })) {
+      await migrateAgentAccountsAndSeats({ data, flush, markDirty });
+    }
     markAllDirty();
     await flush();
   }
 
-  const siblingLegacyPath = `${dataPath}.legacy`; // 迁移 a 的让位文件
+  // ---- 启动加载 + 协调迁移 ----
+  const detected = await detectLegacySingleFile({ dataPath, fileFor, siblingLegacyPath, storeJsonPath });
 
-  if (pathStat?.isFile()) {
+  if (detected.mode === "mixed-state-refuse") {
+    throw new Error(
+      `store 数据目录 ${dataPath} 内同时存在分文件（meta.json 等）与旧单文件 store.json，` +
+        `且两者 _seq 不一致，无法判断哪份是真相。请人工处置：确认要保留哪份数据后，` +
+        `删除或移走另一份（保留 store.json 则删分文件走自动迁移；保留分文件则移走 store.json）。`,
+    );
+  }
+
+  if (detected.mode === "single-file") {
     // 迁移 a：dataPath 本身是旧单文件（老 env 配置残留）。
-    // 读 → 原文件让位改名 .legacy → 原路径建目录 → 写分文件。
-    const parsed = await readJsonIfExists(dataPath);
-    await rename(dataPath, siblingLegacyPath);
-    await mkdir(dataPath, { recursive: true });
-    await rebuildFromLegacy(parsed);
-  } else if (pathStat?.isDirectory()) {
-    const storeJsonPath = join(dataPath, "store.json");
-    const hasMeta = await fileExists(fileFor("meta"));
-    let hasStoreJson = await fileExists(storeJsonPath);
-
-    if (hasStoreJson && hasMeta) {
-      // 分文件与旧单文件共存。两种可能：
-      //   1. 迁移 b 自身的崩溃窗口——分文件已写完（meta.json 最后写，存在即完整）
-      //      但 store.json 还没改名 .legacy。判据：两边 _seq 相等即同源，
-      //      安全自动完成迁移（补上改名），走常规目录加载。
-      //   2. 人为操作（恢复备份、rsync）产生的混合状态——_seq 不等，
-      //      无条件迁移会让旧 store.json 覆盖较新的分文件，拒绝启动人工处置。
-      const meta = await readJsonIfExists(fileFor("meta"));
-      const legacyParsed = await readJsonIfExists(storeJsonPath);
-      if ((meta?._seq ?? 0) === (legacyParsed?._seq ?? 0)) {
-        await rename(storeJsonPath, `${storeJsonPath}.legacy`);
-        hasStoreJson = false;
-      } else {
-        throw new Error(
-          `store 数据目录 ${dataPath} 内同时存在分文件（meta.json 等）与旧单文件 store.json，` +
-            `且两者 _seq 不一致，无法判断哪份是真相。请人工处置：确认要保留哪份数据后，` +
-            `删除或移走另一份（保留 store.json 则删分文件走自动迁移；保留分文件则移走 store.json）。`,
-        );
-      }
-    }
-    if (hasStoreJson) {
-      // 迁移 b：目录里躺着老默认单文件。读 → 写分文件 → 改名 .legacy。
-      await rebuildFromLegacy(await readJsonIfExists(storeJsonPath));
-      await rename(storeJsonPath, `${storeJsonPath}.legacy`);
-    } else if (!hasMeta && (await fileExists(siblingLegacyPath))) {
-      // 崩溃回灌（迁移 a 的中间态）：rename 成 .legacy 之后、分文件写完（以
-      // meta.json 为完成标记）之前崩溃过。从 .legacy 重迁，幂等。
-      await rebuildFromLegacy(await readJsonIfExists(siblingLegacyPath));
-    } else {
-      // 常规目录加载：缺哪个文件哪个集合就用空默认值。
-      for (const name of COLLECTIONS) {
-        const arr = await readJsonIfExists(fileFor(name));
-        if (Array.isArray(arr)) data[name] = arr;
-      }
-      const sessionStates = await readJsonIfExists(fileFor("sessionStates"));
-      if (sessionStates && typeof sessionStates === "object") data.sessionStates = sessionStates;
-      const meta = await readJsonIfExists(fileFor("meta"));
-      if (meta) {
-        data._seq = meta._seq ?? 0;
-        data.eventSeqWatermark = meta.eventSeqWatermark ?? 0;
-      }
-      await migrateAgentAccountsIfNeeded({ backupSplitFiles: true });
-    }
-  } else if (await fileExists(siblingLegacyPath)) {
-    // 崩溃回灌的更早中间态：迁移 a 在 rename 之后、mkdir 之前崩溃，
-    // dataPath 不存在但 .legacy 已让位。同样从 .legacy 重迁。
-    await mkdir(dataPath, { recursive: true });
-    await rebuildFromLegacy(await readJsonIfExists(siblingLegacyPath));
+    // 让位 .legacy → 原路径建目录 → rebuildFromLegacy 写分文件。
+    await renameLegacyAside({ dataPath, storeJsonPath, siblingLegacyPath, mode: "single-file" });
+    await rebuildFromLegacy(detected.parsed);
+  } else if (detected.mode === "dir-store-json") {
+    // 迁移 b：目录里躺着老默认单文件。先 rebuildFromLegacy 写分文件 → 再让位 store.json。
+    await rebuildFromLegacy(detected.parsed);
+    await renameLegacyAside({ dataPath, storeJsonPath, siblingLegacyPath, mode: "dir-store-json" });
+  } else if (detected.mode === "crash-recover-a" || detected.mode === "crash-recover-a-early") {
+    // 崩溃回灌：rename 之后、分文件没写完（甚至 mkdir 都没到）→ 从 .legacy 重灌重迁。
+    await renameLegacyAside({ dataPath, storeJsonPath, siblingLegacyPath, mode: detected.mode });
+    await rebuildFromLegacy(detected.parsed);
+  } else if (detected.mode === "self-heal-rename") {
+    // 自愈：分文件完整、store.json 还没让位同源改名 → 补完改名 → 走常规目录加载。
+    await renameLegacyAside({ dataPath, storeJsonPath, siblingLegacyPath, mode: "self-heal-rename" });
+    await loadDirectoryRegularly();
+  } else if (detected.mode === null) {
+    await loadDirectoryRegularly();
   }
   // 都不是 → 全新空 store，首次 flush 时 mkdir。
+
+  async function loadDirectoryRegularly() {
+    // 常规目录加载：缺哪个文件哪个集合就用空默认值。
+    for (const name of COLLECTIONS) {
+      const arr = await readJsonIfExists(fileFor(name));
+      if (Array.isArray(arr)) data[name] = arr;
+    }
+    const sessionStates = await readJsonIfExists(fileFor("sessionStates"));
+    if (sessionStates && typeof sessionStates === "object") data.sessionStates = sessionStates;
+    const meta = await readJsonIfExists(fileFor("meta"));
+    if (meta) {
+      data._seq = meta._seq ?? 0;
+      data.eventSeqWatermark = meta.eventSeqWatermark ?? 0;
+    }
+    if (needsMigration({ data })) {
+      // 旧分文件已有实际数据，迁移前备份为 .legacy 作回滚锚点（幂等）。
+      await backupSplitFilesAsLegacy({
+        fileFor,
+        keys: ["agents", "accounts", "spaces", "sessionStates", "meta"],
+      });
+      await migrateAgentAccountsAndSeats({ data, flush, markDirty });
+    }
+  }
 
   function assertCollection(name) {
     if (!Array.isArray(data[name])) {

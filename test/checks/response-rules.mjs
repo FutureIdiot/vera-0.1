@@ -1,0 +1,228 @@
+// m. 响应规则收口 + Seat 去 accountId 反迁移（Phase 4.3 + 4.4）：
+// silent 默认 / silent+respondTo / focused / blockAgentIds 声告段过滤 + 直向 @ 穿透。
+
+export async function run(ctx) {
+  const { check, httpRequest, sse, assertEqual, assert } = ctx;
+
+  await check("m.1 silent 默认（respondTo=null）：广播不响应、定向 @ 响应", async () => {
+    const agentS1Resp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockS1",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentS1Resp.status, 201);
+    const agentS1 = agentS1Resp.json.agent;
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "m1-space",
+      seats: [{ agentId: agentS1.id, responseMode: "silent" }],
+    });
+    assertEqual(spaceResp.status, 201);
+    const m1Space = spaceResp.json.space;
+    assert(
+      !("accountId" in m1Space.seats[0]),
+      "m.1 seat should not carry accountId after 4.4 strip",
+    );
+
+    const bc = await httpRequest("POST", `/api/spaces/${m1Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "broadcast" },
+      content: "m.1 broadcast",
+    });
+    assertEqual(bc.status, 201);
+    assertEqual(bc.json.runs.length, 0, "silent 默认不应响应 broadcast");
+
+    const dc = await httpRequest("POST", `/api/spaces/${m1Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agentS1.id] },
+      content: "m.1 direct @",
+    });
+    assertEqual(dc.status, 201);
+    assertEqual(dc.json.runs.length, 1, "silent 默认应响应 direct @");
+    assertEqual(dc.json.runs[0].agentId, agentS1.id);
+    await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === dc.json.runs[0].id, 10000);
+  });
+
+  await check("m.2 silent + respondTo=['user']：user 广播响应、agent 广播不响应、direct @ 响应", async () => {
+    const agentS2Resp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockS2",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentS2Resp.status, 201);
+    const agentS2 = agentS2Resp.json.agent;
+    const agentS2bResp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockS2b",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentS2bResp.status, 201);
+    const agentS2b = agentS2bResp.json.agent;
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "m2-space",
+      seats: [
+        { agentId: agentS2.id, responseMode: "silent", respondTo: ["user"] },
+        { agentId: agentS2b.id, responseMode: "focused" },
+      ],
+    });
+    assertEqual(spaceResp.status, 201);
+    const m2Space = spaceResp.json.space;
+    assertEqual(m2Space.seats[0].respondTo[0], "user", "respondTo should persist on seat");
+
+    const bc1 = await httpRequest("POST", `/api/spaces/${m2Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "broadcast" },
+      content: "m.2 user broadcast",
+    });
+    assertEqual(bc1.status, 201);
+    assertEqual(bc1.json.runs.length, 1, "silent+respondTo=['user'] 应响应 user broadcast");
+    assertEqual(bc1.json.runs[0].agentId, agentS2.id);
+    await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === bc1.json.runs[0].id, 10000);
+
+    const bc2 = await httpRequest("POST", `/api/spaces/${m2Space.id}/messages`, {
+      author: { type: "agent", agentId: agentS2b.id },
+      target: { type: "broadcast" },
+      content: "m.2 agent broadcast",
+    });
+    assertEqual(bc2.status, 201);
+    assertEqual(bc2.json.runs.length, 0, "silent+respondTo=['user'] 不应响应 agent broadcast");
+
+    const dc = await httpRequest("POST", `/api/spaces/${m2Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agentS2.id] },
+      content: "m.2 direct @",
+    });
+    assertEqual(dc.status, 201);
+    assertEqual(dc.json.runs.length, 1, "silent+respondTo=['user'] 应响应 direct @");
+    assertEqual(dc.json.runs[0].agentId, agentS2.id);
+    await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === dc.json.runs[0].id, 10000);
+  });
+
+  await check("m.3 focused：广播不响应、定向 @ 响应", async () => {
+    const agentF3Resp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockF3",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentF3Resp.status, 201);
+    const agentF3 = agentF3Resp.json.agent;
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "m3-space",
+      seats: [{ agentId: agentF3.id, responseMode: "focused" }],
+    });
+    assertEqual(spaceResp.status, 201);
+    const m3Space = spaceResp.json.space;
+
+    const bc = await httpRequest("POST", `/api/spaces/${m3Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "broadcast" },
+      content: "m.3 broadcast",
+    });
+    assertEqual(bc.status, 201);
+    assertEqual(bc.json.runs.length, 0, "focused 不应响应 broadcast");
+
+    const dc = await httpRequest("POST", `/api/spaces/${m3Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agentF3.id] },
+      content: "m.3 direct @",
+    });
+    assertEqual(dc.status, 201);
+    assertEqual(dc.json.runs.length, 1, "focused 应响应 direct @");
+    assertEqual(dc.json.runs[0].agentId, agentF3.id);
+    await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === dc.json.runs[0].id, 10000);
+  });
+
+  await check("m.4 blockAgentIds：声告段过滤 + 不影响 shouldRespond + direct @ 穿透", async () => {
+    const agentXResp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockX",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentXResp.status, 201);
+    const agentX = agentXResp.json.agent;
+    const agentYResp = await httpRequest("POST", "/api/agents", {
+      name: "VerifyMockY",
+      kind: "cli",
+      provider: "mock",
+      connection: {},
+      model: "mock-v1",
+    });
+    assertEqual(agentYResp.status, 201);
+    const agentY = agentYResp.json.agent;
+    const spaceResp = await httpRequest("POST", "/api/spaces", {
+      name: "m4-space",
+      seats: [
+        { agentId: agentX.id, responseMode: "default" },
+        { agentId: agentY.id, responseMode: "default", blockAgentIds: [agentX.id] },
+      ],
+    });
+    assertEqual(spaceResp.status, 201);
+    const m4Space = spaceResp.json.space;
+    assertEqual(m4Space.seats[1].blockAgentIds[0], agentX.id, "blockAgentIds should persist on seat");
+
+    const post1 = await httpRequest("POST", `/api/spaces/${m4Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agentX.id] },
+      content: "m.4 msg1 @X",
+    });
+    assertEqual(post1.status, 201);
+    assertEqual(post1.json.runs.length, 1);
+    assertEqual(post1.json.runs[0].agentId, agentX.id);
+    const end1 = await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === post1.json.runs[0].id, 10000);
+    assertEqual(end1.data.run.status, "completed");
+
+    const tl = await httpRequest("GET", `/api/spaces/${m4Space.id}/timeline?limit=50`);
+    assertEqual(tl.status, 200);
+    const hasXReply = tl.json.items.some(
+      (i) => i.itemType === "message" && i.author?.type === "agent" && i.author?.agentId === agentX.id,
+    );
+    assert(hasXReply, "timeline should contain X's reply bubble (positive control)");
+
+    const post2 = await httpRequest("POST", `/api/spaces/${m4Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "direct", agentIds: [agentY.id] },
+      content: "m.4 msg2 @Y",
+    });
+    assertEqual(post2.status, 201);
+    assertEqual(post2.json.runs.length, 1, "direct @Y should create run (blockAgentIds does not block shouldRespond)");
+    assertEqual(post2.json.runs[0].agentId, agentY.id);
+    const end2 = await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === post2.json.runs[0].id, 10000);
+    assertEqual(end2.data.run.status, "completed");
+    const yReply = sse.events
+      .filter((e) => e.type === "message.completed" && end2.data.run.replyMessageIds.includes(e.data.message.id))
+      .map((e) => e.data.message.content)
+      .join(" ");
+    assert(
+      !yReply.includes(`- ${agentX.name}: `),
+      `Y's reply should not contain X's signature (blockAgentIds filters announcement), got: ${yReply}`,
+    );
+    assert(
+      yReply.includes("- 用户: "),
+      `Y's reply should contain user signature (user bubbles not blocked), got: ${yReply}`,
+    );
+
+    const post3 = await httpRequest("POST", `/api/spaces/${m4Space.id}/messages`, {
+      author: { type: "user" },
+      target: { type: "broadcast" },
+      content: "m.4 msg3 broadcast",
+    });
+    assertEqual(post3.status, 201);
+    assertEqual(
+      post3.json.runs.length,
+      2,
+      "broadcast should trigger both X and Y (blockAgentIds does not affect shouldRespond)",
+    );
+    await Promise.all(
+      post3.json.runs.map((r) => sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === r.id, 10000)),
+    );
+  });
+}
