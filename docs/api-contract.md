@@ -442,6 +442,9 @@ updatedAt: 2026-07-03T00:00:00.000Z
 |---|---|---|
 | GET | `/api/memory` | 索引列表 `{ "memories": [{ slug, type, description, status, stains, createdAt, updatedAt }] }`，按 updatedAt 降序。给前端记忆库用，允许含 stains（前端可显示，R5） |
 | POST | `/api/memory` | 手动「保存到记忆」。body `{ "slug", "type", "description", "content", "stains"? }`；gateway 落盘为上述文件格式。成功 → 201 `{ "memory": { slug, type, description, status, stains, createdAt, updatedAt } }`（与 GET 列表条目同形）；slug 已存在 → 409 `conflict`；slug 不合法（非 kebab-case）→ 400 |
+| GET | `/api/memory/:slug` `[P4.6/F1]` | 取单条完整正文 `{ "memory": { slug, type, description, status, stains, createdAt, updatedAt, content } }`；slug 不存在 → 404 |
+| PATCH | `/api/memory/:slug` `[P4.6/F1]` | 编辑已有记忆。body 任一可选 `{ "type", "description", "status", "content", "stains", "newSlug", "ifMatch" }`：`status` 取 `active` / `archived`（归档不删除，文件保留）；`newSlug` 触发文件 mv（重命名后双链不自动更新——Obsidian 等工具会在下次打开时回写，gateway 不扫描全文替换，保持薄封装）；`ifMatch`（ISO updatedAt）做乐观并发控制，与磁盘 `updatedAt` 不一致 → 409 `conflict` 并附 `{ current: {...} }` 让前端重新加载。成功 → 200 `{ "memory": {...} }`，`updatedAt` 由 gateway 重写。slug 不存在 → 404；`newSlug` 非 kebab-case 或已占用 → 400 / 409 |
+| DELETE | `/api/memory/:slug` `[P4.6/F1]` | 删除记忆文件。**不可逆**，前端必须二次确认。成功 → 204；slug 不存在 → 404。删除后历史时间线中已注入的索引不受追溯影响（索引是当时快照） |
 
 ## 四、SSE 事件流
 
@@ -516,3 +519,256 @@ run.ended          (completed)
 
 - SSE 响应必须逐帧 flush，不得依赖缓冲（Cloudflare 隧道 `disableChunkedEncoding: false`、nginx `proxy_buffering off`，见 `reference/vps-tunnel-deploy.md`）。
 - gateway 每 25s 发 SSE 注释帧 `: ping` 保活，防止中间层超时断连。
+
+## 六、页面接口矩阵 `[F1]`
+
+> ground truth 5.1 页面清单逐页落地：每页声明「SSE 事件输入 / API 读取 / API 写入 / 空错态」。
+> 此矩阵是 F2+ 前端实现的唯一接口闸门——任何 view 不得调用未在此列出的 endpoint，也不得在此列出但后端未实现的 endpoint 上构建可交互控件（不得做假控件）。
+> 标 `[P5]` / `[P5.5]` / `[Phase 6]` 的项当前阶段不实现，但形状在此钉死。
+
+### App Shell（全局，无路由）
+
+- **SSE 事件输入**：`stream.reset`（重连后丢弃本地状态、重走 `/api/bootstrap`）；`account.presence.updated`（顶栏在线指示）；`agent.state.updated`（顶栏省略，仅在当前 Space 内消费）。
+- **API 读取**：`GET /api/bootstrap`（启动 / `stream.reset` 后）；`GET /api/settings`（顶栏主题色 / Appearance token loader 初始化；F2 起前置）。
+- **API 写入**：无（Shell 不持有写流程；用户写操作都进具体 view）。
+- **空错态**：bootstrap 失败 → 顶栏显示「断开」+ 重试按钮；SSE 长断连 → 同上；`/api/settings` 失败 → token loader 回落 config 默认（不阻塞 Shell 渲染）；离线（navigator.offline）→ 顶栏「离线」标记。
+
+### 全屏聊天主页 `#/spaces/:spaceId`
+
+- **SSE 事件输入**：`message.created` / `message.delta` / `message.completed`（时间线渲染）；`activity.created` / `activity.updated`（思考链 / 工具卡片穿插）；`approval.requested` / `approval.answered`（提权卡片）；`run.started` / `run.ended`（agent 状态指示）；`agent.state.updated`（仅 `spaceId` 匹配当前 Space 的条目，驱动 composer 上方 agent 工作相）；`space.updated`（当前 Space name / topic 变更回显顶栏）；`account.presence.updated`（联系人在线指示）。
+- **API 读取**：`GET /api/bootstrap`（首屏）；`GET /api/spaces/:id/timeline?before=&limit=50`（向上翻页加载更早历史）。
+- **API 写入**：`POST /api/spaces/:id/messages`（广播 / `@` 定向，body 含 `author`/`target`/`content`）；`POST /api/runs/:id/cancel`（取消在飞 run）；`POST /api/approvals/:id/answer`（`allow` / `deny`）。
+- **空错态**：Space 不存在（404）→ 主区显示「Space 不存在或已归档」+ 返回导航入口；时间线空 → 「还没有消息，发一条开始」；时间线长 → DOM 上限 200 items，更早走 `?before=` 分页；approval 失效（409）→ 卡片灰化；发送失败（4xx/5xx）→ composer 内联错误 + 保留草稿；SSE 断连 → 时间线冻结 + 顶部「重连中」；已归档 Space 通过此路由进入 → 消息发送返回 409，主区显示「已归档，去设置恢复」入口。
+
+### Space导航 `#/spaces`（右滑 / 抽屉 / 桌面图钉常驻）
+
+- **SSE 事件输入**：`space.updated`（重命名 / Seat / notifications 变更回显）；`agent.updated` / `account.upserted`（左栏联系人投影）；`account.presence.updated`（在线指示）。
+- **API 读取**：`GET /api/bootstrap`（复用 Shell 拉取的 agents/accounts/spaces；进导航页不再发额外请求，纯客户端派生左栏联系人 / 右栏 Space 列表）；`GET /api/spaces?archived=true`（展开「已归档 Spaces」分段时按需拉取已归档列表）。
+- **API 写入**：`POST /api/spaces`（新增；body 继承当前左栏选中成员集合作为 seats）；`PATCH /api/spaces/:id`（重命名 / topic / seats / notifications）；`POST /api/spaces/:id/archive`（二次确认后归档，归档成功后切换到另一活跃 Space）；`POST /api/spaces/:id/restore`（从「已归档」分段恢复）。
+- **空错态**：无 Space → 左栏联系人可点但右栏空 + 「新建 Space」CTA；左栏无选中 → 右栏显示「选一个联系人或群组」；归档失败（409 有未结束 Run）→ toast「有进行中的对话，等结束或取消后再归档」；新增失败 → 内联错误；归档二次确认 → 弹层 only（不替换主区）。
+
+### 当前Space设置 `#/spaces/:spaceId/settings`
+
+- **SSE 事件输入**：`space.updated`（外部改动回显，多端同步）；`agent.updated` / `account.upserted` / `account.presence.updated`（参与 Agent 列表状态）。
+- **API 读取**：`GET /api/bootstrap`（参与 Agent + seats 组合）；不预取 Space Module 列表（`[Phase 6]` 契约未落）。
+- **API 写入**：`PATCH /api/spaces/:id`（一次提交 seats / notifications / name / topic；Seat 字段 `agentId` / `responseMode` / `respondTo` / `blockAgentIds` 全在此）。
+- **空错态**：Space 不存在 → 整页「Space 不存在」+ 返回；无 seats → 「还没有 Agent 参与，去 Account 管理添加」+ 跳转 `#/settings/accounts`；保存失败 → 字段级错误回显，不整页崩溃；Space Module 区 → 「`[Phase 6]` 未开放」占位，不渲染假开关；离开未保存改动 → 浏览器原生 confirm。
+
+### Setting目录 `#/settings`
+
+- **SSE 事件输入**：无（不订阅；进页拉一次即可）。
+- **API 读取**：无（不预取子页数据；只渲染静态分组列表）。
+- **API 写入**：无。
+- **空错态**：纯静态页；分组项被 `[Phase 6]` 占位时显示「未开放」灰条，可点但不跳转或弹「待 Phase 6 落地」。
+
+### Appearance `#/settings/appearance`
+
+- **SSE 事件输入**：无（外观是本地预览 + 保存，不订阅事件）。
+- **API 读取**：`GET /api/settings`（初始外观字段）；`GET /api/themes`（Theme 列表摘要，进页时拉一次）；`GET /api/themes/:id`（选中某 Theme 预览时按需拉取完整对象）。
+- **API 写入**：`PATCH /api/settings`（保存外观字段；按组恢复默认对该组已知 key 一次 PATCH `null`）；`POST /api/themes/import`（导入预览，不持久化）；`POST /api/themes`（确认保存归一化 Theme）；`PATCH /api/themes/:id`（重命名 / 编辑 colors/terminal）；`DELETE /api/themes/:id`（被 `appearance.themeId` 引用时 409）；`GET /api/themes/:id/export?format=vera-json|vera-css`（导出 Theme Palette）；`GET /api/settings/appearance-profile/export`（导出非 Theme 的 Appearance Profile）；`POST /api/settings/appearance-profile/import`（预览 Appearance Profile，不保存，确认后仍 PATCH `/api/settings`）。
+- **空错态**：settings 加载失败 → 回落 config 默认 + 顶部「无法读取已保存配置，展示默认值」；Theme 列表空 → 「还没有保存的 Theme，导入一份试试」；导入失败 → 预览区显示 `warnings` + 不写入；导出失败 → toast；预览只改内存 CSS 变量，刷新或离页未保存 → 丢弃；实时预览与「已保存」之间须有明确视觉区分（按钮态 / 标记）。
+
+### Account管理 `#/settings/accounts`、`#/settings/accounts/:agentId`
+
+- **SSE 事件输入**：`agent.updated`（Agent 名称回显）；`account.upserted`（Account 创建 / 修改回显）；`account.presence.updated`（在线指示 + `runtimeCapabilities` 是否有快照）；`agent.state.updated`（Agent 当前工作相，按 `agentId` 过滤）。
+- **API 读取**：`GET /api/bootstrap`（列表页用 agents + accounts 组合）；`GET /api/accounts?agentId=…`（详情页按需刷新该 Agent 名下 accounts）；`GET /api/agent-states?agentId=…`（详情页 Agent 当前工作相）。**不预取 Memory 正文**——Memory 在 `#/settings/accounts/:agentId/memory` 子路由按需加载。
+- **API 写入**：`POST /api/agents`（新建 Agent；响应含自动派生的 owning account）；`PATCH /api/agents/:id`（仅改 `name`）；`DELETE /api/agents/:id`（删除身份 + 自有 account；有历史的 agent 返回 409）；`POST /api/agents/:id/accounts`（为 Agent 新增非自有 account，多账户 / 驾驶他人账户场景）；`PATCH /api/accounts/:id`（改 `name` / `kind` / `provider` / `connection` / `model`）；`DELETE /api/accounts/:id`（删除连接；自有唯一 account 409）。
+- **空错态**：无 Agent → 「还没有 Agent，新建一个」CTA；Agent 无 account → 「这条 Agent 还没有连接，去添加一条 Account」；删除二次确认 → 弹层（删除 Agent 与删除 Account 是两个明确动作，文案区分）；删除失败（409）→ toast 显示原因；`runtimeCapabilities` 为 `null`（离线或未登录）→ 详情页「未连接，能力未知」而非虚构数据。
+
+### Agent Memory `#/settings/accounts/:agentId/memory`
+
+- **SSE 事件输入**：无（Memory 编辑是请求-响应，不订阅实时事件）。
+- **API 读取**：`GET /api/memory`（索引列表，按 `updatedAt` 降序，含 stains）；`GET /api/memory/:slug`（选中条目按需拉取完整正文）。
+- **API 写入**：`POST /api/memory`（新建；slug 已存在 409）；`PATCH /api/memory/:slug`（编辑 frontmatter 字段 / 正文；可选 `newSlug` 重命名，重命名是文件 mv + 双链更新）；`DELETE /api/memory/:slug`（删除文件；删除前二次确认）。
+- **空错态**：vault 不存在 / 空 → 「记忆库为空，agent 用一次就慢慢攒起来了」+ 「手动保存一条」CTA；slug 不存在（404）→ 返回列表 + toast；编辑冲突（同时被 agent 写）→ 加载时记录 `updatedAt`，PATCH 携带 `ifMatch` 校验，不一致返回 409，前端提示「这条刚被 agent 改过，重新加载」；删除二次确认 → 弹层。
+
+### Extension管理 `#/settings/extensions` `[Phase 6]`
+
+- **SSE 事件输入**：`[Phase 6]` 待定（extension.install / uninstall / permission.request 等事件）。
+- **API 读取**：`[Phase 6]` `GET /api/extensions`（已安装 Extension Package 摘要列表）。
+- **API 写入**：`[Phase 6]` `POST /api/extensions/install` / `DELETE /api/extensions/:id` / `PATCH /api/extensions/:id/permissions` 等。
+- **空错态**：当前阶段（F1–F5）整页显示「`[Phase 6]` Extension 体系尚未开放」，不渲染任何假按钮或假列表。
+
+### 路径管理 `#/settings/paths`
+
+- **SSE 事件输入**：无。
+- **API 读取**：`GET /api/paths`（返回 memory.vaultPath 当前值 + 是否存在 + 记忆条数；`gateway.dataPath` 当前值只读展示 + 大小估算；env-only 参数如 port/SSE 心跳不在本接口，去 `/api/status`）。
+- **API 写入**：`POST /api/paths/validate`（body `{ key, value }`，预检目标路径：绝对路径 / 可写或可创建 / 不在仓库内 / 磁盘空间足够；返回 `{ ok, errors[], warnings[], normalized }`，不写盘）；`POST /api/paths/migrate`（body `{ key, target }`：对 `memory.vaultPath` 走「校验 → mv → 改 config → 返回新值」；对 `gateway.dataPath` 走「校验 → 备份 → 复制 → 验证 → 改 config override → 返回 `{ restartRequired: true }`」，实际切换需 gateway 重启；旧路径留 `.legacy` 备份不自动删）。
+- **空错态**：路径校验失败 → 字段下方红字 + 不允许进入 migrate；migrate 失败 → toast 显示错误 + 路径不动（回滚已内置）；gateway.dataPath migrate 成功 → 「重启 gateway 后生效」+ 重启按钮（仅本地开发 / systemd manage 场景可用；VPS 部署后由 systemd 自重启）；memory.vaultPath 改完 → 直接生效（memory 模块重开）+ 不需要重启。
+
+### 中控台 `#/settings/control-center`
+
+- **SSE 事件输入**：无（中控台是轮询，不订阅；离开页面立即停止 poller）。
+- **API 读取**：`GET /api/status`（gateway/SSE/store/vault/daemon 状态摘要 + 最近错误；字段清单见章节八；进页时取一次，之后 5s 轮询，离页清理）。
+- **API 写入**：无（中控台只读；任何「重启 / 清理」操作走专门接口或运维，不在本页提供按钮）。
+- **空错态**：`/api/status` 失败 → 「gateway 不可达」+ 重试；store 显示当前 file store 状态（文件大小、记录数），不虚构数据库连接；vault 不存在 → 「vault 路径无效」+ 跳 `#/settings/paths`；无 daemon 在线 → 「当前没有 agent daemon 连接」（联邦形态 Phase 5.5 落地后才有 presence 数据；当前阶段显示「联邦形态未启用」而非假数据）。
+
+### 系统设置 `#/settings/system`
+
+- **SSE 事件输入**：无（系统设置是表单 + 保存，不订阅实时事件）。
+- **API 读取**：`GET /api/settings`（加载系统字段当前合并视图：`isolation.*` / `memory.*` / `presentation.*`）。
+- **API 写入**：`PATCH /api/settings`（部分字段覆盖；按组恢复默认对该组已知 key 一次 PATCH `null`）。
+- **空错态**：settings 加载失败 → 表单回落默认值 + 顶部错误条；保存失败（400 invalid_request）→ 字段级错误回显；保存失败（5xx）→ toast + 保留改动；未保存离页 → 浏览器原生 confirm。
+
+## 七、Path 管理与受控迁移 API `[P4.6/F1]`
+
+ground truth 4.1 末段把可配置路径分两类：用户数据位置（Memory vault、Agent 工作路径、Files/附件路径）走普通保存；gateway 数据目录等影响事实来源的高风险路径必须走「校验 → 迁移 → 验证 → 回滚」独立流程。端口、SSE 心跳/缓冲、store 落盘节流、daemon 回收、run 看门狗仍走 env，不进本接口。
+
+### 字段清单
+
+| key | 作用 | 当前可编辑 | 风险等级 |
+|---|---|---|---|
+| `memory.vaultPath` | Obsidian 兼容 vault 根目录 | 是 | 普通（仅 markdown 文件，失败不危及事实来源） |
+| `gateway.dataPath` | gateway 持久化数据根目录 | 是（仅 migrate，无直接文本框） | 高（含 agents/spaces/messages/runs/session-states 全部事实来源） |
+| `agents.*.workspacePath` `[P5.5]` | per-agent daemon 工作目录 | 否（联邦 daemon 登录时声明） | 普通 |
+| `files.attachmentsPath` `[P5]` | Space 内附件存储根 | 否 | 普通 |
+
+### 端点
+
+| Method | Path | 说明 |
+|---|---|---|
+| GET | `/api/paths` | 返回当前路径摘要：`{ paths: { memory: { vaultPath, exists, memoryCount }, gateway: { dataPath, sizeBytes, restartRequired: false } } }`。`gateway.dataPath.sizeBytes` 是目录递归大小估算（du 等价），用于路径管理页展示。**不返回** port / SSE / store 节流等 env 配置（去 `/api/status`）。 |
+| POST | `/api/paths/validate` | body `{ key, value }`，`key` ∈ `memory.vaultPath` / `gateway.dataPath`；`value` 为绝对路径字符串（相对路径规范化为相对 cwd 的绝对）。返回 `{ ok: bool, errors: string[], warnings: string[], normalized: string }`，**不写盘**。校验项：绝对路径；路径可写或可创建（父目录存在且可写）；不在仓库工作树内（防止用户把 vault 指到 `~/projects/Vera-0.0.1/`）；对 `gateway.dataPath` 额外校验：目标目录为空或仅含可识别的 Vera store 文件（防覆盖陌生数据）；磁盘剩余空间 ≥ 当前 dataPath 大小（迁移用）。 |
+| POST | `/api/paths/migrate` | body `{ key, target }`；migrate 是 validate + 实际搬移 + 改 config override 的合动作。返回 `{ ok, key, from, to, restartRequired }`。失败时路径不动（已搬移的部分回滚），返回 400/409 + `{ errors }`。 |
+
+**migrate 各 key 行为**：
+
+- `memory.vaultPath`：
+  1. validate target → 2. `mkdir -p target` → 3. 把当前 vault 下所有 `*.md` 移到 target（非 `*.md` 不动）→ 4. 验证 target 文件数 = 原 vault 文件数 → 5. `PATCH /api/settings` 写 `paths.memoryVaultPath = target` override → 6. memory 模块重开（重读 target，热替换）→ 7. 返回 `{ restartRequired: false }`。原 vault 目录留空不删（用户自行清理）。失败任一步回滚：把已搬到 target 的文件 mv 回原 vault。
+  2. `gateway.dataPath`：
+  1. validate target → 2. 写 `<target>.legacy-migration` 标记 → 3. 复制当前 dataPath 全部内容到 target（rsync 等价，保留文件权限）→ 4. 在 target 上启动一个临时 store loader 试加载（只读模式，确认无损坏）→ 5. 通过后，`PATCH /api/settings` 写 `paths.gateway.dataPath = target` override → 6. 旧 dataPath 不动（保留作回滚锚点），返回 `{ restartRequired: true }`。gateway 实际切换到 target 在下次重启后由 store migrate detect 走「分文件 → 分文件」自愈（不另写迁移代码）。
+  3. **回滚**：migrate 失败任一步：已复制到 target 的内容删除并移走 `.legacy-migration` 标记；settings.json 不写 override；旧路径不动。重启后 store 在新 path 加载失败时，gateway 启动 enter crash-safe：检测到 `paths.gateway.dataPath` override 与磁盘不一致 → 回滚 override + 启动用旧路径 + 在 `/api/status` 标记 `dataPathRollbackPending`。
+
+**字段新增到 settings 白名单**：`paths.memoryVaultPath`（string）、`paths.gateway.dataPath`（string）。两个 key 都支持 `null` 恢复 config 默认（即 env `VERA_MEMORY_VAULT_PATH` / `VERA_DATA_PATH` 当前值）。**`paths.gateway.dataPath = null` 不会自动回滚已迁移的数据**——只是把 override 清掉，gateway 仍读 env 当前值；已迁移到 target 的数据需要用户手动 rsync 回 env 路径或在 env 改路径后重启。
+
+### 持久化
+
+`paths.*` 与 `appearance.*` / 系统字段一样落 `<dataPath>/settings.json` override；consumer 是 server.js boot 时读 settingsStore override 决定实际 dataPath / vaultPath（**注意**：gateway.dataPath 是 chicken-and-egg——settings 文件本身在 dataPath 内，迁移后 settings.json 也会随 dataPath 一起搬走，不冲突）。
+
+## 八、中控台 Status API `[P4.6/F1]`
+
+中控台只读，字段严格按当前真实可观测的状态，**不虚构未来的数据库连接或联邦 presence 数据**。
+
+### 端点
+
+| Method | Path | 说明 |
+|---|---|---|
+| GET | `/api/status` | 200 `{ status: {...} }`。无查询参数。 |
+
+### 字段清单
+
+```json
+{
+  "status": {
+    "gateway": {
+      "version": "0.0.1",
+      "pid": 12345,
+      "startedAt": "…",
+      "uptimeMs": 123456,
+      "dataPath": "/…/data",
+      "dataPathRollbackPending": false
+    },
+    "sse": {
+      "currentSeq": 1042,
+      "bufferSize": 2000,
+      "connectedClients": 1
+    },
+    "store": {
+      "kind": "file",
+      "collections": { "agents": 2, "accounts": 2, "spaces": 1, "messages": 47, "activities": 12, "approvals": 3, "runs": 8 },
+      "sessionStates": 3,
+      "themesCount": 0,
+      "lastFlushAt": "…"
+    },
+    "memory": {
+      "vaultPath": "/…/memory",
+      "vaultExists": true,
+      "memoryCount": 5
+    },
+    "agents": {
+      "federation": "disabled",
+      "onlineAccounts": 0,
+      "accounts": [{ "accountId": "acc_…", "agentId": "agt_…", "presence": "offline", "lastSeenAt": null }]
+    },
+    "recentErrors": [
+      { "ts": "…", "scope": "adapter", "code": "adapter_unavailable", "message": "…" }
+    ]
+  }
+}
+```
+
+- `gateway.version` 来自 package.json；`startedAt` / `uptimeMs` 进程启动时记一次；`dataPath` 同 `/api/paths` 返回值；`dataPathRollbackPending` 见章节七回滚段。
+- `sse.connectedClients` 是 hub 当前活跃 SSE 连接数；`currentSeq` 同 `hub.currentSeq()`。
+- `store.kind` 永远是 `"file"`（Phase 5 前）；`collections` 是各 JSON 文件 `data[name].length`，无坏文件容错掉的不计；`lastFlushAt` 是最近一次 doFlush 完成 ISO 时间。
+- `memory` 同 `/api/paths` 的 memory 字段。
+- `agents.federation` 当前阶段固定 `"disabled"`（联邦 Phase 5.5 落地后改 `"enabled"`）；`onlineAccounts` 当前阶段固定 `0`；`accounts` 列出每条 account 的 presence/lastSeenAt（当前阶段 presence 全 `"offline"`、lastSeenAt 全 `null`）。
+- `recentErrors` 是进程内环形缓冲（默认 20 条），收集 `ApiError` 抛出与 adapter / store / memory 模块的告警；超过 N 条滚动覆盖。只读，无写入端点。
+
+## 九、客户端 platform adapter 接口 `[P4.6/F1]`
+
+三端共享同一份 `frontend/src` 业务代码；平台差异只允许通过统一 platform adapter 调用。adapter 必须明确返回 `unsupported` 而非静默失效。Web fallback 在契约中可表达，原生壳在 F2/F3 阶段不实现，但 F1 必须钉接口形状。
+
+### 接口形状（`src/state/platform.js`）
+
+```js
+{
+  id: "web" | "android" | "ios",
+  // gateway URL：Web 由同源伺服（location.origin）；原生壳从 secureStorage 读用户配置
+  async getGatewayUrl(): string,
+  async setGatewayUrl(url): void | unsupported,
+  // fetch 与 SSE：Web 直接用 window.fetch + EventSource；原生壳用原生 http + 长连接
+  fetch(url, init): Promise<Response>,
+  createEventSource(url, opts): EventSource,
+  // 安全存储：Web 用 localStorage（仅存未提交预览，ground truth 4.4）；原生壳用 secure enclave/kv
+  secureStorage: {
+    async get(key): string | null,
+    async set(key, value): void,
+    async remove(key): void,
+  },
+  // 通知：ground truth 4.2.6 / Space.notifications 消费
+  notifications: {
+    async requestPermission(): "granted" | "denied" | "unsupported",
+    async notify({ title, body, spaceId, messageId }): "shown" | "unsupported",
+  },
+  // 文件选择：Space Files / 路径校验回执
+  async pickFile({ accept? }): { path, name, mime } | unsupported,
+  async pickDirectory(): { path } | unsupported,
+  // 键盘 / 返回：原生壳决定是否拦截
+  keyboard: { insets: { bottom, top }, onInsetChange(cb): unsubscribe },
+  backButton: { onBack(cb): unsubscribe, consume(): void },
+  haptics: { async tap(mode): void | unsupported, async notify(type): void | unsupported },
+  // 外部认证 / 链接：原生壳用系统浏览器回跳；Web 直接 history
+  externalAuth: {
+    async open(url, opts?): { redirected: url } | unsupported,
+    onRedirect(cb): unsubscribe,
+  },
+  externalLink: { async open(url): "opened" | "unsupported" },
+}
+```
+
+每个方法在缺失能力时返回 `{ unsupported: true }` 或抛 `UnsupportedError`，业务调用方必须显式检查，不静默 fallback 到 Web 行为——若需 fallback，在调用点显式声明。
+
+### Web fallback 形状
+
+Web 实现位于 `src/platform/web.js`，对原生能力返回 `unsupported`：
+- `notifications.notify` → Web Notification API（permission denied 时返 `unsupported`）
+- `pickFile` / `pickDirectory` → `<input type="file">` / `showDirectoryPicker()`（不支持时返 `unsupported`）
+- `haptics` → 返 `unsupported`
+- `keyboard.insets` → 始终 `{ bottom: 0, top: 0 }`（视口尺寸变化由 viewport meta 处理）
+- `backButton` → Web 用 `popstate`；`consume()` 调 `history.back()`
+- `externalAuth.open` → Web 直接 `window.location` 跳转（Cloudflare Access 邮件 OTP）；`onRedirect` 用 `window` 的 `hashchange` / `popstate`
+- `secureStorage` → Web 用 `localStorage`，仅限未提交预览（ground truth 4.4），不存已确认配置
+
+### 原生壳认证路径（CORS / SSE / Cloudflare Access）
+
+- **gateway URL**：原生壳不内置固定 URL/IP/token；首启从无 secureStorage 状态弹「配置 gateway URL」视图（用户输入 `https://vera.futureidiot.com`），保存到 secureStorage 后所有请求 APPENDED 该前缀。Web 由 `location.origin` 派生。
+- **CORS**：Web 同源伺服天然无 CORS；原生壳跨域请求，gateway `/api/*` 必须 `Access-Control-Allow-Origin: *` + `Allow-Methods: GET,POST,PATCH,DELETE,OPTIONS` + `Allow-Headers: Authorization,Content-Type,Last-Event-ID` + 预检 `OPTIONS` 204。gateway 当前实现仅同源；Phase 5.5 落地时由 `src/api/http.js` 统一加 CORS 头（无 origin 白名单——单用户自部署，凭 Cloudflare Access + agent token 把门）。
+- **Cloudflare Access 登录**：浏览器 / 原生壳首次访问 `https://vera.futureidiot.com/api/bootstrap` 未携带 session cookie 时，Cloudflare 边缘 302 到 Access 登录页（邮件 OTP）；浏览器自动跟跳，原生壳同样用系统 WebView 完成登录拿到 session cookie，之后 fetch 带该 cookie 持久化到原生 HTTP 客户端。**Service Token 路径**仅用于 `/api/agent/*` daemon 通道（联邦 Phase 5.5），普通客户端不持有 Service Token。
+- **SSE 长连接**：原生壳必须用原生 HTTP 客户端保持长连接（不能依赖 EventSource polyfill）；认证用同一条 session cookie；断线重连带 `Last-Event-ID` 头走 `?since=` 重放规则不变。
+- **回跳认证**：Cloudflare Access 登录完成回跳到 gateway 根路径，原生壳需在系统浏览器层捕获 cookie，写回原生 HTTP 客户端的 cookie jar；不支持 cookie 持久化的原生层需 fallback 到「在 App 内 WebView 完成登录，提取 CF_Auth cookie 写回 native client」。Web 不存在此问题。
+
+### 根节点标记与 safe-area
+
+- HTML 根节点设置 `data-platform="web|android|ios"`（由 platform adapter 根据自身 `id` 在 boot 时写入），CSS 通过 `[data-platform="…"]` 选择器做小范围平台适配，**不 fork 页面**。
+- safe-area 由 CSS env 变量 `env(safe-area-inset-*)` + platform adapter 的 `keyboard.insets` 共同驱动，组件层只读 CSS 变量。
+- 平台差异唯一允许的体现：安全区、键盘、返回手势、通知、文件选择、触感、外部认证/链接、本地安全存储。颜色、排版、页面职责、业务流程不分叉（ground truth 6.2）。
