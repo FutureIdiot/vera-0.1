@@ -45,6 +45,8 @@ Vera gateway (VPS, 7×24)
 | 触发判定（responseMode / 离线跳过 / blockAgentIds） | ✅ | ❌ |
 | Account.presence（在线/离线） | ✅ 维护 | ✅ 心跳维持 |
 | CLI/API 进程的 spawn 与生命周期 | ❌ | ✅ |
+| 本机Tools（文件/进程）、MCP、Hook、Agent Plugin执行 | ❌ | ✅（在绑定workspace与权限策略内） |
+| RuntimeCapabilities公开快照 | ✅ 暂存/提供给前端 | ✅ 登录时如实报告 |
 | 会话连续性具体实现（resume / daemon keepalive） | ❌ | ✅（agent 自己 spawn 的进程自己管） |
 | sessionState 真值 | 备份兜底 | 在线时持有最新副本 |
 
@@ -59,7 +61,24 @@ CF-Access-Client-Id: <service-token-id>
 CF-Access-Client-Secret: <service-token-secret>
 ```
 
-请求 body 为空（或可选 `{ "agentId": "agt_…", "accountId": "acc_…" }`，daemon 可显式声明它要驾驶哪个 account；缺省 = token 持有者的自有 owning account）。
+请求body：
+
+```json
+{
+  "accountId": "acc_…",
+  "runtimeCapabilities": {
+    "tools": [
+      { "name": "web.search", "source": "native", "scope": "network" },
+      { "name": "fs.read", "source": "daemon", "scope": "workspace" },
+      { "name": "fs.write", "source": "daemon", "scope": "workspace", "approval": "onRequest" },
+      { "name": "process.execute", "source": "native", "scope": "workspace", "approval": "onRequest" }
+    ],
+    "extensions": ["skill", "mcp", "hook", "agentPlugin"]
+  }
+}
+```
+
+`accountId` 可省略（缺省=token持有者的自有owning account）。`runtimeCapabilities` 是本次daemon进程的临时事实：`source` 为 `native` / `provider` / `daemon`，tool `name` 是可扩展命名空间字符串；基础标准名见ground truth 4.2.1。availability不等于authorization，最终执行仍受Vera保存的tool policy、workspace边界与Approval约束。daemon不得为了让UI好看而上报实际不可调用的能力。
 
 ```json
 // 200 响应
@@ -72,9 +91,12 @@ CF-Access-Client-Secret: <service-token-secret>
   "sessionStates": {
     "acc_…:spc_…": <opaque>
   },
+  "runtimeCapabilities": { "tools": [ … ], "extensions": [ … ] },
   "heartbeatIntervalMs": 15000
 }
 ```
+
+gateway只在该登录session期间暂存并公开`runtimeCapabilities`；daemon登出/离线后前端将这些能力显示为不可用，不写回Account持久记录。CLI已有的原生Tools由daemon报告而不是在Vera重复安装；API型daemon若要访问本机代码，必须自己实现provider tool-call循环并在本机执行受限Tools。纯远程API、无本地daemon时不得报告`fs.*`或`process.execute`。
 
 gateway 把该 Account.presence 置 `online` + `lastSeenAt=now`，并广播 `account.presence.updated` SSE。
 
