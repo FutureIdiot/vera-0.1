@@ -5,7 +5,7 @@
 // frontmatter 是本契约子集的手写 YAML：字符串标量 + 一层嵌套 map（stains），
 // 不引入 yaml 依赖。解析容错：字段缺失或整段 frontmatter 缺失都不崩溃。
 
-import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { ApiError } from "../core/errors.js";
 
@@ -238,6 +238,108 @@ export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25 }) {
     return { slug, ...meta };
   }
 
+  // 取单条完整正文（GET /api/memory/:slug）。
+  async function getMemory(slug) {
+    if (!SLUG_PATTERN.test(slug)) {
+      throw new ApiError("invalid_request", `slug must be kebab-case: ${JSON.stringify(slug)}`);
+    }
+    let raw;
+    try {
+      raw = await readFile(filePathFor(slug), "utf8");
+    } catch (err) {
+      if (err.code === "ENOENT") throw new ApiError("not_found", `memory ${slug} does not exist`);
+      throw err;
+    }
+    const { frontmatter, body } = splitFrontmatter(raw);
+    const meta = toIndexEntry(slug, frontmatter);
+    return { ...meta, content: body.replace(/\n$/, "") };
+  }
+
+  // 编辑已有记忆（PATCH /api/memory/:slug）。
+  // 乐观并发：ifMatch 与磁盘 updatedAt 不一致 → 409 附 current 让前端重新加载。
+  // newSlug：文件 mv（重命名后双链不自动更新，gateway 不扫描全文替换，保持薄封装）。
+  async function updateMemory(slug, patch) {
+    if (!SLUG_PATTERN.test(slug)) {
+      throw new ApiError("invalid_request", `slug must be kebab-case: ${JSON.stringify(slug)}`);
+    }
+    let raw;
+    try {
+      raw = await readFile(filePathFor(slug), "utf8");
+    } catch (err) {
+      if (err.code === "ENOENT") throw new ApiError("not_found", `memory ${slug} does not exist`);
+      throw err;
+    }
+    const { frontmatter, body } = splitFrontmatter(raw);
+    const currentUpdatedAt = frontmatter.updatedAt ?? null;
+
+    // 乐观并发校验
+    if (patch.ifMatch !== undefined && patch.ifMatch !== currentUpdatedAt) {
+      const currentMeta = toIndexEntry(slug, frontmatter);
+      const err = new ApiError("conflict", `memory ${slug} was modified since ${patch.ifMatch}`);
+      err.current = { slug, ...currentMeta };
+      throw err;
+    }
+
+    // 归档状态校验
+    if (patch.status !== undefined && !["active", "archived"].includes(patch.status)) {
+      throw new ApiError("invalid_request", `status must be "active" or "archived"`);
+    }
+
+    const newSlug = patch.newSlug;
+    if (newSlug !== undefined) {
+      if (!SLUG_PATTERN.test(newSlug)) {
+        throw new ApiError("invalid_request", `newSlug must be kebab-case: ${JSON.stringify(newSlug)}`);
+      }
+      if (newSlug !== slug) {
+        const targetExists = await readFile(filePathFor(newSlug), "utf8").then(
+          () => true,
+          (err) => err.code === "ENOENT" ? false : true,
+        );
+        if (targetExists) {
+          throw new ApiError("conflict", `memory ${newSlug} already exists`);
+        }
+      }
+    }
+
+    const now = new Date().toISOString();
+    const meta = {
+      type: patch.type !== undefined ? patch.type : (frontmatter.type ?? ""),
+      description: patch.description !== undefined ? patch.description : (frontmatter.description ?? ""),
+      status: patch.status !== undefined ? patch.status : (frontmatter.status ?? "active"),
+      stains: patch.stains !== undefined ? patch.stains : (frontmatter.stains ?? {}),
+      createdAt: frontmatter.createdAt ?? now,
+      updatedAt: now,
+    };
+    const content = patch.content !== undefined ? patch.content : body.replace(/\n$/, "");
+    const fileText = `${serializeFrontmatter(meta)}\n\n${content}\n`;
+
+    const targetSlug = newSlug && newSlug !== slug ? newSlug : slug;
+    await mkdir(vaultPath, { recursive: true });
+
+    if (targetSlug !== slug) {
+      // 先写新文件，确认成功后再删旧文件（顺序保证崩溃时不丢数据）
+      await writeFile(filePathFor(targetSlug), fileText, "utf8");
+      await unlink(filePathFor(slug));
+    } else {
+      await writeFile(filePathFor(slug), fileText, "utf8");
+    }
+
+    return { slug: targetSlug, ...meta };
+  }
+
+  // 删除记忆文件（DELETE /api/memory/:slug）。不可逆，前端必须二次确认。
+  async function deleteMemory(slug) {
+    if (!SLUG_PATTERN.test(slug)) {
+      throw new ApiError("invalid_request", `slug must be kebab-case: ${JSON.stringify(slug)}`);
+    }
+    try {
+      await unlink(filePathFor(slug));
+    } catch (err) {
+      if (err.code === "ENOENT") throw new ApiError("not_found", `memory ${slug} does not exist`);
+      throw err;
+    }
+  }
+
   // 常驻索引注入块：外部会话首条消息头部用（api-contract.md「常驻索引注入」）。
   // 排除 archived，按 updatedAt 降序截断至 residentIndexMaxLines 行；vault 为
   // 空或全部 archived 时返回 null，表示调用方不应注入任何内容。
@@ -257,5 +359,5 @@ export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25 }) {
     ].join("\n");
   }
 
-  return { listMemories, saveMemory, residentIndex };
+  return { listMemories, saveMemory, getMemory, updateMemory, deleteMemory, residentIndex };
 }

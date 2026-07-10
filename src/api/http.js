@@ -1,6 +1,7 @@
 // HTTP 响应/请求体的小工具，供各 domain 的 routes.js 复用。
 
 import { STATUS_BY_CODE, ApiError } from "../core/errors.js";
+import { recordError } from "../core/status.js";
 
 export function sendJson(res, status, body) {
   const payload = JSON.stringify(body);
@@ -31,6 +32,7 @@ export async function readJsonBody(req) {
 }
 
 // 包一层统一错误处理：domain 层只管抛 ApiError，这里按 code 映射状态码。
+// 同时记录到 status tracker 的 recentErrors 环形缓冲（中控台用）。
 export function asHandler(fn) {
   return async (ctx) => {
     try {
@@ -39,6 +41,7 @@ export function asHandler(fn) {
       const code = err?.code || "internal";
       const status = STATUS_BY_CODE[code] || 500;
       sendError(ctx.res, status, code, err?.message || "internal error");
+      recordError("api", code, err?.message || "internal error");
     }
   };
 }

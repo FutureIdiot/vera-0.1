@@ -1,11 +1,24 @@
 // Account CRUD（api-contract.md 二、Account 形状）。
 // Account 是供应商连接 + 项目/会话上下文；Agent 只保留身份。
+// F1 补 presence/lastSeenAt/runtimeCapabilities/authorizedAgentIds 字段形状
+// （值在联邦 Phase 5.5 前为 offline/null/[owningAgentId]，但字段必须在）。
 
 import { newAccountId } from "../core/id.js";
 import { ApiError } from "../core/errors.js";
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
+}
+
+// 旧 Account 记录可能缺联邦字段（F1 前创建的），读取时补默认。
+// 不做一次性 store 迁移——updateAccount 会自然把字段写进去，新创建的都有。
+function normalizeAccount(account) {
+  const normalized = stripInternal(account);
+  normalized.presence = account.presence ?? "offline";
+  normalized.lastSeenAt = account.lastSeenAt ?? null;
+  normalized.runtimeCapabilities = account.runtimeCapabilities ?? null;
+  normalized.authorizedAgentIds = account.authorizedAgentIds ?? [account.owningAgentId];
+  return normalized;
 }
 
 export function accountDisplayName(agent, body = {}) {
@@ -17,17 +30,18 @@ export function accountDisplayName(agent, body = {}) {
 export function listAccounts(store, { agentId } = {}) {
   const accounts = store.list("accounts");
   const filtered = agentId ? accounts.filter((account) => account.owningAgentId === agentId) : accounts;
-  return filtered.map(stripInternal);
+  return filtered.map(normalizeAccount);
 }
 
 export function getOwningAccount(store, agentId) {
-  return store.list("accounts").find((account) => account.owningAgentId === agentId) ?? null;
+  const account = store.list("accounts").find((account) => account.owningAgentId === agentId) ?? null;
+  return account ? normalizeAccount(account) : null;
 }
 
 export function getAccountOrThrow(store, id) {
   const account = store.find("accounts", id);
   if (!account) throw new ApiError("not_found", `account ${id} does not exist`);
-  return account;
+  return normalizeAccount(account);
 }
 
 export function createAccount(store, agentId, body = {}) {
@@ -43,6 +57,10 @@ export function createAccount(store, agentId, body = {}) {
     provider: body.provider ?? null,
     connection: body.connection ?? {},
     model: body.model ?? "",
+    presence: "offline",
+    lastSeenAt: null,
+    runtimeCapabilities: null,
+    authorizedAgentIds: [agentId],
     createdAt: now,
     updatedAt: now,
   };
@@ -56,7 +74,8 @@ export function updateAccount(store, id, patch) {
     if (patch[key] !== undefined) next[key] = patch[key];
   }
   next.updatedAt = new Date().toISOString();
-  return stripInternal(store.update("accounts", account.id, next));
+  const updated = store.update("accounts", account.id, next);
+  return normalizeAccount(updated);
 }
 
 export function deleteAccount(store, id) {

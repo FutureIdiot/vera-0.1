@@ -36,6 +36,28 @@ const DEFAULTS = {
     vaultPath: "~/.vera/memory", // Obsidian 兼容 vault，仓库外（api-contract.md Memory 一节）
     residentIndexMaxLines: 25, // 常驻索引截断行数
   },
+  // Appearance 默认值（ground truth 4.3「F0确认默认值」/ api-contract.md Appearance 字段）。
+  // 这是唯一默认源——settings-store 的 appearance.* deriveDefaults 从这里读，
+  // 代码其他地方不许另写第二份。运行时覆盖走 PATCH /api/settings。
+  // 主题/主题色/高亮色/字体族全局；字号/窗口边距按 phone/desktop × chat/management 分域；
+  // 气泡圆角/间距按 phone/desktop 分域且只进聊天时间线。
+  appearance: {
+    theme: "system", // system / light / dark / custom
+    themeId: null, // theme: custom 时指向已保存 Theme id
+    themeColor: "", // 空 = 跟随 Theme Palette / 系统默认
+    accentColor: "", // 同上
+    fontFamily: "system", // system / 具体字体族字符串
+    fontSize: {
+      phone: { chat: 14, management: 14 },
+      desktop: { chat: 16, management: 16 },
+    },
+    bubbleRadius: { phone: 16, desktop: 16 },
+    bubbleGap: { phone: 4, desktop: 10 },
+    windowMargin: {
+      phone: { chat: 12, management: 12 },
+      desktop: { chat: 64, management: 8 },
+    },
+  },
   // Speaker view 编译层（ground truth 2.3 / api-contract.md「Speaker view 编译层输出契约」）：
   // 群聊声告段从 messages.json 临时派生，每轮刷新、无状态。下列参数硬性约束段上限与署名呈现。
   viewCompiler: {
@@ -99,6 +121,7 @@ export function loadConfig(env = process.env) {
       vaultPath: expandHome(env.VERA_MEMORY_VAULT_PATH || DEFAULTS.memory.vaultPath),
       residentIndexMaxLines: num(env.VERA_MEMORY_INDEX_MAX_LINES, DEFAULTS.memory.residentIndexMaxLines),
     },
+    appearance: DEFAULTS.appearance,
     viewCompiler: {
       groupDeltaMaxMessages: num(env.VERA_VIEW_COMPILER_GROUP_DELTA_MAX_MESSAGES, DEFAULTS.viewCompiler.groupDeltaMaxMessages),
       groupDeltaMaxChars: num(env.VERA_VIEW_COMPILER_GROUP_DELTA_MAX_CHARS, DEFAULTS.viewCompiler.groupDeltaMaxChars),

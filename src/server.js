@@ -12,11 +12,16 @@ import { sendJson, sendError } from "./api/http.js";
 import { createStaticHandler } from "./api/static.js";
 import { createAgentStateTracker } from "./agents/agent-state.js";
 import { registerAgentRoutes } from "./agents/routes.js";
+import { listSpaces } from "./spaces/spaces.js";
 import { registerSpaceRoutes } from "./spaces/routes.js";
 import { createMemoryVault } from "./memory/memory.js";
 import { registerMemoryRoutes } from "./memory/routes.js";
 import { createSettingsStore } from "./core/settings-store.js";
 import { registerSettingsRoutes } from "./api/settings-routes.js";
+import { createStatusTracker } from "./core/status.js";
+import { registerStatusRoutes } from "./api/status-routes.js";
+import { registerPathsRoutes } from "./api/paths-routes.js";
+import { registerThemesRoutes } from "./api/themes-routes.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 
@@ -59,7 +64,7 @@ router.get("/api/bootstrap", ({ res }) => {
   sendJson(res, 200, {
     agents: store.list("agents").map(({ _seq, ...rest }) => rest),
     accounts: store.list("accounts").map(({ _seq, ...rest }) => rest),
-    spaces: store.list("spaces").map(({ _seq, ...rest }) => rest),
+    spaces: listSpaces(store), // 默认只返活跃（api-contract.md 260）
     agentStates: agentStates.list(),
     seq: hub.currentSeq(),
   });
@@ -76,6 +81,11 @@ registerMemoryRoutes(router, { memory });
 // boot 顺序：store → hub/agentStates/memory → settingsStore → 路由注册。
 const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
 registerSettingsRoutes(router, { settingsStore });
+
+const statusTracker = createStatusTracker({ config });
+registerStatusRoutes(router, { statusTracker, store, hub, config, memory, settingsStore });
+registerPathsRoutes(router, { config, settingsStore, memory, store });
+registerThemesRoutes(router, { store, settingsStore });
 
 const server = createServer(async (req, res) => {
   try {

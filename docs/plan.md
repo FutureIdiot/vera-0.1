@@ -131,11 +131,11 @@
 
 ### F1 — 前端契约与后端就绪闸门
 
-- [ ] 逐页面列“事件输入 / API读取 / API写入 / 空态与错误态”；接口缺失先改 `api-contract.md` 再写后端。
-- [ ] 补齐4.6所需后端：Space notifications与archive/restore（只写`archivedAt`，不删除记录）、Appearance字段/null恢复默认、Account组合读取所需摘要、Agent Memory编辑、路径校验/迁移入口、中控台status摘要；未完成的Extension/Agent Plugin/Space Module不做假控件。
-- [ ] 落Theme/Profile契约：Theme对象与列表/预览导入/保存/导出API，`vera-json`与白名单`vera-css`，iTerm2 `.itermcolors`与Terminal.app `.terminal`导入转换；Theme切换不得覆盖字体、响应式字号、气泡和窗口边距，导入原文不得直接持久化或执行。
-- [ ] 定义客户端平台adapter接口：gateway URL、fetch/SSE、secure storage、notification、file picker、keyboard/back、haptics、external auth/link；Web fallback必须在契约中可表达。
-- [ ] 明确原生壳连接VPS gateway的CORS/SSE/Cloudflare Access登录路径，不能等APK/IPA生成后再解决认证。
+- [x] 逐页面列"事件输入 / API读取 / API写入 / 空态与错误态"；接口缺失先改 `api-contract.md` 再写后端。
+- [x] 补齐4.6所需后端：Space notifications与archive/restore（只写`archivedAt`，不删除记录）、Appearance字段/null恢复默认、Account组合读取所需摘要、Agent Memory编辑、路径校验/迁移入口、中控台status摘要；未完成的Extension/Agent Plugin/Space Module不做假控件。
+- [x] 落Theme/Profile契约：Theme对象与列表/预览导入/保存/导出API，`vera-json`与白名单`vera-css`，iTerm2 `.itermcolors`与Terminal.app `.terminal`导入转换；Theme切换不得覆盖字体、响应式字号、气泡和窗口边距，导入原文不得直接持久化或执行。
+- [x] 定义客户端平台adapter接口：gateway URL、fetch/SSE、secure storage、notification、file picker、keyboard/back、haptics、external auth/link；Web fallback必须在契约中可表达。
+- [x] 明确原生壳连接VPS gateway的CORS/SSE/Cloudflare Access登录路径，不能等APK/IPA生成后再解决认证。
 
 **验收**：每个将要实现的控件都有真实API/consumer；`npm test`、`scripts/verify.mjs`与`git diff --check`通过。
 

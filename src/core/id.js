@@ -17,3 +17,4 @@ export const newMessageId = () => makeId("msg");
 export const newRunId = () => makeId("run");
 export const newActivityId = () => makeId("act");
 export const newApprovalId = () => makeId("apr");
+export const newThemeId = () => makeId("thm");

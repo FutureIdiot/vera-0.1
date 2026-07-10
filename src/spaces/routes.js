@@ -1,7 +1,15 @@
 // Space / Message / Run / Approval HTTP 路由。
 
 import { asHandler, readJsonBody, sendJson } from "../api/http.js";
-import { listSpaces, createSpace, updateSpace, getSpaceOrThrow } from "./spaces.js";
+import {
+  listSpaces,
+  createSpace,
+  updateSpace,
+  archiveSpace,
+  restoreSpace,
+  isArchived,
+  getSpaceOrThrow,
+} from "./spaces.js";
 import { getTimeline } from "./timeline.js";
 import { postMessage } from "./messages.js";
 import { cancelRun } from "./run-controller.js";
@@ -15,8 +23,10 @@ function stripInternal({ _seq, ...rest }) {
 export function registerSpaceRoutes(router, { store, hub, config, resolveAdapter, agentStates, memory }) {
   router.get(
     "/api/spaces",
-    asHandler(async ({ res }) => {
-      sendJson(res, 200, { spaces: listSpaces(store) });
+    asHandler(async ({ res, query }) => {
+      const archivedParam = query.get("archived");
+      const archived = archivedParam === "true" ? true : archivedParam === "all" ? "all" : undefined;
+      sendJson(res, 200, { spaces: listSpaces(store, { archived }) });
     }),
   );
 
@@ -38,6 +48,22 @@ export function registerSpaceRoutes(router, { store, hub, config, resolveAdapter
     }),
   );
 
+  router.post(
+    "/api/spaces/:id/archive",
+    asHandler(async ({ res, params }) => {
+      const space = archiveSpace(store, params.id);
+      sendJson(res, 200, { space });
+    }),
+  );
+
+  router.post(
+    "/api/spaces/:id/restore",
+    asHandler(async ({ res, params }) => {
+      const space = restoreSpace(store, params.id);
+      sendJson(res, 200, { space });
+    }),
+  );
+
   router.get(
     "/api/spaces/:id/timeline",
     asHandler(async ({ res, params, query }) => {
@@ -52,6 +78,10 @@ export function registerSpaceRoutes(router, { store, hub, config, resolveAdapter
   router.post(
     "/api/spaces/:id/messages",
     asHandler(async ({ req, res, params }) => {
+      // 已归档 Space 禁止发消息（api-contract.md 266）
+      if (isArchived(store, params.id)) {
+        throw new ApiError("conflict", `space ${params.id} is archived, restore it first`);
+      }
       const body = await readJsonBody(req);
       const result = postMessage({
         store,

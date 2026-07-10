@@ -21,8 +21,39 @@ function normalizeSeat(seat) {
   return normalized;
 }
 
-export function listSpaces(store) {
-  return store.list("spaces").map(stripInternal);
+// notifications 默认（api-contract.md Space 形状 [P4.6]）。
+const DEFAULT_NOTIFICATIONS = { mode: "agentMessages", includeActivityErrors: true };
+const NOTIFICATION_MODES = ["all", "agentMessages", "off"];
+
+function normalizeNotifications(notifications) {
+  if (!notifications) return { ...DEFAULT_NOTIFICATIONS };
+  const mode = NOTIFICATION_MODES.includes(notifications.mode) ? notifications.mode : "agentMessages";
+  return {
+    mode,
+    includeActivityErrors: notifications.includeActivityErrors !== false,
+  };
+}
+
+// 旧 Space 记录可能缺 notifications / archivedAt（F1 前创建的），读取时补默认。
+// 不做一次性 store 迁移——updateSpace 会自然把字段写进去，新创建的都有。
+function normalizeSpace(space) {
+  const normalized = stripInternal(space);
+  normalized.notifications = normalizeNotifications(space.notifications);
+  normalized.archivedAt = space.archivedAt ?? null;
+  return normalized;
+}
+
+export function listSpaces(store, { archived } = {}) {
+  let spaces = store.list("spaces");
+  if (archived === true) {
+    spaces = spaces.filter((s) => s.archivedAt != null);
+  } else if (archived === "all") {
+    // 全部，不过滤
+  } else {
+    // 默认只列活跃（archivedAt == null）
+    spaces = spaces.filter((s) => !s.archivedAt);
+  }
+  return spaces.map(normalizeSpace);
 }
 
 export function createSpace(store, body) {
@@ -34,6 +65,8 @@ export function createSpace(store, body) {
     name: body.name,
     topic: body.topic ?? "",
     seats: (body.seats ?? []).map(normalizeSeat),
+    notifications: normalizeNotifications(body.notifications),
+    archivedAt: null,
     createdAt: new Date().toISOString(),
   };
   return stripInternal(store.insert("spaces", space));
@@ -46,7 +79,36 @@ export function updateSpace(store, id, patch) {
   if (patch.name !== undefined) next.name = patch.name;
   if (patch.topic !== undefined) next.topic = patch.topic;
   if (patch.seats !== undefined) next.seats = patch.seats.map(normalizeSeat);
-  return stripInternal(store.update("spaces", id, next));
+  if (patch.notifications !== undefined) next.notifications = normalizeNotifications(patch.notifications);
+  const updated = store.update("spaces", id, next);
+  return normalizeSpace(updated);
+}
+
+export function archiveSpace(store, id) {
+  const space = store.find("spaces", id);
+  if (!space) throw new ApiError("not_found", `space ${id} does not exist`);
+  if (space.archivedAt) return normalizeSpace(space); // 幂等
+  // 有未结束 Run 时拒绝（api-contract.md 263）
+  const runningRuns = store.list("runs").filter((r) => r.spaceId === id && r.status === "running");
+  if (runningRuns.length > 0) {
+    throw new ApiError("conflict", `space ${id} has ${runningRuns.length} running run(s), cancel or wait before archiving`);
+  }
+  const updated = store.update("spaces", id, { archivedAt: new Date().toISOString() });
+  return normalizeSpace(updated);
+}
+
+export function restoreSpace(store, id) {
+  const space = store.find("spaces", id);
+  if (!space) throw new ApiError("not_found", `space ${id} does not exist`);
+  if (!space.archivedAt) return normalizeSpace(space); // 幂等
+  const updated = store.update("spaces", id, { archivedAt: null });
+  return normalizeSpace(updated);
+}
+
+export function isArchived(store, id) {
+  const space = store.find("spaces", id);
+  if (!space) throw new ApiError("not_found", `space ${id} does not exist`);
+  return space.archivedAt != null;
 }
 
 // 内部用：拿 raw record（不剥离 _seq），供 domain 内部逻辑（如 messages.js

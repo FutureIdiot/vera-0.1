@@ -41,8 +41,10 @@ export function registerAgentRoutes(router, { store, agentStates }) {
 
   router.get(
     "/api/agent-states",
-    asHandler(async ({ res }) => {
-      sendJson(res, 200, { agentStates: agentStates.list() });
+    asHandler(async ({ res, query }) => {
+      const spaceId = query.get("spaceId") || undefined;
+      const agentId = query.get("agentId") || undefined;
+      sendJson(res, 200, { agentStates: agentStates.list({ spaceId, agentId }) });
     }),
   );
 
