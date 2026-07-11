@@ -58,17 +58,19 @@
 
 注 2（2026-07-03，与 Theta 确认）：store 持久化拆为 `data/` 目录按集合分文件（agents / spaces / messages / activities / approvals / runs / session-states / meta），防 memory、profile 等数据增长后混存一个大 JSON。`dataPath` 语义由文件改为目录，旧单文件 `store.json` 启动时自动迁移。store 对外 API 不变。
 
-## Phase 3 — 隧道上手机
+## Phase 3 — 隧道上手机（历史验收；目标网络已由 2026-07-11 纯私网设计取代）
 
 **目标**：手机在蜂窝网络下跑通同一条切片。
 
-- [x] cloudflared 隧道（照 `docs/reference/vps-tunnel-deploy.md` Option A，个人隧道可跳过 VPS）——`vera.futureidiot.com` → `127.0.0.1:3210`，LaunchAgent 常驻（`com.cloudflare.cloudflared`，plist 需手补 `tunnel run vera` 参数）。本地网络屏蔽 UDP 7844，config.yml 钉死 `protocol: http2`。SSE 过隧道实测逐条到达（ping 间隔 25s 不结块）
+- [x] cloudflared 隧道（历史方案，当前部署指南已不再保留该Option）——`vera.futureidiot.com` → `127.0.0.1:3210`，LaunchAgent 常驻（`com.cloudflare.cloudflared`，plist 需手补 `tunnel run vera` 参数）。本地网络屏蔽 UDP 7844，config.yml 钉死 `protocol: http2`。SSE 过隧道实测逐条到达（ping 间隔 25s 不结块）
 - [x] Cloudflare Access 认证（Zero Trust 面板手工配：email OTP → Theta 邮箱；team `plain-silence-4358`，session 1 week，实测未登录请求 302 到 Access 登录页）
 - [x] 手机浏览器实测（2026-07-03 真机验收）：蜂窝网络下流式逐字、锁屏/切后台重连、上下文连续均通过。附带教训：gateway 静态文件此前不发缓存头，Cloudflare 默认边缘缓存 .js/.css 导致前端改动手机拿不到——已改为 `Cache-Control: no-store`（api-contract.md 系统表），Phase 6 换 ETag。首测曾卡在 api.navy 免费日额度耗尽（UTC 午夜重置；超限时流式请求挂 60s 被掐、opencode 无限重试、run 挂 working 直到 30min 看门狗——provider 错误尽早浮出 UI 是后续待修项）。已加第二个 agent `Gemma`（本地 ollama `gemma4:e4b`，tmux 会话 `ollama` 常驻）绕开额度依赖；GLM 席位临时 silent，额度恢复后改回 default
 
 **完成标准**：手机蜂窝网络下发消息、看流式回复，体验与本地一致。✅ 2026-07-03 达成。
 
 注（运维现状）：gateway与ollama各跑在tmux会话里（`vera-gateway` / `ollama`）；gateway常驻迁移已改由Phase 5.5落VPS systemd，agent daemon再按宿主使用launchd/systemd。cloudflared当前仍为用户级LaunchAgent；重启gateway时store已自动迁移为data/分集合文件（旧文件留`store.json.legacy`），Gemma会话跨重启复用同一external session验证通过。
+
+> 2026-07-11 网络修订：以上 Cloudflare Tunnel / Access 条目只保留为 Phase 3 已完成的历史证据，不再是目标部署。Phase 5.5 改为 VPS 单一 gateway + Tailscale Serve 纯私网；手机与 Mac 都加入 tailnet，Vera 不保留公网入口。
 
 ## Phase 4 — 横向铺开
 
@@ -135,7 +137,7 @@
 - [x] 补齐4.6所需后端：Space notifications与archive/restore（只写`archivedAt`，不删除记录）、Appearance字段/null恢复默认、Account组合读取所需摘要、Agent Memory编辑、路径校验/迁移入口、中控台status摘要；未完成的Extension/Agent Plugin/Space Module不做假控件。
 - [x] 落Theme/Profile契约：Theme对象与列表/预览导入/保存/导出API，`vera-json`与白名单`vera-css`，iTerm2 `.itermcolors`与Terminal.app `.terminal`导入转换；Theme切换不得覆盖字体、响应式字号、气泡和窗口边距，导入原文不得直接持久化或执行。
 - [x] 定义客户端平台adapter接口：gateway URL、fetch/SSE、secure storage、notification、file picker、keyboard/back、haptics、external auth/link；Web fallback必须在契约中可表达。
-- [x] 明确原生壳连接VPS gateway的CORS/SSE/Cloudflare Access登录路径，不能等APK/IPA生成后再解决认证。
+- [x] 明确原生壳通过Tailscale连接VPS gateway的私网URL、精确Origin CORS、可信owner identity与SSE恢复路径；2026-07-11 已替换原Cloudflare Access/公网登录设计。
 
 **验收**：每个将要实现的控件都有真实API/consumer；`npm test`、`scripts/verify.mjs`与`git diff --check`通过。
 
@@ -178,7 +180,7 @@
 ### 依赖闸门 — Phase 5 / 5.5
 
 - [ ] 完成Phase 5中Account页真实依赖的Agent Memory编辑/检索与Files最小接口。
-- [ ] 完成Phase 5.5联邦：VPS gateway、远程agent daemon、presence、runtimeCapabilities、稳定HTTPS/SSE。
+- [ ] 完成Phase 5.5联邦：VPS gateway、Tailscale Serve纯私网、手机/Mac tailnet接入、owner identity校验、agent token、presence、runtimeCapabilities、稳定HTTPS/SSE。
 - [ ] 原生客户端认证、runtime gateway URL和后台/恢复重连在真实VPS链路通过；在此之前Android/iOS只允许壳级实验，不标“持续可用”。
 
 ### F6 — 三端共享平台层与仓库结构闸门
@@ -233,38 +235,39 @@
 
 **完成标准**：agent 在 A Space 获得的长期记忆，整理后在 B Space 可用。
 
-## Phase 5.5 — Agent 联邦（gateway 搬 VPS + agent daemon 远程接入）
+## Phase 5.5 — Agent 联邦（VPS gateway + Tailscale纯私网）
 
-**目标**：把当前"gateway + adapter 同机 spawn CLI"形态改成"gateway 在 VPS、agent daemon 在远端、通过 HTTP/SSE 联邦接入"形态。这是 2026-07-04 与 Theta 五问五答定下来的根本架构转向（ground-truth 2.4），不是单纯运维搬迁。
+**目标**：把当前“gateway + adapter 同机 spawn CLI”形态改成“gateway 在 VPS；手机、Mac与agent daemon全部经Tailscale Serve私网HTTPS接入”的纯私网形态。手机“不走VPN”特指不再同时运行v2rayNG等其他VPN，Tailscale仍保持启用。开源版本也默认纯私网。
 
 **为什么必须做**：
 - 用户核心需求是"手机随时随地能联系 Mac 上的 agent"。Mac 单机形态下 Mac sleeps / 切网 / 重启就联系不上。
-- cloudflared 边缘漂移假活（2026-07-04 实测，salvage-notes 第 5 条）暴露了 launchd 存活检测治不了"进程假活"，光搬 VPS 不够，还要 systemd watchdog。
-- Agent 跟 gateway 解耦后，agent daemon 在哪台机器都行（Mac / 另一台 VPS / 云函数 / API 型无进程），用户在手机上能跨机器调度 agent 协作。
+- cloudflared 边缘漂移假活（2026-07-04 实测，salvage-notes 第 5 条）是历史教训；新设计直接移除 cloudflared 运行依赖，不再为它建设 watchdog。
+- 全部控制面和用户面收进tailnet：Mac / 手机 / 另一台VPS daemon可接入；纯第三方云函数若不加入tailnet则不能直连`/api/agent/*`。公网暴露不是当前实现范围。
 
 **契约先行**（已完成，本阶段代码实施前确认对齐）：
-- [x] `docs/ground-truth.md` 2.4 节定稿：4 条决策（gateway 搬 VPS / agent 被动响应 / 离线 @ 跳过 + error activity / 工作流约定冲突协调）+ 心跳退出协议 + 双层认证 + AgentState per-Space + GitHub 单账号分活
+- [x] `docs/ground-truth.md` 2.4 节定稿并于2026-07-11修订：4条联邦决策 + Tailscale Serve纯私网 + 手机/Mac接入语义 + owner Tailscale identity + agent token + 心跳退出协议 + AgentState per-Space
 - [x] `docs/adapter-interface.md` 重写为 agent daemon 协议（旧 gateway-spawn 形态移附录 A）
-- [x] `docs/api-contract.md` 加 `/api/agent/*` 路由前缀 + Account.presence/lastSeenAt + AgentState per-Space 扩展态 + `agent.heartbeat` / `run.requested` / `account.presence.updated` 事件 + 离线 @ Activity 规则 + 双层认证说明
-- [x] `docs/reference/vps-tunnel-deploy.md` 重写为 VPS gateway + 远程 agent daemon 部署指南
+- [x] `docs/api-contract.md` 加`/api/agent/*`路由前缀 + Account.presence/lastSeenAt + AgentState per-Space扩展态 + 联邦事件 + 离线@Activity + owner Tailscale identity / agent token边界
+- [x] `docs/reference/vps-tunnel-deploy.md` 重写为VPS单一gateway + Tailscale Serve纯私网部署指南
 
 **代码实施清单**（按依赖序）：
 
 - [ ] **5.5.1 AgentState per-Space 改造**（最浅，先做）：`src/agents/agent-state.js` 跟踪键 `agentId` → `agentId:spaceId`；形状加 `spaceId` + `detail` 字段；`status` 枚举扩到 `idle/thinking/typing/reading/coding/reviewing/on_task/away`；`/api/agent-states` 支持 `?spaceId` / `?agentId` 过滤；契约 + 4.1 已建跟踪器同步改。verify.mjs 加 per-Space 测试。
 - [ ] **5.5.2 Account.presence + 离线 @ 行为**：Account 形状加 `presence` / `lastSeenAt` 字段；`src/agents/accounts.js` 暴露 `setPresence`；`src/spaces/messages.js` 的 `shouldRespond` 加在线判定：offline 则不创建 run，改在 Space 时间线 insert 一条 `phase:"error", label:"agent-offline"` 的 Activity；SSE 加 `account.presence.updated` 事件。verify.mjs 加离线 @ 测试。
-- [ ] **5.5.3 Agent token 体系**：`src/core/agent-tokens.js` 新建——加载 `~/.vera/agent-tokens.json`，校验 Bearer token → 返回 agentId；token 文件格式 `{ "agt_xxx": "<long-random>", … }`，新建 agent 时自动生成一条；gateway 启动加载、不进 repo。
-- [ ] **5.5.4 `/api/agent/*` 路由层**：`src/api/agent-routes.js` 新建——所有 `/api/agent/*` 走 Bearer token 中间件识别身份；`POST /api/agent/login` 接收并暂存 `runtimeCapabilities`、返回 agent/account/seats/sessionStates/runtimeCapabilities/heartbeatIntervalMs，离线清空能力快照；其余为 `DELETE /api/agent/sessions`、`GET /api/agent/events`（SSE，daemon 单一长连接，复用 hub 但按 agentId 过滤推送 + 加 `agent.heartbeat` 定时帧）、`POST /api/agent/runs` / `PATCH /api/agent/runs/:id` / `POST /api/agent/runs/:id/{delta,messages,activities,approvals}` / `POST /api/agent/sync-state`。
-- [ ] **5.5.5 Run 触发链路改造**：`src/spaces/messages.js` 不再 sync 调 `executeRun`；改成"对每个应该响应的 seat：在线 → 创建 Run 记录（status=running）+ 通过 daemon SSE 通道推 `run.requested` 事件（含编译层 promptText）；离线 → 走 5.5.2 离线 activity 路径"。`run-controller.js` 的 `executeRun` 拆掉，编译层抽出独立模块 `src/spaces/view-compiler.js`（Phase 4.2 本来要做，联邦形态下它直接服务于 `run.requested` 的 promptText 字段）。mock adapter 保留给 verify.mjs gateway 内部一致性测试用。
-- [ ] **5.5.6 `scripts/agent-daemon.js`**：新进程，独立于 gateway。启动读 env（gateway URL / agent token / Service Token / CLI binary path / workspace），探测CLI/provider/daemon实际Tools并随`POST /api/agent/login`报告`runtimeCapabilities`，拉回sessionState → `GET /api/agent/events` SSE订阅 → 收`run.requested`后内部走“spawn CLI / 调API”逻辑（搬运 `src/adapters/opencode-adapter.js` 的daemon管理 + runner子进程逻辑，但ctx.*回调改成对gateway的POST）→ 流式输出回POST → 心跳缺失3次后exit(0)。API型若要访问本机代码，tool-call循环和受限执行也在此daemon实现。
-- [ ] **5.5.7 mock daemon + verify.mjs 拆分**：verify.mjs 加一段端到端协议测试——起一个 mock daemon 子进程，对 `/api/agent/*` 全协议走一遍（login → run.requested → delta → activity → message → run completed → sync-state → logout）；gateway 内部一致性测试保留旧 mock adapter 路径。
-- [ ] **5.5.8 VPS 部署落地**：按 `docs/reference/vps-tunnel-deploy.md` 顺序：VPS 初始化 → 数据 rsync → systemd units（gateway / cloudflared / watchdog timer）→ Service Token 在 Cloudflare 面板配 → 验证。
-- [ ] **5.5.9 本机清理**：`tmux kill-session vera-gateway`、`launchctl unload com.cloudflare.cloudflared`；本机 `~/.vera/` 与 `~/.cloudflared/` 留冷备份不删；本机起 agent daemon 验证 Mac → VPS → 手机端到端通。
+- [ ] **5.5.3 Agent token 体系**：`src/core/agent-tokens.js` 新建——加载 `~/.vera/agent-tokens.json`，校验 Bearer token → 返回 agentId；token 文件格式 `{ "agt_xxx": "<long-random>", … }`，新建 agent 时自动生成一条；gateway 启动加载、不进 repo。tailnet ACL只做网络门禁，不替代此token。
+- [ ] **5.5.4 Tailscale owner identity + 入口权限**：gateway只信任本机Tailscale Serve注入并去伪造的identity headers；普通API/SSE要求login命中`config.security.ownerTailscaleLogins`；生产列表为空时拒绝业务API。原生CORS使用配置化精确Origin白名单，不自建配对码/device session。
+- [ ] **5.5.5 `/api/agent/*` 路由层**：`src/api/agent-routes.js` 新建——所有 `/api/agent/*` 走 Bearer token 中间件识别身份；`POST /api/agent/login` 接收并暂存 `runtimeCapabilities`、返回 agent/account/seats/sessionStates/runtimeCapabilities/heartbeatIntervalMs，离线清空能力快照；其余为daemon登录、SSE、run回传和sessionState同步接口。
+- [ ] **5.5.6 Run 触发链路改造**：`src/spaces/messages.js` 不再 sync 调 `executeRun`；在线seat创建Run并通过daemon SSE推`run.requested`，离线走5.5.2 Activity路径；编译层抽出`src/spaces/view-compiler.js`。mock adapter保留给gateway内部一致性测试。
+- [ ] **5.5.7 `scripts/agent-daemon.js`**：新进程，启动读Tailscale私网gateway URL / agent token / CLI binary path / workspace（不再有Cloudflare Service Token），报告runtimeCapabilities并跑完整HTTP/SSE协议；心跳缺失3次后exit(0)，不得私网失败后fallback到公网域名。
+- [ ] **5.5.8 mock daemon + verify.mjs 拆分**：起mock daemon走login → run.requested → delta → activity → message → completed → sync-state → logout；gateway内部一致性测试保留旧mock adapter路径。
+- [ ] **5.5.9 VPS纯私网部署落地**：完成数据迁移、gateway systemd、VPS加入tailnet、Tailscale Serve、ACL、owner login配置、SSE逐帧和公网不可达验收；不安装公网反向代理，不启用Funnel。
+- [ ] **5.5.10 本机清理**：停旧Mac gateway与cloudflared自启；旧数据和cloudflared配置只留冷备份；验证Mac daemon与手机客户端均经Tailscale访问VPS，其他手机App仍直连公网。
 
 **完成标准**：
 1. `scripts/verify.mjs` 全过（含 mock daemon 端到端协议测试 + 离线 @ error activity + per-Space AgentState + 心跳缺失 daemon 自杀）
-2. VPS 上 gateway + cloudflared + watchdog systemd unit 全部 active
+2. VPS上gateway + Tailscale Serve active；未加入tailnet的设备无法访问任何Vera页面/API，公网3210/443均无Vera入口
 3. 手机蜂窝网络下 @ 在线 agent（daemon 在 Mac）→ 流式回复正常到达；@ 离线 agent → 时间线一行 error 提示 + 不创建 Run
-4. 重启 VPS gateway → Mac daemon 自动重连 + sessionState 取回 + 后续消息零 session-reset
+4. 重启VPS gateway → Mac daemon经Tailscale自动重连并取回sessionState；手机Tailscale身份仍有效且SSE按since恢复
 5. 停 VPS gateway → Mac daemon 在 ~45s 内 exit(0)，不反复撞网关；恢复 gateway 后手动起 daemon 重新登录正常
 
 ## Phase 6 — 原生客户端、适配补全与扩展

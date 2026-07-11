@@ -1,6 +1,6 @@
 # Adapter 接口契约
 
-> 本文是 **agent daemon ↔ gateway** 通信协议的唯一基准（2026-07-04 联邦形态定稿，见 ground-truth 2.4）。
+> 本文是 **agent daemon ↔ gateway** 通信协议的唯一基准（2026-07-11 纯私网修订，见 ground-truth 2.4）。
 > 核心承诺：**gateway 不 spawn 任何 agent 进程；agent daemon 在远端独立活着，gateway 只通过 HTTP/SSE 与它通讯**。
 > 旧形态（gateway 同机 spawn CLI 的"adapter 模块"）已迁移至文末附录 A 作历史参考，不再有效；新代码只认本文正文。
 
@@ -9,7 +9,7 @@
 ## 一、形态总览
 
 ```
-Agent daemon (任意机器: Mac / 另一台 VPS / 云函数 / API 型无进程)
+Agent daemon (加入同一 Tailscale tailnet 的 Mac / 另一台 VPS)
     │
     │  启动: POST /api/agent/login   (Bearer <vera-agent-token>)
     │  ↓
@@ -57,9 +57,9 @@ Vera gateway (VPS, 7×24)
 ```http
 POST /api/agent/login
 Authorization: Bearer <vera-agent-token>
-CF-Access-Client-Id: <service-token-id>
-CF-Access-Client-Secret: <service-token-secret>
 ```
+
+base URL 必须是 VPS 的 Tailscale MagicDNS / `*.ts.net` HTTPS 私网地址。tailnet ACL 是网络门禁，Bearer token 是 agent 身份；Vera 不配置公网域名或公网 fallback。不再发送 Cloudflare Access Service Token 头。
 
 请求body：
 
@@ -183,6 +183,7 @@ daemon 向 gateway 报 run 失败时 PATCH `error: { code, message }`：
 - **无交互模式**：CLI 必须以无交互参数运行（opencode `--dangerously-skip-permissions`、CC print 模式等），**禁止让 CLI 弹出选项式提问**。需要用户点头的危险操作走 `requestApproval`；其他问题让 agent 正常发消息问。
 - **常驻资源**：CLI daemon（opencode serve）等长命资源是 daemon 内部实现细节，daemon 自己管空闲回收、SIGTERM 关停，gateway 不帮忙清理。
 - **secrets**：API 型 daemon 通过 `account.connection.secretRef` 向 gateway（或 VPS 本地 `~/.vera/secrets.json`）换取明文 key，只存在于内存，不落日志、不进 sessionState。
+- **网络路径**：daemon 的 HTTP、SSE、心跳和重连全部固定走 Tailscale 私网 base URL。Mac 使用小火箭承载 Tailscale 时，daemon 不感知客户端品牌，只要求 MagicDNS、tailnet 路由与长连接真实可用；不得在私网失败时静默 fallback 到公网域名。
 - **缓存纪律**（ground truth 6 技术约束）：
   - CLI 型：**必须复用会话**（sessionState 机制的本意）。禁止退化成"每条消息新开会话、把历史拼进 prompt 重放"——那样供应商侧 prompt cache 全部落空，多轮成本近似平方增长。
   - API 型：prompt 组装必须前缀稳定、只追加。system 提示与历史消息是稳定前缀；时间戳、AgentState 等动态内容只许放消息尾部；长期记忆注入采用版本化批量更新（记忆变更累积后一次性换版），不得逐条改写 system 提示。Anthropic 系设置 `cache_control` 断点。**重建历史气泡只放本人 assistant 轮次 + 用户直接对该 agent 的提问 user 轮次**——其他 agent 的气泡绝不进稳定历史，只以"群内最近发言"形式落在本轮新 user 消息尾部（ground truth 2.3 群聊视角注入形态）。
@@ -275,4 +276,4 @@ export function createOpencodeAdapter({ config }) {
 
 旧形态的"两映射示例"（OpenCode daemon / Claude Code resume）的行为约束仍成立——只是协议载体从"进程内函数调用"换成"HTTP/SSE 跨进程消息"。附录中的两个表格作为 daemon 实现的对照参考保留。
 
-`docs/salvage-notes.md` 第五节记录的 cloudflared 边缘漂移假活是 2026-07-04 联邦决策的导火索，新形态下 watchdog timer 取代 launchd 存活检测，详见 `docs/reference/vps-tunnel-deploy.md` 第 4.3 节。
+`docs/salvage-notes.md` 第五节记录的 cloudflared 边缘漂移假活是 2026-07-04 联邦决策的导火索；2026-07-11 纯私网修订直接移除了 cloudflared 与公网入口。历史只用于排查旧部署，不再建设 tunnel watchdog。
