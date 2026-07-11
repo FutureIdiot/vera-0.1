@@ -70,11 +70,15 @@ export function createStatusTracker({ config, pkgVersion = "0.0.1" }) {
     }
 
     // memory vault 状态
-    let memoryStatus = { vaultPath: config.memory.vaultPath, vaultExists: false, memoryCount: 0 };
+    let memoryStatus = { vaultPath: memory.getVaultPath(), vaultExists: false, memoryCount: 0, legacyUnscopedCount: 0 };
     try {
-      const s = await stat(config.memory.vaultPath);
-      const memories = await memory.listMemories();
-      memoryStatus = { vaultPath: config.memory.vaultPath, vaultExists: s.isDirectory(), memoryCount: memories.length };
+      const summary = await memory.inspect();
+      memoryStatus = {
+        vaultPath: memory.getVaultPath(),
+        vaultExists: summary.exists,
+        memoryCount: summary.memoryCount,
+        legacyUnscopedCount: summary.legacyUnscopedCount,
+      };
     } catch {
       // vault 不存在或不可读
     }

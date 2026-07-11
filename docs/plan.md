@@ -131,8 +131,8 @@
 
 ### F1 — 前端契约与后端就绪闸门
 
-- [~] 逐页面列"事件输入 / API读取 / API写入 / 空态与错误态"；接口缺失先改 `api-contract.md` 再写后端。
-- [~] 补齐4.6所需后端：Space notifications与archive/restore（只写`archivedAt`，不删除记录）、Appearance字段/null恢复默认、Account组合读取所需摘要、Agent Memory编辑、路径校验/迁移入口、中控台status摘要；未完成的Extension/Agent Plugin/Space Module不做假控件。
+- [x] 逐页面列"事件输入 / API读取 / API写入 / 空态与错误态"；接口缺失先改 `api-contract.md` 再写后端。
+- [x] 补齐4.6所需后端：Space notifications与archive/restore（只写`archivedAt`，不删除记录）、Appearance字段/null恢复默认、Account组合读取所需摘要、Agent Memory编辑、路径校验/迁移入口、中控台status摘要；未完成的Extension/Agent Plugin/Space Module不做假控件。
 - [x] 落Theme/Profile契约：Theme对象与列表/预览导入/保存/导出API，`vera-json`与白名单`vera-css`，iTerm2 `.itermcolors`与Terminal.app `.terminal`导入转换；Theme切换不得覆盖字体、响应式字号、气泡和窗口边距，导入原文不得直接持久化或执行。
 - [x] 定义客户端平台adapter接口：gateway URL、fetch/SSE、secure storage、notification、file picker、keyboard/back、haptics、external auth/link；Web fallback必须在契约中可表达。
 - [x] 明确原生壳连接VPS gateway的CORS/SSE/Cloudflare Access登录路径，不能等APK/IPA生成后再解决认证。
@@ -223,7 +223,7 @@
 >
 > **Vault 位置策略**（2026-07-04，与 Theta 确认 + 联邦形态对齐）：vault 热数据**只在 VPS**（`/home/theta/.vera/memory/`，联邦后 gateway 跑在 VPS），所有 agent daemon 通过 Vera memory API 远程读写，本地不再有"原版"——避免双写冲突/双读漂移，保持 single source of truth。**备份走 git 镜像**：把 VPS vault init 成 git repo，每次整理后 `git push` 到一个私有 GitHub repo；Mac 上 `git pull` 即得只读备份，还能看版本历史（Obsidian vault 全 markdown，git 友好）。rsync 冷备份作次要手段（崩了需要快速回滚时用），不替代 git 镜像的版本维度。Phase 3-4 期间 vault 还在本机 Mac `~/.vera/memory/`，Phase 5.5 联邦落地时随数据 rsync 一起搬 VPS，搬完即切 git 镜像备份流。
 
-- [~] 动工前：memory-hook.md 术语/API 对齐契约（按文档头部整合注记），形状收编进 api-contract.md（最小闭环部分已收编；其余 `/api/memory/*` 届时再补）
+- [~] 动工前：memory-hook.md 术语/API 对齐契约（按文档头部整合注记），形状收编进 api-contract.md（最小闭环部分已收编；其余 `/api/agents/:agentId/memory/*` 届时再补）
 - [~] 文件库（Obsidian 兼容 vault）+ Raw Event 留 store + 手动"保存到记忆"入口（R1–R2，MVP Step 1–3）（vault + 手动保存提前做；Raw Event 溯源链留本阶段）
 - [ ] memory_write_hook（context 容量触发；slug/钩子行质量为第一验收项）+ stain frontmatter 与前端色块（Step 4–5）
 - [ ] 三渠道注入：常驻索引（批量换版）、token 计价检索注入（哑墨、同会话去重、尾部放置）、fetch_more / fetch_detail 钻取（R3、R5，Step 6）

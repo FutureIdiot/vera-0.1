@@ -246,5 +246,5 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
 
   await load();
 
-  return { load, get, getAll, setAll, close };
+  return { load, get, getAll, setAll, flush, close };
 }

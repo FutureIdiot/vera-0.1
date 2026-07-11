@@ -9,8 +9,18 @@ import { createMemoryVault } from "../../src/memory/memory.js";
 async function withVault(fn, { residentIndexMaxLines } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "vera-memory-test-"));
   const vaultPath = join(dir, "vault"); // 故意不预先创建，覆盖“目录不存在”场景
+  const agentId = "agt_test01";
   try {
-    await fn(createMemoryVault({ vaultPath, residentIndexMaxLines }), vaultPath);
+    const vault = createMemoryVault({ vaultPath, residentIndexMaxLines });
+    const memory = {
+      listMemories: () => vault.listMemories(agentId),
+      saveMemory: (body) => vault.saveMemory(agentId, body),
+      getMemory: (slug) => vault.getMemory(agentId, slug),
+      updateMemory: (slug, body) => vault.updateMemory(agentId, slug, body),
+      deleteMemory: (slug) => vault.deleteMemory(agentId, slug),
+      residentIndex: () => vault.residentIndex(agentId),
+    };
+    await fn(memory, join(vaultPath, agentId), vault, agentId);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -38,6 +48,36 @@ test("saveMemory + listMemories round-trip including stains and colon-bearing de
     assert.equal(entry.status, "active");
     assert.deepEqual(entry.stains, { agt_x1y2: "#7A8FA6" });
     assert.ok(entry.createdAt && entry.updatedAt);
+  });
+});
+
+test("agent directories isolate equal slugs and reopen hot-switches every operation", async () => {
+  await withVault(async (_memory, agentPath, vault, firstAgentId) => {
+    const secondAgentId = "agt_test02";
+    await vault.saveMemory(firstAgentId, { slug: "same-slug", description: "first", content: "A" });
+    await vault.saveMemory(secondAgentId, { slug: "same-slug", description: "second", content: "B" });
+    assert.equal((await vault.getMemory(firstAgentId, "same-slug")).content, "A");
+    assert.equal((await vault.getMemory(secondAgentId, "same-slug")).content, "B");
+
+    const oldRoot = join(agentPath, "..");
+    const newRoot = join(oldRoot, "..", "new-vault");
+    vault.reopen({ vaultPath: newRoot });
+    assert.deepEqual(await vault.listMemories(firstAgentId), []);
+    await vault.saveMemory(firstAgentId, { slug: "after-reopen", description: "new", content: "new-root" });
+    assert.equal((await vault.getMemory(firstAgentId, "after-reopen")).content, "new-root");
+    assert.equal((await readFile(join(newRoot, firstAgentId, "after-reopen.md"), "utf8")).includes("new-root"), true);
+  });
+});
+
+test("root markdown remains unscoped and is never exposed through an agent", async () => {
+  await withVault(async (_memory, agentPath, vault, agentId) => {
+    const root = join(agentPath, "..");
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "legacy.md"), "legacy", "utf8");
+    assert.deepEqual(await vault.listMemories(agentId), []);
+    const summary = await vault.inspect();
+    assert.equal(summary.memoryCount, 0);
+    assert.equal(summary.legacyUnscopedCount, 1);
   });
 });
 

@@ -102,7 +102,6 @@ export async function run(ctx) {
 
   await check("l.3 常驻索引块仅首次注入", async () => {
     const vaultPath = join(dataDir, "memory");
-    await mkdir(vaultPath, { recursive: true });
     const decisionFile = `---
 type: decision
 description: 测试常驻索引注入
@@ -114,8 +113,6 @@ updatedAt: 2026-07-08T00:00:00.000Z
 
 测试正文
 `;
-    await writeFile(join(vaultPath, "decision-test.md"), decisionFile, "utf8");
-
     const agentCResp = await httpRequest("POST", "/api/agents", {
       name: "VerifyMockC",
       kind: "cli",
@@ -125,6 +122,9 @@ updatedAt: 2026-07-08T00:00:00.000Z
     });
     assertEqual(agentCResp.status, 201);
     const agentC = agentCResp.json.agent;
+    const agentVaultPath = join(vaultPath, agentC.id);
+    await mkdir(agentVaultPath, { recursive: true });
+    await writeFile(join(agentVaultPath, "decision-test.md"), decisionFile, "utf8");
 
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "l3-space",

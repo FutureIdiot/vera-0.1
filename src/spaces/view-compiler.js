@@ -127,7 +127,7 @@ export async function compilePrompt({ store, space, seat, agent, account, trigge
 
   // 常驻索引块：仅 (account, Space) 尚无 sessionState（即将开启全新外部会话）时注入。
   // memory 空或 vault 空时 residentIndex 返回 null，直接照用。
-  const residentBlock = priorSessionState === null ? await memory?.residentIndex() : null;
+  const residentBlock = priorSessionState === null ? await memory?.residentIndex(agent.id) : null;
 
   // 群聊声告段：从 store 临时派生，幂等。
   const spaceMessages = store.list("messages").filter((m) => m.spaceId === space.id);

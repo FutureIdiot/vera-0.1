@@ -14,6 +14,7 @@ import { executeRun } from "../../src/spaces/run-controller.js";
 const CONFIG = {
   bubbles: { boundaryPattern: "\\n\\s*\\n", minLength: 1, maxLength: 800 },
   activity: { detailMaxLength: 2000 },
+  viewCompiler: { groupDeltaMaxMessages: 20, groupDeltaMaxChars: 4000 },
 };
 
 function waitFor(hub, predicate, timeoutMs = 2000) {
@@ -63,7 +64,7 @@ async function withFixture(fn) {
 
 test("prepends resident index to prompt when no sessionState exists yet", async () => {
   await withFixture(async ({ store, memory, hub }) => {
-    await memory.saveMemory({
+    await memory.saveMemory("agt_test1", {
       slug: "project-rule-one",
       type: "project_rule",
       description: "常驻钩子示例",
@@ -71,12 +72,13 @@ test("prepends resident index to prompt when no sessionState exists yet", async 
     });
 
     const agent = { id: "agt_test1" };
+    const account = { id: "acc_test1" };
     const space = { id: "spc_test1", seats: [] };
     const triggerMessage = { id: "msg_test1", content: "hello agent" };
     const captured = [];
     const adapter = fakeAdapter(captured);
 
-    const run = executeRun({ store, hub, config: CONFIG, agent, space, triggerMessage, adapter, agentStates: null, memory });
+    const run = executeRun({ store, hub, config: CONFIG, agent, account, space, triggerMessage, adapter, agentStates: null, memory });
     await waitFor(hub, (e) => e.type === "run.ended" && e.data.run.id === run.id);
 
     assert.equal(captured.length, 1);
@@ -89,7 +91,7 @@ test("prepends resident index to prompt when no sessionState exists yet", async 
 
 test("does not inject resident index once sessionState is already persisted", async () => {
   await withFixture(async ({ store, memory, hub }) => {
-    await memory.saveMemory({
+    await memory.saveMemory("agt_test2", {
       slug: "project-rule-two",
       type: "project_rule",
       description: "不该被注入",
@@ -97,6 +99,7 @@ test("does not inject resident index once sessionState is already persisted", as
     });
 
     const agent = { id: "agt_test2" };
+    const account = { id: "acc_test2" };
     const space = { id: "spc_test2", seats: [] };
     const captured = [];
     const adapter = fakeAdapter(captured);
@@ -107,6 +110,7 @@ test("does not inject resident index once sessionState is already persisted", as
       hub,
       config: CONFIG,
       agent,
+      account,
       space,
       triggerMessage: { id: "msg_first", content: "first message" },
       adapter,
@@ -122,6 +126,7 @@ test("does not inject resident index once sessionState is already persisted", as
       hub,
       config: CONFIG,
       agent,
+      account,
       space,
       triggerMessage: { id: "msg_second", content: "second message" },
       adapter,
@@ -137,7 +142,7 @@ test("does not inject resident index once sessionState is already persisted", as
 
 test("injection only decorates the prompt; stored Message.content stays unpolluted", async () => {
   await withFixture(async ({ store, memory, hub }) => {
-    await memory.saveMemory({
+    await memory.saveMemory("agt_test4", {
       slug: "project-rule-store",
       type: "project_rule",
       description: "只该进 prompt，不该进 store",
@@ -145,6 +150,7 @@ test("injection only decorates the prompt; stored Message.content stays unpollut
     });
 
     const agent = { id: "agt_test4" };
+    const account = { id: "acc_test4" };
     const space = { id: "spc_test4", seats: [] };
     // 按 postMessage 的真实流程：trigger 消息先落 store，再交给 executeRun
     const triggerMessage = store.insert("messages", {
@@ -160,7 +166,7 @@ test("injection only decorates the prompt; stored Message.content stays unpollut
     const captured = [];
     const adapter = fakeAdapter(captured);
 
-    const run = executeRun({ store, hub, config: CONFIG, agent, space, triggerMessage, adapter, agentStates: null, memory });
+    const run = executeRun({ store, hub, config: CONFIG, agent, account, space, triggerMessage, adapter, agentStates: null, memory });
     await waitFor(hub, (e) => e.type === "run.ended" && e.data.run.id === run.id);
 
     // prompt 里有注入块
@@ -178,6 +184,7 @@ test("injection only decorates the prompt; stored Message.content stays unpollut
 test("memory being absent (undefined) does not crash prompt assembly", async () => {
   await withFixture(async ({ store, hub }) => {
     const agent = { id: "agt_test3" };
+    const account = { id: "acc_test3" };
     const space = { id: "spc_test3", seats: [] };
     const captured = [];
     const adapter = fakeAdapter(captured);
@@ -187,6 +194,7 @@ test("memory being absent (undefined) does not crash prompt assembly", async () 
       hub,
       config: CONFIG,
       agent,
+      account,
       space,
       triggerMessage: { id: "msg_test3", content: "no memory wired" },
       adapter,

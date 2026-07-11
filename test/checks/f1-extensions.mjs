@@ -236,8 +236,9 @@ export async function run(ctx) {
 
   // ---- Memory 编辑 ----
 
-  await check("o.18 Memory GET/PATCH/DELETE /api/memory/:slug", async () => {
-    const create = await httpRequest("POST", "/api/memory", {
+  await check("o.18 Agent Memory GET/PATCH/DELETE 与作用域隔离", async () => {
+    const prefix = `/api/agents/${ctx.agent.id}/memory`;
+    const create = await httpRequest("POST", prefix, {
       slug: "f1-test-mem",
       type: "decision",
       description: "test hook",
@@ -245,11 +246,11 @@ export async function run(ctx) {
     });
     assertEqual(create.status, 201);
 
-    const get = await httpRequest("GET", "/api/memory/f1-test-mem");
+    const get = await httpRequest("GET", `${prefix}/f1-test-mem`);
     assertEqual(get.status, 200);
     assertEqual(get.json.memory.content, "original body");
 
-    const patch = await httpRequest("PATCH", "/api/memory/f1-test-mem", {
+    const patch = await httpRequest("PATCH", `${prefix}/f1-test-mem`, {
       description: "updated hook",
       status: "archived",
     });
@@ -257,10 +258,15 @@ export async function run(ctx) {
     assertEqual(patch.json.memory.status, "archived");
     assertEqual(patch.json.memory.description, "updated hook");
 
-    const del = await httpRequest("DELETE", "/api/memory/f1-test-mem");
+    const missingAgent = await httpRequest("GET", "/api/agents/agt_missing/memory");
+    assertEqual(missingAgent.status, 404);
+    const oldRoute = await httpRequest("GET", "/api/memory/f1-test-mem");
+    assertEqual(oldRoute.status, 404);
+
+    const del = await httpRequest("DELETE", `${prefix}/f1-test-mem`);
     assertEqual(del.status, 204);
 
-    const getAfterDelete = await httpRequest("GET", "/api/memory/f1-test-mem");
+    const getAfterDelete = await httpRequest("GET", `${prefix}/f1-test-mem`);
     assertEqual(getAfterDelete.status, 404);
   });
 
@@ -271,6 +277,7 @@ export async function run(ctx) {
     assertEqual(status, 200);
     assert("vaultPath" in json.paths.memory, "should have vaultPath");
     assert("exists" in json.paths.memory, "should have exists");
+    assert("legacyUnscopedCount" in json.paths.memory, "should expose legacy unscoped count");
     assert("dataPath" in json.paths.gateway, "should have dataPath");
   });
 

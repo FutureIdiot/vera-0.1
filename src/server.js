@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadConfig } from "./core/config.js";
+import { applyBootPathOverrides } from "./core/path-overrides.js";
 import { createStore } from "./store/store.js";
 import { createRouter } from "./api/router.js";
 import { createEventHub, handleSseRequest } from "./api/sse.js";
@@ -29,6 +30,7 @@ const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "fronte
 const serveStatic = createStaticHandler(frontendRoot);
 
 const config = loadConfig(process.env);
+const bootPaths = await applyBootPathOverrides(config);
 const store = await createStore({ dataPath: config.dataPath, debounceMs: config.store.debounceMs });
 // seq 跨重启单调（api-contract.md）：从持久化水位 + 缓冲长度跳跃续增，
 // 保证客户端带上一世的 since 重连必然触发 stream.reset 而不是静默漏事件。
@@ -76,7 +78,7 @@ router.get("/api/events", ({ req, res }) => {
 
 registerAgentRoutes(router, { store, agentStates });
 registerSpaceRoutes(router, { store, hub, config, resolveAdapter, agentStates, memory });
-registerMemoryRoutes(router, { memory });
+registerMemoryRoutes(router, { memory, store });
 // 系统设置（Phase 4.5）：独立 settings.json 模块，不进 store.js（避免与 4.3+4.4 并行分支冲突）。
 // boot 顺序：store → hub/agentStates/memory → settingsStore → 路由注册。
 const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
@@ -84,7 +86,7 @@ registerSettingsRoutes(router, { settingsStore });
 
 const statusTracker = createStatusTracker({ config });
 registerStatusRoutes(router, { statusTracker, store, hub, config, memory, settingsStore });
-registerPathsRoutes(router, { config, settingsStore, memory, store });
+registerPathsRoutes(router, { config, settingsStore, memory, store, bootPaths });
 registerThemesRoutes(router, { store, settingsStore });
 
 const server = createServer(async (req, res) => {
