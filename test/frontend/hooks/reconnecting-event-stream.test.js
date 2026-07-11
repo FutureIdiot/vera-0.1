@@ -232,3 +232,21 @@ test("a rejected connection enters backoff instead of becoming an unhandled reje
   assert.equal(attempts, 2);
   stream.close();
 });
+
+test("connection status reports opening, open, and reconnecting", async () => {
+  const connector = createFakeConnector();
+  const statuses = [];
+  const timers = [];
+  const stream = createReconnectingEventStream({
+    connect: connector.connect,
+    initialSince: 0,
+    onStatus: (status) => statuses.push(status),
+    setTimer(callback) { timers.push(callback); return timers.length; },
+    clearTimer() {},
+  });
+  await flushAsyncWork();
+  connector.connections[0].callbacks.onOpen();
+  connector.connections[0].callbacks.onError();
+  assert.deepEqual(statuses, ["opening", "open", "reconnecting"]);
+  stream.close();
+});

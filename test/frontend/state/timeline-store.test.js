@@ -97,6 +97,20 @@ test("hydrate retains only the newest maxItems records", () => {
   assert.equal(ids.at(-1), "msg_250");
 });
 
+test("prependOlder deduplicates history and shifts the bounded window toward older items", () => {
+  const store = createTimelineStore({ maxItems: 3 });
+  store.hydrate([
+    { itemType: "message", id: "m4" },
+    { itemType: "message", id: "m3" },
+  ]);
+  store.prependOlder([
+    { itemType: "message", id: "m3" },
+    { itemType: "message", id: "m2" },
+    { itemType: "message", id: "m1" },
+  ]);
+  assert.deepEqual(store.getOrderedItems().map((item) => item.id), ["m1", "m2", "m3"]);
+});
+
 test("live inserts stay bounded and report keys removed from the front", () => {
   const store = createTimelineStore({ maxItems: 3 });
   const notifications = [];

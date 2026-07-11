@@ -1,7 +1,7 @@
 // 底部输入框：发消息（POST /api/spaces/:id/messages，广播）。
 // 只负责收集输入、调用 onSend，不知道 gateway 的 URL 形状。
 
-export function createComposer({ onSend } = {}) {
+export function createComposer({ onSend, targets = [] } = {}) {
   const form = document.createElement("form");
   form.className = "vera-composer";
 
@@ -16,7 +16,27 @@ export function createComposer({ onSend } = {}) {
   button.className = "vera-composer__send";
   button.textContent = "发送";
 
-  form.appendChild(input);
+  const target = document.createElement("select");
+  target.className = "vera-composer__target";
+  target.setAttribute("aria-label", "消息发送对象");
+  function setTargets(nextTargets) {
+    const selected = target.value;
+    target.replaceChildren();
+    const broadcast = document.createElement("option");
+    broadcast.value = "broadcast";
+    broadcast.textContent = "全部";
+    target.appendChild(broadcast);
+    for (const item of nextTargets) {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = `@${item.name}`;
+      target.appendChild(option);
+    }
+    target.value = [...target.options].some((option) => option.value === selected) ? selected : "broadcast";
+  }
+  setTargets(targets);
+
+  form.append(target, input);
   form.appendChild(button);
 
   const error = document.createElement("p");
@@ -30,7 +50,7 @@ export function createComposer({ onSend } = {}) {
     if (!content) return;
     button.disabled = true;
     error.hidden = true;
-    Promise.resolve(onSend?.(content))
+    Promise.resolve(onSend?.(content, target.value === "broadcast" ? { type: "broadcast" } : { type: "direct", agentIds: [target.value] }))
       .then(() => { input.value = ""; })
       .catch((err) => {
         console.error("vera: send message failed", err);
@@ -43,5 +63,11 @@ export function createComposer({ onSend } = {}) {
       });
   });
 
-  return { element: form, input };
+  function setDisabled(disabled) {
+    input.disabled = disabled;
+    target.disabled = disabled;
+    button.disabled = disabled;
+  }
+
+  return { element: form, input, setTargets, setDisabled };
 }

@@ -10,6 +10,10 @@ export function createSpacesClient(http) {
       const query = params.toString();
       return http.get(`/api/spaces/${spaceId}/timeline${query ? `?${query}` : ""}`);
     },
+    listSpaces({ archived } = {}) {
+      const query = archived === true ? "?archived=true" : archived === "all" ? "?archived=all" : "";
+      return http.get(`/api/spaces${query}`);
+    },
     postMessage(spaceId, message) {
       return http.post(`/api/spaces/${spaceId}/messages`, message);
     },

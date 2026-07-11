@@ -5,6 +5,8 @@ import { renderMessageBubble, applyMessageBubble } from "../components/message-b
 import { renderActivity, applyActivity } from "../components/activity-item.js";
 import { renderApprovalCard, applyApprovalCard } from "../components/approval-card.js";
 import { createComposer } from "../components/composer.js";
+import { attachEdgeSwipe } from "../hooks/edge-swipe.js";
+import { createRunStatus } from "../components/run-status.js";
 
 const TIMELINE_PAGE_SIZE = 50;
 const TIMELINE_DOM_LIMIT = 200;
@@ -15,26 +17,52 @@ function keyOf(item) {
 
 function envelopeSpaceId(envelope) {
   const data = envelope?.data;
-  return data?.spaceId ?? data?.message?.spaceId ?? data?.activity?.spaceId ?? data?.approval?.spaceId ?? null;
+  return data?.spaceId ?? data?.message?.spaceId ?? data?.activity?.spaceId ?? data?.approval?.spaceId ?? data?.run?.spaceId ?? null;
 }
 
-export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpaceId } = {}) {
+export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpaceId, shell } = {}) {
   let mounted = true;
   let space = null;
   let hydrating = true;
   let hydrationGeneration = 0;
   let pendingEvents = [];
+  let hasOlder = true;
+  let loadingOlder = false;
+  let preserveFullRenderScroll = false;
 
   root.dataset.routeScope = "chat";
 
   const statusBar = document.createElement("div");
   statusBar.className = "vera-status-bar";
   statusBar.textContent = "连接中…";
+  const setStatus = (message) => {
+    statusBar.textContent = message;
+    statusBar.hidden = !message;
+  };
+  const showArchivedStatus = () => {
+    setStatus("这个 Space 已归档；可从 Space 导航恢复。");
+    const restoreLink = document.createElement("button");
+    restoreLink.type = "button";
+    restoreLink.className = "vera-text-button";
+    restoreLink.textContent = "打开 Space 导航";
+    restoreLink.addEventListener("click", () => shell?.openNavigator());
+    statusBar.appendChild(restoreLink);
+  };
   const timelineEl = document.createElement("div");
   timelineEl.className = "vera-timeline";
-  root.append(statusBar, timelineEl);
-
+  const olderButton = document.createElement("button");
+  olderButton.type = "button";
+  olderButton.className = "vera-load-older";
+  olderButton.textContent = "加载更早消息";
+  olderButton.hidden = true;
   const spaces = createSpacesClient(createHttpClient(platform));
+  const runStatus = createRunStatus({
+    onCancel: async (runIds) => {
+      try { await Promise.all(runIds.map((runId) => spaces.cancelRun(runId))); }
+      catch (err) { setStatus(`取消失败：${err.message}`); }
+    },
+  });
+  root.append(statusBar, olderButton, timelineEl, runStatus.element);
   const store = createTimelineStore({ maxItems: TIMELINE_DOM_LIMIT });
   const nodeByKey = new Map();
   const agentNameById = new Map();
@@ -52,7 +80,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
             data: { approval: { ...approval, status: "stale", answer: null } },
           });
         }
-        statusBar.textContent = "这项授权已经失效或被答复。";
+        setStatus("这项授权已经失效或被答复。");
       }
       throw err;
     }
@@ -71,6 +99,10 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     if (item.itemType === "approval") return applyApprovalCard(element, item, { onAnswer: handleAnswer });
   }
 
+  function isNearBottom() {
+    return timelineEl.scrollHeight - timelineEl.scrollTop - timelineEl.clientHeight < 80;
+  }
+
   function scrollToBottom() {
     timelineEl.scrollTop = timelineEl.scrollHeight;
   }
@@ -84,7 +116,8 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
       nodeByKey.set(keyOf(item), element);
       timelineEl.appendChild(element);
     }
-    scrollToBottom();
+    if (preserveFullRenderScroll) preserveFullRenderScroll = false;
+    else scrollToBottom();
   }
 
   const unsubscribeStore = store.subscribe((items, changedKey, removedKeys) => {
@@ -100,6 +133,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     const item = items.find((candidate) => keyOf(candidate) === changedKey);
     if (!item) return;
     const existing = nodeByKey.get(changedKey);
+    const keepLatestVisible = isNearBottom();
     if (existing) applyItem(existing, item);
     else {
       const element = renderItem(item);
@@ -107,7 +141,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
       nodeByKey.set(changedKey, element);
       timelineEl.appendChild(element);
     }
-    scrollToBottom();
+    if (keepLatestVisible) scrollToBottom();
   });
 
   function ingestForCurrentSpace(envelope) {
@@ -124,14 +158,30 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     space = requestedSpaceId
       ? bootstrap.spaces.find((candidate) => candidate.id === requestedSpaceId) ?? null
       : bootstrap.spaces[0] ?? null;
+    if (!space && requestedSpaceId) {
+      const allSpaces = await spaces.listSpaces({ archived: "all" });
+      if (!mounted || generation !== hydrationGeneration) return;
+      space = allSpaces.spaces.find((candidate) => candidate.id === requestedSpaceId) ?? null;
+    }
     if (!space) {
       store.hydrate([]);
-      statusBar.textContent = requestedSpaceId ? "Space 不存在或已归档。" : "还没有 Space，请先创建一个。";
+      setStatus(requestedSpaceId ? "Space 不存在。" : "还没有 Space，请先创建一个。");
+      composer.setDisabled(true);
+      shell?.setSpace(null);
     } else {
       const timeline = await spaces.fetchTimeline(space.id, { limit: TIMELINE_PAGE_SIZE });
       if (!mounted || generation !== hydrationGeneration) return;
       store.hydrate(timeline.items);
-      statusBar.textContent = `Space: ${space.name}`;
+      hasOlder = timeline.items.length === TIMELINE_PAGE_SIZE;
+      olderButton.hidden = !hasOlder;
+      if (space.archivedAt) showArchivedStatus();
+      else setStatus(timeline.items.length ? "" : "还没有消息，发一条开始。");
+      composer.setDisabled(Boolean(space.archivedAt));
+      composer.setTargets(bootstrap.agents.filter((agent) => space.seats.some((seat) => seat.agentId === agent.id)));
+      shell?.setSpace(space);
+      if (!requestedSpaceId && window.location.hash !== `#/spaces/${encodeURIComponent(space.id)}`) {
+        window.history.replaceState(null, "", `#/spaces/${encodeURIComponent(space.id)}`);
+      }
     }
     if (!mounted || generation !== hydrationGeneration) return;
     const queued = pendingEvents.filter((envelope) => envelope.seq > baselineSeq);
@@ -144,39 +194,81 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     if (!mounted) return;
     hydrating = false;
     pendingEvents = [];
-    statusBar.textContent = `${prefix}：${err.message}`;
+    setStatus(`${prefix}：${err.message}`);
   }
 
   function handleRuntimeEvent(envelope) {
     if (!mounted) return;
     if (envelope.type === "runtime.degraded") {
-      statusBar.textContent = "连接出现缺口，正在重新同步…";
+      setStatus("连接出现缺口，正在重新同步…");
       return;
     }
     if (envelope.type === "runtime.reset") {
-      statusBar.textContent = "连接重置，重新同步…";
+      setStatus("连接重置，重新同步…");
+      runStatus.reset();
       void hydrateFromBootstrap(envelope.data.bootstrap, envelope.seq, { clearPending: true }).catch((err) => {
         handleHydrationError("重新同步失败", err);
       });
       return;
     }
+    if (envelope.type === "space.updated" && envelope.data?.space?.id === space?.id) {
+      space = envelope.data.space;
+      shell?.setSpace(space);
+      composer.setDisabled(Boolean(space.archivedAt));
+      composer.setTargets(runtime.getBootstrap().agents.filter((agent) => space.seats.some((seat) => seat.agentId === agent.id)));
+      if (space.archivedAt) showArchivedStatus();
+      else setStatus(null);
+    }
+    runStatus.handleEvent(envelope, space?.id);
     if (hydrating) pendingEvents.push(envelope);
     else ingestForCurrentSpace(envelope);
   }
 
   const bootstrap = runtime.getBootstrap();
-  const unsubscribeRuntime = runtime.subscribe(handleRuntimeEvent, { since: bootstrap.seq });
+  const initialSpace = requestedSpaceId
+    ? bootstrap.spaces.find((candidate) => candidate.id === requestedSpaceId)
+    : bootstrap.spaces[0];
   const composer = createComposer({
-    onSend: async (content) => {
+    targets: bootstrap.agents.filter((agent) => initialSpace?.seats.some((seat) => seat.agentId === agent.id)),
+    onSend: async (content, target) => {
       if (!space) throw new Error("当前没有可发送消息的 Space");
       await spaces.postMessage(space.id, {
         author: { type: "user" },
-        target: { type: "broadcast" },
+        target,
         content,
       });
     },
   });
+  const unsubscribeRuntime = runtime.subscribe(handleRuntimeEvent, { since: bootstrap.seq });
+  for (const state of bootstrap.agentStates ?? []) {
+    runStatus.handleEvent({ type: "agent.state.updated", data: { agentState: state } }, initialSpace?.id);
+  }
   root.appendChild(composer.element);
+
+  olderButton.addEventListener("click", async () => {
+    if (!space || !hasOlder || loadingOlder) return;
+    const oldest = store.getOrderedItems()[0];
+    if (!oldest) return;
+    loadingOlder = true;
+    olderButton.disabled = true;
+    const beforeHeight = timelineEl.scrollHeight;
+    const beforeTop = timelineEl.scrollTop;
+    try {
+      const page = await spaces.fetchTimeline(space.id, { before: oldest.id, limit: TIMELINE_PAGE_SIZE });
+      preserveFullRenderScroll = true;
+      store.prependOlder(page.items);
+      hasOlder = page.items.length === TIMELINE_PAGE_SIZE;
+      olderButton.hidden = !hasOlder;
+      timelineEl.scrollTop = beforeTop + timelineEl.scrollHeight - beforeHeight;
+    } catch (err) {
+      setStatus(`更早消息加载失败：${err.message}`);
+    } finally {
+      loadingOlder = false;
+      olderButton.disabled = false;
+    }
+  });
+
+  const detachEdgeSwipe = attachEdgeSwipe(root, () => shell?.openNavigator());
 
   void hydrateFromBootstrap(bootstrap, bootstrap.seq).catch((err) => {
     handleHydrationError("加载时间线失败", err);
@@ -189,6 +281,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     pendingEvents = [];
     unsubscribeRuntime();
     unsubscribeStore();
+    detachEdgeSwipe();
     nodeByKey.clear();
     root.replaceChildren();
     delete root.dataset.routeScope;

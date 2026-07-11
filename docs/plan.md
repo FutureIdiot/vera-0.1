@@ -120,7 +120,7 @@
 
 ## 前端与三端交付总路线（新窗口执行入口）
 
-> 当前起点（2026-07-11）：F0–F2已完成，前端保持原生ES Modules并已落Vite构建、全局app runtime、route lifecycle、platform Web adapter、领域拆分与production dist伺服；下一步进入F3 Web核心体验。仓库仍无Android/iOS壳。按下列顺序推进，每阶段独立commit并更新本节状态；上一阶段未验收不进入下一阶段。
+> 当前起点（2026-07-11）：F0–F3已完成，Web端已有全屏聊天Shell、双栏Space导航、当前Space设置、长时间线与断线恢复；下一步进入F4 Web管理体验。仓库仍无Android/iOS壳。按下列顺序推进，每阶段独立commit并更新本节状态；上一阶段未验收不进入下一阶段。
 
 ### F0 — 参考图与可调UI Lab
 
@@ -153,12 +153,12 @@
 
 ### F3 — Web核心体验：聊天、Space导航、当前Space设置
 
-- [ ] 全屏聊天Shell：无底部标签；左上当前Space设置、右上全局Settings；composer、最新消息可见、Activity/Approval状态正确。
-- [ ] 右滑双栏导航：左侧Agent/群头像投影，右侧对应活跃Space列表；手机右滑+顶栏Space名称入口，桌面左下图钉切换覆盖/常驻；支持切换、新增、重命名、二次确认归档及从“已归档Spaces”恢复，不提供永久删除。
-- [ ] 当前Space设置：参与Agent、Seat responseMode/respondTo/blockAgentIds、消息提醒；Space Module区在Phase 6前不显示。
-- [ ] 真实gateway/SSE运行验证手机浏览器与桌面浏览器；处理loading/empty/error/offline/长时间线。
+- [x] 全屏聊天Shell：无底部标签；左上当前Space设置、右上全局Settings；composer、最新消息可见、Activity/Approval状态正确。
+- [x] 右滑双栏导航：左侧Agent/群头像投影，右侧对应活跃Space列表；手机右滑+顶栏Space名称入口，桌面左下图钉切换覆盖/常驻；支持切换、新增、重命名、二次确认归档及从“已归档Spaces”恢复，不提供永久删除。
+- [x] 当前Space设置：参与Agent、Seat responseMode/respondTo/blockAgentIds、消息提醒；Space Module区在Phase 6前不显示。
+- [x] 真实gateway/SSE运行验证手机浏览器与桌面浏览器；处理loading/empty/error/offline/长时间线。
 
-**验收**：4.6聊天/Space端到端全过；390px手机浏览器和桌面无横向溢出，前进后退/deep-link/重连正确。
+**验收（2026-07-11完成）**：完整单测96/96、gateway/SSE黑盒65/65通过；subagent最终审查后的竞态/reset/多Run修正另跑前端与Space纯单测37/37、`analyze:web`与`git diff --check`通过，默认聊天16,854 / 204,800 bytes gzip。真实浏览器完成390×844与1280×900验收：无横向溢出，消息发送、Space设置保存回显、新建/改名/归档/恢复且历史不丢、桌面固定导航、前进后退、断开启动错误与重试恢复均通过。最终修正后的整套端口测试复跑因Codex授权额度耗尽未获执行许可；不是测试失败，增量路径已由上述纯单测与构建覆盖。
 
 ### F4 — Web管理体验：Settings、Account、Memory、Appearance
 

@@ -13,6 +13,7 @@ export function createReconnectingEventStream({
   initialSince,
   onEvent,
   onReset,
+  onStatus,
   minDelayMs = 500,
   maxDelayMs = 10000,
   setTimer = setTimeout,
@@ -30,6 +31,7 @@ export function createReconnectingEventStream({
     if (stopped || reconnectTimer !== null) return;
     const delay = Math.min(maxDelayMs, minDelayMs * 2 ** attempt);
     attempt += 1;
+    onStatus?.("reconnecting");
     reconnectTimer = setTimer(() => {
       reconnectTimer = null;
       void open();
@@ -38,6 +40,7 @@ export function createReconnectingEventStream({
 
   async function open() {
     if (stopped) return;
+    onStatus?.("opening");
     source?.close();
     const currentGeneration = ++generation;
     let nextSource;
@@ -47,6 +50,7 @@ export function createReconnectingEventStream({
         onOpen: () => {
           if (stopped || currentGeneration !== generation) return;
           attempt = 0;
+          onStatus?.("open");
         },
         onEvent: (envelope) => {
           if (stopped || currentGeneration !== generation) return;

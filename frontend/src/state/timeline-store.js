@@ -56,6 +56,24 @@ export function createTimelineStore({ maxItems = 200 } = {}) {
     notify(null); // null 表示"整体重渲染"，区别于单条增量变化
   }
 
+  function prependOlder(timelineItems) {
+    const added = [];
+    for (const item of [...timelineItems].reverse()) {
+      const k = key(item.itemType, item.id);
+      if (items.has(k)) continue;
+      items.set(k, { ...item, itemType: item.itemType });
+      added.push(k);
+    }
+    order.unshift(...added);
+    const removedKeys = [];
+    while (order.length > maxItems) {
+      const removedKey = order.pop();
+      items.delete(removedKey);
+      removedKeys.push(removedKey);
+    }
+    notify(null, removedKeys);
+  }
+
   function ingestEvent(envelope) {
     const { type, data } = envelope;
     switch (type) {
@@ -116,5 +134,5 @@ export function createTimelineStore({ maxItems = 200 } = {}) {
     notify(null, removedKeys);
   }
 
-  return { hydrate, ingestEvent, getOrderedItems, subscribe, clear };
+  return { hydrate, prependOlder, ingestEvent, getOrderedItems, subscribe, clear };
 }

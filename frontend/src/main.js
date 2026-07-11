@@ -2,6 +2,8 @@ import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/chat.css";
+import "./styles/navigation.css";
+import "./styles/management.css";
 
 import { createAppRouter } from "./state/router.js";
 import { initializePlatform } from "./state/platform.js";
@@ -28,8 +30,24 @@ async function boot() {
   await router.start();
 }
 
+function renderBootFailure(root, err) {
+  const page = document.createElement("main");
+  page.className = "vera-boot-error";
+  const title = document.createElement("h1");
+  title.textContent = "Vera 暂时无法连接";
+  const detail = document.createElement("p");
+  detail.textContent = err.message || "gateway 不可达";
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "vera-primary-button";
+  retry.textContent = "重试";
+  retry.addEventListener("click", () => window.location.reload());
+  page.append(title, detail, retry);
+  root.replaceChildren(page);
+}
+
 boot().catch((err) => {
   console.error("vera: failed to boot frontend", err);
   const root = document.getElementById("app");
-  if (root) root.textContent = `启动失败：${err.message}`;
+  if (root) renderBootFailure(root, err);
 });

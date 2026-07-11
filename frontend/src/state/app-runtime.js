@@ -31,8 +31,41 @@ export function createAppRuntime({
   }
 
   function publish(envelope) {
+    applyBootstrapEvent(envelope);
     remember(envelope);
     for (const listener of listeners) listener(envelope);
+  }
+
+  function applyBootstrapEvent(envelope) {
+    if (!bootstrap) return;
+    const upsert = (items, item) => {
+      if (!item?.id) return items;
+      const index = items.findIndex((candidate) => candidate.id === item.id);
+      if (index === -1) return [...items, item];
+      const next = [...items];
+      next[index] = item;
+      return next;
+    };
+    if (envelope.type === "space.updated" && envelope.data?.space) {
+      const space = envelope.data.space;
+      bootstrap.spaces = space.archivedAt
+        ? bootstrap.spaces.filter((candidate) => candidate.id !== space.id)
+        : upsert(bootstrap.spaces, space);
+    } else if (envelope.type === "agent.updated" && envelope.data?.agent) {
+      bootstrap.agents = upsert(bootstrap.agents, envelope.data.agent);
+    } else if (envelope.type === "account.upserted" && envelope.data?.account) {
+      bootstrap.accounts = upsert(bootstrap.accounts, envelope.data.account);
+    } else if (envelope.type === "account.presence.updated" && envelope.data?.accountId) {
+      bootstrap.accounts = bootstrap.accounts.map((account) => account.id === envelope.data.accountId
+        ? { ...account, presence: envelope.data.presence, lastSeenAt: envelope.data.lastSeenAt }
+        : account);
+    } else if (envelope.type === "agent.state.updated" && envelope.data?.agentState) {
+      const state = envelope.data.agentState;
+      const index = bootstrap.agentStates.findIndex((candidate) => candidate.agentId === state.agentId && candidate.spaceId === state.spaceId);
+      bootstrap.agentStates = index === -1
+        ? [...bootstrap.agentStates, state]
+        : bootstrap.agentStates.map((candidate, candidateIndex) => candidateIndex === index ? state : candidate);
+    }
   }
 
   async function reset() {
@@ -96,11 +129,20 @@ export function createAppRuntime({
         onReset: () => {
           if (!resetPending) void reset();
         },
+        onStatus: (status) => {
+          const envelope = { type: "runtime.connection", seq: bootstrap?.seq ?? 0, data: { status } };
+          for (const listener of listeners) listener(envelope);
+        },
       });
     },
     getBootstrap() {
       if (!bootstrap) throw new Error("app runtime is not started");
       return bootstrap;
+    },
+    mergeSpace(space) {
+      const envelope = { type: "space.updated", seq: bootstrap?.seq ?? 0, data: { space } };
+      applyBootstrapEvent(envelope);
+      for (const listener of listeners) listener(envelope);
     },
     subscribe(listener, { since = null } = {}) {
       listeners.add(listener);

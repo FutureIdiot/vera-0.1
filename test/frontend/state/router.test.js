@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { createAppRouter, parseRoute } from "../../../frontend/src/state/router.js";
 
-function createFixture({ hash = "#/", loadSpaceView } = {}) {
+function createFixture({ hash = "#/", loadSpaceView, loadSpaceSettingsView } = {}) {
   const listeners = new Map();
   const children = [];
   const root = {
@@ -50,8 +50,13 @@ function createFixture({ hash = "#/", loadSpaceView } = {}) {
   const router = createAppRouter({
     root,
     platform: { kind: "web" },
+    runtime: { getBootstrap() { return { spaces: [], agents: [], accounts: [], agentStates: [], seq: 0 }; } },
     windowTarget,
+    createShell() {
+      return { outlet: root, setRoute() {}, destroy() {} };
+    },
     loadSpaceView,
+    loadSpaceSettingsView,
   });
   return { root, router, windowTarget, listeners };
 }
@@ -66,14 +71,13 @@ test("parseRoute recognizes the chat root and encoded Space ids", () => {
   assert.deepEqual(parseRoute("#/spaces/spc_123"), { name: "space", spaceId: "spc_123" });
   assert.deepEqual(parseRoute("#/spaces/space%20name/"), { name: "space", spaceId: "space name" });
   assert.deepEqual(parseRoute("#/spaces/%zz"), { name: "not-found", path: "/spaces/%zz" });
+  assert.deepEqual(parseRoute("#/spaces"), { name: "spaces", spaceId: null });
+  assert.deepEqual(parseRoute("#/settings"), { name: "settings" });
+  assert.deepEqual(parseRoute("#/spaces/spc_1/settings"), { name: "space-settings", spaceId: "spc_1" });
 });
 
 test("parseRoute returns a not-found route for unsupported paths", () => {
-  assert.deepEqual(parseRoute("#/settings"), { name: "not-found", path: "/settings" });
-  assert.deepEqual(parseRoute("#/spaces/spc_1/settings"), {
-    name: "not-found",
-    path: "/spaces/spc_1/settings",
-  });
+  assert.deepEqual(parseRoute("#/settings/nope"), { name: "not-found", path: "/settings/nope" });
 });
 
 test("start mounts the current route once and stop removes listener and view", async () => {
@@ -196,4 +200,26 @@ test("a stale async route load cannot mount after a newer navigation", async () 
   assert.equal(fixture.root.children[0].children[0].route, "spc_fast");
 
   fixture.router.stop();
+});
+
+test("a route cleanup can veto navigation to preserve unsaved settings", async () => {
+  let chatMounts = 0;
+  const fixture = createFixture({
+    hash: "#/spaces/spc_1/settings",
+    loadSpaceSettingsView: async () => ({
+      mountSpaceSettingsView({ root }) {
+        root.appendChild({ route: "settings" });
+        return () => false;
+      },
+    }),
+    loadSpaceView: async () => ({
+      mountSpaceView() { chatMounts += 1; return () => {}; },
+    }),
+  });
+  await fixture.router.start();
+  fixture.windowTarget.location.hash = "#/spaces/spc_1";
+  fixture.listeners.get("hashchange")();
+  await flushAsyncWork();
+  assert.equal(chatMounts, 0);
+  assert.equal(fixture.root.children[0].children[0].route, "settings");
 });

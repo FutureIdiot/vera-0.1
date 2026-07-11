@@ -136,3 +136,41 @@ test("a failed reset stays degraded and retries instead of publishing across a k
   ]);
   runtime.close();
 });
+
+test("space.updated keeps the shared bootstrap projection current", async () => {
+  const sources = [];
+  const platform = {
+    async getGatewayUrl() { return "https://vera.test"; },
+    async fetch() { return jsonResponse({ agents: [], accounts: [], spaces: [], agentStates: [], seq: 1 }); },
+    createEventSource(url) {
+      const source = { url, close() {} };
+      sources.push(source);
+      return source;
+    },
+  };
+  const runtime = createAppRuntime({ platform });
+  await runtime.start();
+  await flushAsyncWork();
+  sources[0].onmessage({ data: JSON.stringify({ seq: 2, type: "space.updated", data: { space: { id: "spc_1", name: "One", archivedAt: null } } }) });
+  assert.equal(runtime.getBootstrap().spaces[0].name, "One");
+  sources[0].onmessage({ data: JSON.stringify({ seq: 3, type: "space.updated", data: { space: { id: "spc_1", name: "One", archivedAt: "now" } } }) });
+  assert.deepEqual(runtime.getBootstrap().spaces, []);
+  runtime.close();
+});
+
+test("local Space merges and presence events update the canonical bootstrap projection", async () => {
+  const sources = [];
+  const platform = {
+    async getGatewayUrl() { return "https://vera.test"; },
+    async fetch() { return jsonResponse({ agents: [], accounts: [{ id: "acc_1", presence: "offline" }], spaces: [], agentStates: [], seq: 1 }); },
+    createEventSource(url) { const source = { url, close() {} }; sources.push(source); return source; },
+  };
+  const runtime = createAppRuntime({ platform });
+  await runtime.start();
+  await flushAsyncWork();
+  runtime.mergeSpace({ id: "spc_local", name: "Local", archivedAt: null });
+  assert.equal(runtime.getBootstrap().spaces[0].id, "spc_local");
+  sources[0].onmessage({ data: JSON.stringify({ seq: 2, type: "account.presence.updated", data: { accountId: "acc_1", presence: "online", lastSeenAt: "now" } }) });
+  assert.deepEqual(runtime.getBootstrap().accounts[0], { id: "acc_1", presence: "online", lastSeenAt: "now" });
+  runtime.close();
+});

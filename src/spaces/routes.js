@@ -35,6 +35,7 @@ export function registerSpaceRoutes(router, { store, hub, config, resolveAdapter
     asHandler(async ({ req, res }) => {
       const body = await readJsonBody(req);
       const space = createSpace(store, body);
+      hub.publish("space.updated", { space });
       sendJson(res, 201, { space });
     }),
   );
@@ -44,6 +45,7 @@ export function registerSpaceRoutes(router, { store, hub, config, resolveAdapter
     asHandler(async ({ req, res, params }) => {
       const body = await readJsonBody(req);
       const space = updateSpace(store, params.id, body);
+      hub.publish("space.updated", { space });
       sendJson(res, 200, { space });
     }),
   );
@@ -52,6 +54,7 @@ export function registerSpaceRoutes(router, { store, hub, config, resolveAdapter
     "/api/spaces/:id/archive",
     asHandler(async ({ res, params }) => {
       const space = archiveSpace(store, params.id);
+      hub.publish("space.updated", { space });
       sendJson(res, 200, { space });
     }),
   );
@@ -60,6 +63,7 @@ export function registerSpaceRoutes(router, { store, hub, config, resolveAdapter
     "/api/spaces/:id/restore",
     asHandler(async ({ res, params }) => {
       const space = restoreSpace(store, params.id);
+      hub.publish("space.updated", { space });
       sendJson(res, 200, { space });
     }),
   );
