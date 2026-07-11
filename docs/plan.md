@@ -64,7 +64,7 @@
 
 - [x] cloudflared 隧道（历史方案，当前部署指南已不再保留该Option）——`vera.futureidiot.com` → `127.0.0.1:3210`，LaunchAgent 常驻（`com.cloudflare.cloudflared`，plist 需手补 `tunnel run vera` 参数）。本地网络屏蔽 UDP 7844，config.yml 钉死 `protocol: http2`。SSE 过隧道实测逐条到达（ping 间隔 25s 不结块）
 - [x] Cloudflare Access 认证（Zero Trust 面板手工配：email OTP → Theta 邮箱；team `plain-silence-4358`，session 1 week，实测未登录请求 302 到 Access 登录页）
-- [x] 手机浏览器实测（2026-07-03 真机验收）：蜂窝网络下流式逐字、锁屏/切后台重连、上下文连续均通过。附带教训：gateway 静态文件此前不发缓存头，Cloudflare 默认边缘缓存 .js/.css 导致前端改动手机拿不到——已改为 `Cache-Control: no-store`（api-contract.md 系统表），Phase 6 换 ETag。首测曾卡在 api.navy 免费日额度耗尽（UTC 午夜重置；超限时流式请求挂 60s 被掐、opencode 无限重试、run 挂 working 直到 30min 看门狗——provider 错误尽早浮出 UI 是后续待修项）。已加第二个 agent `Gemma`（本地 ollama `gemma4:e4b`，tmux 会话 `ollama` 常驻）绕开额度依赖；GLM 席位临时 silent，额度恢复后改回 default
+- [x] 手机浏览器实测（2026-07-03 真机验收）：蜂窝网络下流式逐字、锁屏/切后台重连、上下文连续均通过。附带教训：gateway 静态文件此前不发缓存头，Cloudflare 默认边缘缓存 .js/.css 导致前端改动手机拿不到——当时先改为 `Cache-Control: no-store`，后由F2 production build完成hash资源immutable与HTML ETag/协商缓存，F5只做发布复核。首测曾卡在 api.navy 免费日额度耗尽（UTC 午夜重置；超限时流式请求挂 60s 被掐、opencode无限重试、run挂working直到30min看门狗——provider错误尽早浮出UI是后续待修项）。已加第二个agent `Gemma`（本地ollama `gemma4:e4b`，tmux会话`ollama`常驻）绕开额度依赖；GLM席位临时silent，额度恢复后改回default
 
 **完成标准**：手机蜂窝网络下发消息、看流式回复，体验与本地一致。✅ 2026-07-03 达成。
 
@@ -93,9 +93,9 @@
 - [x] **4.5 系统配置**：新增 `GET/PATCH /api/settings`，字段以 ground truth 4.1 为唯一清单（数据隔离规则、记忆整理触发/注入预算、消息呈现等），严格遵守不扩；运维参数仍走 env 不进前端（ground truth 4.1 末段边界注记）。持久化进 `data/settings.json`（store 新集合），config 作启动默认、settings 作运行时覆盖。
 - [ ] **4.6 前端正式布局**：按 ground truth 5.1–5.4 分阶段推进，手机竖屏第一公民；使用简单hash路由，不为路由引入UI框架。
   - [x] **4.6.0 文档契约（2026-07-10）**：ground truth 已定全屏聊天主页、当前Space设置、右滑双栏Space导航、全局Settings、Account组合管理、配置闭环、提前拆分与页面完成标准；API契约已补 Appearance（含Theme/Profile边界与安全导入导出）、Space提醒、Space归档/恢复及Account组合读取边界。本步不改前端代码。
-  - [ ] **4.6.1 可调雏形 + Shell**：可调雏形与默认tokens已由F0完成；F2已落全局app runtime、route lifecycle与旧时间线挂载。无底部标签、左上当前Space设置、右上全局Settings及手机/桌面Shell交互随F3闭环后再标完成，不因基础层已存在提前打勾。
+  - [x] **4.6.1 可调雏形 + Shell（2026-07-11）**：可调雏形与默认tokens由F0完成，F2落全局app runtime、route lifecycle与旧时间线挂载；F3已完成无底部标签、左上当前Space设置、右上全局Settings及手机/桌面Shell交互并通过真实浏览器验收。
   - [x] **4.6.2 基础层提前拆分（2026-07-11）**：已移除 `api/gateway-client.js`，按领域拆成 `http` / `spaces` / `agents` / `accounts` / `settings` / `memory` / `extensions` / `status` / `events` clients；state 已拆 router、全局app runtime、platform、Space导航/时间线、Account、Settings、Extension边界；样式已拆 `tokens.css`（变量唯一来源）/ `base.css` / `shell.css` / `chat.css`，旧巨型 `theme.css` 已移除。聊天route显式mount/unmount，全局runtime唯一持有SSE并处理reset水位，timeline state与DOM同步限制200项。
-  - [ ] **4.6.3 全屏聊天 + Space导航/设置闭环**：`views/space-view.js`、`space-navigator-view.js`、`space-settings-view.js` 分开。手机右滑或点顶栏Space名称打开导航，桌面可用导航左下图钉切换覆盖/常驻；左栏为Agent/群头像投影，右栏为相同成员集合的活跃Space列表；完成切换、新增、重命名、二次确认归档与恢复，不提供永久删除。当前Space设置完成参与Agent、Seat响应规则和notifications；Space Module区等Phase 6契约/后端就绪后再显示，不建假开关。composer只属于聊天主页，设置路由替换聊天主区而不与时间线纵向叠放。
+  - [x] **4.6.3 全屏聊天 + Space导航/设置闭环（2026-07-11）**：F3已拆分聊天、导航与Space设置职责；手机右滑或点顶栏Space名称打开导航，桌面图钉切换覆盖/常驻；已完成Space切换、新增、重命名、二次确认归档与恢复，以及参与Agent、Seat响应规则和notifications。Space Module区继续等Phase 6契约/后端就绪后再显示，不建假开关；composer只属于聊天主页，设置路由替换聊天主区而不与时间线纵向叠放。
   - [ ] **4.6.4 Account组合管理 + Agent Memory闭环**：只有 `#/settings/accounts` 一个管理入口；`account-list-view.js`、`account-detail-view.js`、`agent-memory-view.js` 分开。详情组合显示Agent身份/状态/Memory与其一个或多个Account连接，但API/state仍按Agent和Account分域；删除连接与删除Agent是两个明确动作。Memory只在进入对应Agent子路由时加载正文。
   - [ ] **4.6.5 Setting子页闭环**：`settings-index-view.js`、`system-settings-view.js`、`appearance-view.js`、`path-settings-view.js`、`control-center-view.js` 分开；设置首页只显示普通分组列表，不预取子页数据。Appearance预览只改内存CSS变量，保存走gateway，按组恢复默认传 `null`。中控台进入时才取状态/轮询，离开即停止；当前file store显示存储状态，不虚构数据库连接。Extension Package管理等Phase 6契约落地后加入。
   - [ ] **4.6.6 真实运行与性能验收**：补路由/state单测和 `scripts/verify.mjs` 端到端；启动临时gateway于3210实测API与逐条SSE，再在390px中档Android/WebView和桌面宽屏验证deep-link刷新、前进后退、虚拟键盘、安全区、loading/empty/error/offline/长内容与最新消息可见。记录bundle/Performance trace：首屏自有JS+CSS gzip目标≤200 KiB，缓存后聊天可交互≤1.5s、模拟4G冷启动≤3s、时间线DOM≤200 items、无连续>50ms long task；路由离页后timer/poller/listener归零。不得以静态文件检查或build成功代替验收。
@@ -107,8 +107,8 @@
 | 数据隔离 | 全局 `/api/settings` | `#/settings/system` | Memory / Files / AgentState各自模块 | API已落，控件与consumer待4.6/Phase 5 |
 | 记忆整理与注入预算 | 全局 `/api/settings` | `#/settings/system` | memory整理器 / resident index | API已落，控件与完整consumer待4.6/Phase 5 |
 | 消息呈现 | 全局 `/api/settings` | `#/settings/system` | bubble-stream / bubble-splitter | API已落，运行时覆盖接入待4.6.5 |
-| Seat响应规则 | per-Space `/api/spaces/:id` | `#/spaces/:spaceId/settings` | shouldRespond / view-compiler | 后端已落，前端待4.6.3 |
-| Space消息提醒 | per-Space `/api/spaces/:id` `[P4.6]` | `#/spaces/:spaceId/settings` | 客户端通知桥 | 契约已落，实现与验收待4.6.3 |
+| Seat响应规则 | per-Space `/api/spaces/:id` | `#/spaces/:spaceId/settings` | shouldRespond / view-compiler | 4.6.3已完成并于2026-07-11验收 |
+| Space消息提醒 | per-Space `/api/spaces/:id` `[P4.6]` | `#/spaces/:spaceId/settings` | 客户端通知桥 | 4.6.3已完成Web控件与持久化；Android/iOS原生通知桥归Phase 6 |
 | Agent / Account | 各对象API | `#/settings/accounts/...` | adapter / 联邦登录 / Memory | 后端已落，组合前端待4.6.4 |
 | Tools与运行时能力 | per-Agent daemon login + policy `[Phase 5.5/6]` | Account详情Capabilities | CLI/provider/daemon tool host | 命名和执行边界已定，capability上报与policy待实现 |
 | Appearance | 全局 `/api/settings` `[P4.6]` | `#/settings/appearance` | CSS token loader | 契约已落，实现与验收待4.6.5 |
@@ -118,9 +118,9 @@
 
 **完成标准**：手机蜂窝网络下，主页无底部标签且当前Space聊天占满主区；右滑双栏可按Agent/群切换、新增、重命名、归档和恢复Space，历史与sessionState不丢；桌面图钉常驻切换正确；左上当前Space设置与右上全局Settings职责不串且设置页替换聊天主区；≥2 agents 的 Space 完成一次广播 + 一次定向，被 @ 的 agent 回复prompt含他人署名发言且无误用assistant角色；4.6范围内配置项前端可达且consumer真实生效。`scripts/verify.mjs` 加对应端到端。
 
-## 前端与三端交付总路线（新窗口执行入口）
+## Phase 4.6 Web交付路线（新窗口执行入口）
 
-> 当前起点（2026-07-11）：F0–F3已完成，Web端已有全屏聊天Shell、双栏Space导航、当前Space设置、长时间线与断线恢复；下一步进入F4 Web管理体验。仓库仍无Android/iOS壳。按下列顺序推进，每阶段独立commit并更新本节状态；上一阶段未验收不进入下一阶段。
+> 当前起点（2026-07-11）：F0–F3已完成，Web端已有全屏聊天Shell、双栏Space导航、当前Space设置、长时间线与断线恢复；下一步进入F4 Web管理体验。F0–F5只细化Phase 4.6的Web交付，不再跨入Phase 5/5.5/6；每个F独立commit并更新本节状态，上一项未验收不进入下一项。Android/iOS壳统一留到Phase 6，至少等F5冻结Web外观、交互和性能基线后再生成。
 
 ### F0 — 参考图与可调UI Lab
 
@@ -163,59 +163,21 @@
 ### F4 — Web管理体验：Settings、Account、Memory、Appearance
 
 - [ ] Settings根页只做轻量分组列表；子页动态import、进页取数、离页清理。
-- [ ] Account组合页：Agent身份/状态/RuntimeCapabilities/Memory摘要 + 1:N Account连接；删除Agent与删除连接分开；Memory正文只在Agent Memory路由加载。
+- [ ] Account组合页：Agent身份/状态/Memory摘要 + 1:N Account连接；删除Agent与删除连接分开；Memory正文只在Agent Memory路由加载。`runtimeCapabilities`真实快照归Phase 5.5，F4只按现有契约实现`null`时的“未连接，能力未知”空态，不虚构能力数据。
 - [ ] System/Appearance/Paths/Control Center分别独立；配置逐项闭环，Appearance实时预览/保存/null恢复默认，Theme Palette与Appearance Profile分别导入导出；中控台离页停止轮询。
 - [ ] 路径高风险迁移使用校验/迁移/验证/回滚流程，不提供直接生效文本框。
 
-**验收**：4.6配置覆盖表中非Phase5/6项全部闭环；跨手机浏览器/桌面浏览器读取同一gateway设置；无无效入口或假状态。
+**验收**：4.6配置覆盖表中非Phase5/6项全部闭环；Agent Memory只验收当前已提前落地的最小编辑闭环，检索注入、Files与派生整理仍归Phase 5；跨手机浏览器/桌面浏览器读取同一gateway设置；无无效入口或假状态。
 
 ### F5 — Web发布与性能基线
 
-- [ ] Production build、静态资源hash/ETag、错误边界、断线恢复、无障碍和键盘导航；开发期`no-store`与生产缓存策略分开。
+- [ ] 在F2已有production build与hash/ETag基础上完成发布复核，并补齐错误边界、断线恢复、无障碍和键盘导航；开发期`no-store`与生产缓存策略继续严格分开，不另造第二套缓存实现。
 - [ ] 主页bundle、route chunks、DOM数量、listener/timer/poller和Performance trace纳入自动/人工验收。
 - [ ] Chrome桌面、Safari桌面、Android Chrome、iOS Safari跑同一核心场景；把平台差异修在adapter/tokens，不fork页面。
 
 **验收**：ground truth 6.1预算达成；Web版作为三端共享核心冻结一个可回退commit。
 
-### 依赖闸门 — Phase 5 / 5.5
-
-- [ ] 完成Phase 5中Account页真实依赖的Agent Memory编辑/检索与Files最小接口。
-- [ ] 完成Phase 5.5联邦：VPS gateway、Tailscale Serve纯私网、手机/Mac tailnet接入、owner identity校验、agent token、presence、runtimeCapabilities、稳定HTTPS/SSE。
-- [ ] 原生客户端认证、runtime gateway URL和后台/恢复重连在真实VPS链路通过；在此之前Android/iOS只允许壳级实验，不标“持续可用”。
-
-### F6 — 三端共享平台层与仓库结构闸门
-
-- [x] **结构规约已预先放行（2026-07-10）**：`AGENTS.md` 已列出单一Capacitor配置及生成的 `android/`、`ios/`，并明确根目录其他新增项必须先问用户。此项只解除未来结构冲突，不授权当前或新窗口立即生成。
-- [ ] **执行授权闸门**：只有本F6被标为进行中、且用户在当前任务明确授权进入F6后，才可运行`cap init`/`cap add`/`npx cap ...`等安装或生成命令；执行前再次检查git状态与共享Web产物基线。
-- [ ] 引入Capacitor与单一配置，`webDir`指向共享Web产物；原生工程不放业务JS/CSS副本。
-- [ ] platform adapter补Android/iOS实现；根节点设置`data-platform`，统一safe-area、keyboard、back、notifications、file picker、external auth/link与secure storage。
-- [ ] 建立共享测试矩阵和构建脚本命名，平台特有代码只能位于bridge/原生壳。
-
-**验收**：同一Web产物可被网页、Android、iOS加载；业务view中没有Capacitor直接import；Web fallback仍全过。
-
-### F7 — Android交付
-
-- [ ] 生成Android壳，接入运行时gateway选择/安全存储、系统返回、键盘、安全区、前后台SSE恢复、通知权限与文件选择。
-- [ ] 真机验证蜂窝网络、锁屏/切后台、旋转/字体缩放、冷启动、长时间线、上传/下载（接口就绪时）。
-- [ ] `build:android:debug`与安装脚本固定；调试APK产物路径写入计划验收记录，不进repo。
-
-**验收**：真实Android设备完成登录/选Space/发消息/@/Approval/设置保存/断线重连；达到性能预算，无平台专属业务页面。
-
-### F8 — iOS交付
-
-- [ ] 生成iOS壳，处理WKWebView safe-area、键盘、返回手势、外部认证回跳、通知权限、ATS与前后台SSE恢复。
-- [ ] Xcode模拟器先跑共享矩阵，再上真机验证蜂窝网络、锁屏/切后台、字体缩放和文件选择。
-- [ ] 固定`build:ios:simulator`/archive校验流程；签名、Provisioning和TestFlight/App Store发布作为独立发布步骤，不混进UI实现。
-
-**验收**：iPhone模拟器和至少一台真机完成与Android相同核心场景；平台差异只存在于adapter/壳。
-
-### F9 — Extension体系与三端回归
-
-- [ ] 先完成Extension Package manifest/权限/安装契约，再分别实现Skill/MCP/Hook、daemon侧Agent Plugin、隔离Space Module；不建万能Plugin runtime。
-- [ ] Space Module使用可销毁sandbox并提供Web/Android/iOS一致bridge；未启用零加载，崩溃不影响聊天Shell。
-- [ ] 扩展安装/卸载/升级/权限变更后，三端都跑聊天与性能回归。
-
-**最终验收**：Web、Android、iOS共享一套业务代码与配置事实来源；三端核心场景一致、Appearance可调、扩展按需加载；任一平台/扩展失败不拖垮gateway或其他客户端。
+**阶段衔接**：F5验收后结束Phase 4.6，回到总体主线，严格按`Phase 5 → Phase 5.5 → Phase 6`推进。Phase 5完成Memory/Files数据层，Phase 5.5完成VPS gateway、Tailscale纯私网、daemon联邦、owner identity、presence与`runtimeCapabilities`；两阶段均验收后才进入原生壳。不得从F5直接跳到Capacitor或三端交付。
 
 ## Phase 5 — Memory 与数据层
 
@@ -272,18 +234,18 @@
 
 ## Phase 6 — 原生客户端、适配补全与扩展
 
-> 具体执行顺序与验收以本文件“前端与三端交付总路线”F6–F9为准；本节只记录产品阶段状态，避免另写第二份计划。
+> 本节是唯一的三端、原生适配与Extension执行清单，不再维护另一套跨Phase的F6–F9时间轴。为保持`AGENTS.md`的授权用语，6.0保留`F6`别名：只有Phase 5与5.5均完成、F5冻结的Web基线仍通过、6.0/F6被标为进行中，且用户在当前任务明确授权进入F6后，才可生成原生工程。按6.0→6.6依赖序推进，不并行跳项。
 
-- [ ] **6.0 仓库结构/平台契约闸门**：`AGENTS.md`结构名单已预先放行；进入F6时仍须取得当前任务明确授权并将F6标为进行中，之后才能生成Capacitor配置、`android/`、`ios/`。同时完成platform adapter与原生认证/SSE契约。
-- [ ] **6.1 Android**：共享Web产物 + Capacitor Android壳，完成真机网络/键盘/返回/通知/文件/前后台恢复与性能验收。
-- [ ] **6.2 iOS**：共享Web产物 + Capacitor iOS壳，完成模拟器/真机WKWebView、safe-area、键盘、认证回跳、通知/文件/前后台恢复与性能验收。
+- [ ] **6.0 / F6 仓库结构与共享平台闸门**：`AGENTS.md`已预先放行单一Capacitor配置及生成的`android/`、`ios/`，但不构成执行授权。获当前任务明确授权并将本项标为进行中后，引入Capacitor，`webDir`指向F5冻结的共享Web产物，原生工程不复制业务JS/CSS；platform adapter补Android/iOS实现，根节点设置`data-platform`，统一gateway URL、fetch/SSE、secure storage、notification、file picker、keyboard/back、haptics与external auth/link；建立共享测试矩阵和构建脚本命名，平台特有代码只在bridge/原生壳。验收同一Web产物可被网页、Android、iOS加载，业务view无Capacitor直接import且Web fallback全过。
+- [ ] **6.1 Android**：生成独立Android壳，接入运行时gateway选择/安全存储、系统返回、键盘、安全区、前后台SSE恢复、通知权限与文件选择；真机验证蜂窝网络、锁屏/切后台、旋转/字体缩放、冷启动、长时间线及接口就绪后的上传/下载；固定`build:android:debug`与安装脚本，调试APK产物路径只写入本项验收记录、不进repo。完成标准为真实Android设备跑通登录/选Space/发消息/@/Approval/设置保存/断线重连，达到性能预算且无平台专属业务页面。
+- [ ] **6.2 iOS**：生成独立iOS壳，处理WKWebView safe-area、键盘、返回手势、外部认证回跳、通知权限、ATS与前后台SSE恢复；Xcode模拟器先跑共享矩阵，再上真机验证蜂窝网络、锁屏/切后台、字体缩放和文件选择；固定`build:ios:simulator`与archive校验流程，签名、Provisioning及TestFlight/App Store发布留到6.6。完成标准为iPhone模拟器和至少一台真机通过与Android相同核心场景，平台差异只存在于adapter/壳。
 - [ ] **6.3 CLI/API daemon适配补全**：Claude Code（`--resume`）、Codex及API tool-call host；全部复用Phase 5.5 daemon协议与RuntimeCapabilities，不回到gateway spawn。
-- [ ] **6.4 配置补全**：Appearance全套配置项、Skill管理、Tools policy与Capabilities展示逐项闭环。
-- [ ] **6.5 Extension体系**：Extension Package manifest/安装/版本/权限；Skill/MCP/Hook各自runtime；Agent Plugin运行在daemon；Space Module运行在浏览器沙箱；Settings全局安装 + Account/Space分别启用。第三方代码不得直接进入主DOM或持有gateway/secrets/宿主文件权限。
-- [ ] **6.6 发布收口**：Web production缓存、Android release、iOS archive/TestFlight准备、三端共享回归矩阵与可回退版本。
+- [ ] **6.4 联邦能力与配置补全**：Skill管理、Tools policy与`runtimeCapabilities`展示逐项闭环；Appearance的产品配置与Web闭环归F4，本项只验证三端读取同一gateway保存值，并处理不可编辑的safe-area/输入法平台叠加，不再重做主题系统。
+- [ ] **6.5 Extension体系**：先完成Extension Package manifest/安装/版本/权限契约，再实现Skill/MCP/Hook各自runtime、daemon侧Agent Plugin与隔离Space Module；Settings负责全局安装，Account/Space分别启用，不建万能Plugin runtime。Space Module使用可销毁sandbox并提供Web/Android/iOS一致bridge，未启用时零加载、崩溃不影响聊天Shell；第三方代码不得直接进入主DOM或持有gateway/secrets/宿主文件权限。
+- [ ] **6.6 原生发布与三端回归**：F5冻结的Web production缓存与性能基线只做回归，不在本项重建；完成Android release、iOS archive/TestFlight准备、三端共享核心场景与性能矩阵、Extension安装/卸载/升级/权限变更回归，并冻结可回退版本。签名、Provisioning、TestFlight/App Store正式发布作为独立发布步骤，不混进UI实现。
 - [ ] ~~gateway launchd常驻 + 崩溃自愈~~ —— **提前到Phase 5.5，形态改为VPS systemd + agent daemon launchd/systemd双层**。
 
-**完成标准**：ground truth第四节可配置项逐项对勾；Web/Android/iOS共享业务代码和gateway事实来源；三端核心场景、性能预算、断线恢复与安全边界全部通过。
+**完成标准**：ground truth第四节可配置项逐项对勾；Web、Android、iOS共享业务代码和gateway事实来源；三端核心场景、性能预算、断线恢复与安全边界全部通过；Appearance共享且扩展按需加载，任一平台或扩展失败不拖垮gateway与其他客户端。
 
 ---
 
