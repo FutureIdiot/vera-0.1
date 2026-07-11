@@ -1,0 +1,121 @@
+:root {
+  color-scheme: light dark;
+  --vera-color-bg: #ffffff;
+  --vera-color-surface: #f4f4f5;
+  --vera-color-border: #d9d9de;
+  --vera-color-text: #18181b;
+  --vera-color-text-muted: #6b6b73;
+  --vera-color-theme: #2f6fed;
+  --vera-color-accent: #2f6fed;
+  --vera-color-accent-text: #ffffff;
+  --vera-color-bubble-user-bg: var(--vera-color-accent);
+  --vera-color-bubble-user-text: #ffffff;
+  --vera-color-bubble-agent-bg: #f4f4f5;
+  --vera-color-bubble-agent-text: #18181b;
+  --vera-color-bubble-author-text: #6b6b73;
+  --vera-color-bubble-streaming-border: var(--vera-color-accent);
+  --vera-color-activity-bg: #fbfbfc;
+  --vera-color-activity-text: #6b6b73;
+  --vera-color-activity-border: #e4e4e7;
+  --vera-color-approval-bg: #fff8e6;
+  --vera-color-approval-border: #f0c96a;
+  --vera-color-approval-answered-bg: #f4f4f5;
+  --vera-color-approval-answered-border: #d9d9de;
+  --vera-color-danger: #d1373f;
+  --vera-color-success: #2a9d5c;
+
+  --vera-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --vera-font-size-phone-chat: 14px;
+  --vera-font-size-phone-management: 14px;
+  --vera-font-size-desktop-chat: 16px;
+  --vera-font-size-desktop-management: 16px;
+  --vera-font-size-small: 12px;
+  --vera-font-size-large: 18px;
+  --vera-line-height-base: 1.45;
+
+  --vera-bubble-radius-phone: 16px;
+  --vera-bubble-radius-desktop: 16px;
+  --vera-bubble-gap-phone: 4px;
+  --vera-bubble-gap-desktop: 10px;
+  --vera-window-margin-phone-chat: 12px;
+  --vera-window-margin-phone-management: 12px;
+  --vera-window-margin-desktop-chat: 64px;
+  --vera-window-margin-desktop-management: 8px;
+
+  --vera-font-size-base: var(--vera-font-size-phone-chat);
+  --vera-bubble-radius: var(--vera-bubble-radius-phone);
+  --vera-bubble-gap: var(--vera-bubble-gap-phone);
+  --vera-window-margin: var(--vera-window-margin-phone-chat);
+  --vera-space-xs: 4px;
+  --vera-space-sm: 8px;
+  --vera-space-md: 12px;
+  --vera-space-lg: 20px;
+  --vera-bubble-padding: 10px 14px;
+  --vera-bubble-max-width: 80%;
+  --vera-composer-height: 56px;
+  --vera-border-width: 1px;
+  --vera-transition-fast: 120ms ease;
+  --vera-safe-area-top: env(safe-area-inset-top, 0px);
+  --vera-safe-area-right: env(safe-area-inset-right, 0px);
+  --vera-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --vera-safe-area-left: env(safe-area-inset-left, 0px);
+}
+
+@media (min-width: 768px) {
+  :root {
+    --vera-font-size-base: var(--vera-font-size-desktop-chat);
+    --vera-bubble-radius: var(--vera-bubble-radius-desktop);
+    --vera-bubble-gap: var(--vera-bubble-gap-desktop);
+    --vera-window-margin: var(--vera-window-margin-desktop-chat);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --vera-color-bg: #17171a;
+    --vera-color-surface: #1f2023;
+    --vera-color-border: #303136;
+    --vera-color-text: #ececef;
+    --vera-color-text-muted: #9a9aa2;
+    --vera-color-theme: #5b8def;
+    --vera-color-accent: #5b8def;
+    --vera-color-accent-text: #0c0c0e;
+    --vera-color-bubble-user-text: #0c0c0e;
+    --vera-color-bubble-agent-bg: #26272b;
+    --vera-color-bubble-agent-text: #ececef;
+    --vera-color-bubble-author-text: #9a9aa2;
+    --vera-color-activity-bg: #1b1c1f;
+    --vera-color-activity-text: #9a9aa2;
+    --vera-color-activity-border: #303136;
+    --vera-color-approval-bg: #332a12;
+    --vera-color-approval-border: #a9822f;
+    --vera-color-approval-answered-bg: #1f2023;
+    --vera-color-approval-answered-border: #303136;
+    --vera-color-danger: #f0666d;
+    --vera-color-success: #63d296;
+  }
+}
+
+:root[data-theme="dark"] {
+  --vera-color-bg: #17171a;
+  --vera-color-surface: #1f2023;
+  --vera-color-border: #303136;
+  --vera-color-text: #ececef;
+  --vera-color-text-muted: #9a9aa2;
+  --vera-color-theme: #5b8def;
+  --vera-color-accent: #5b8def;
+  --vera-color-accent-text: #0c0c0e;
+  --vera-color-bubble-user-text: #0c0c0e;
+  --vera-color-bubble-agent-bg: #26272b;
+  --vera-color-bubble-agent-text: #ececef;
+  --vera-color-bubble-author-text: #9a9aa2;
+  --vera-color-activity-bg: #1b1c1f;
+  --vera-color-activity-text: #9a9aa2;
+  --vera-color-activity-border: #303136;
+  --vera-color-approval-bg: #332a12;
+  --vera-color-approval-border: #a9822f;
+  --vera-color-approval-answered-bg: #1f2023;
+  --vera-color-approval-answered-border: #303136;
+  --vera-color-danger: #f0666d;
+  --vera-color-success: #63d296;
+}

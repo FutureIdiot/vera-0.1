@@ -9,7 +9,12 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "dev:web": "vite --config frontend/vite.config.js",
+    "build:web": "vite build --config frontend/vite.config.js",
+    "analyze:web": "npm run build:web && node scripts/analyze-web.mjs"
   },
-  "dependencies": {}
+  "devDependencies": {
+    "vite": "^6.4.3"
+  }
 }

@@ -1,0 +1,22 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--vera-color-bg);
+  color: var(--vera-color-text);
+  font-family: var(--vera-font-family);
+  font-size: var(--vera-font-size-base);
+  line-height: var(--vera-line-height-base);
+}
+
+button,
+input {
+  font: inherit;
+}

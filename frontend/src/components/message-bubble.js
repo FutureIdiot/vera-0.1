@@ -1,5 +1,5 @@
 // Message 气泡：随 message.delta 流式增长、message.completed 以全文覆盖
-// （docs/api-contract.md 四、客户端义务）。样式一律走 CSS 变量（styles/theme.css）。
+// （docs/api-contract.md 四、客户端义务）。样式一律走 CSS 变量（styles/tokens.css）。
 // agent 消息在气泡内顶部显示作者名（群聊 Space 区分谁在说话）；
 // 名字由调用方通过 ctx.agentName(agentId) 解析，缺席时回退 agentId。
 

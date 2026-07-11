@@ -26,7 +26,7 @@ import { registerThemesRoutes } from "./api/themes-routes.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 
-const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend");
+const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
 
 const config = loadConfig(process.env);
@@ -93,7 +93,7 @@ const server = createServer(async (req, res) => {
   try {
     const handled = await router.handle(req, res);
     if (handled) return;
-    // 非 /api/ 路径回退到 frontend/ 静态文件（api-contract.md 系统表）。
+    // 非 /api/ 路径回退到 production build（frontend/dist/）。
     if (!req.url.startsWith("/api/")) {
       const served = await serveStatic(req, res);
       if (served) return;

@@ -1,12 +1,6 @@
-// 静态文件服务：非 /api/ 路径回退到 frontend/（api-contract.md 系统表）。
-// Phase 2 不引入构建步骤，浏览器直接加载原生 ES modules，这里只是一个
-// 零依赖的最小静态文件 handler：Content-Type 按扩展名映射 + 路径穿越防护。
-//
-// 约定与 router.js 一致：handler 返回 true 表示已处理（无论成功与否），
-// false 表示未找到文件，交由调用方（server.js）继续兜底（404）。
-
+import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { extname, join, normalize, sep } from "node:path";
+import { extname, relative, resolve, sep } from "node:path";
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -20,50 +14,101 @@ const MIME_TYPES = {
   ".map": "application/json; charset=utf-8",
 };
 
-// 把 URL pathname 解析到 root 目录下的绝对路径，拒绝任何逃逸出 root 的请求
-// （`..` 穿越、编码绕过等）。逃逸或非法路径返回 null。
-function resolveSafePath(root, pathname) {
+function decodeSafePath(rawPathname) {
   let decoded;
   try {
-    decoded = decodeURIComponent(pathname);
+    decoded = decodeURIComponent(rawPathname);
   } catch {
     return null;
   }
-  const relative = normalize(decoded).replace(/^([.]{2}(\/|\\|$))+/, "");
-  const full = join(root, relative);
-  const rootWithSep = root.endsWith(sep) ? root : root + sep;
-  if (full !== root && !full.startsWith(rootWithSep)) return null;
-  return full;
+  if (decoded.includes("\0") || decoded.split(/[\\/]+/).includes("..")) return null;
+  return decoded;
 }
 
-export function createStaticHandler(root) {
+function resolveSafePath(root, rawPathname) {
+  const decoded = decodeSafePath(rawPathname);
+  if (decoded === null) return null;
+  const rootPath = resolve(root);
+  const fullPath = resolve(rootPath, `.${decoded.startsWith("/") ? decoded : `/${decoded}`}`);
+  const offset = relative(rootPath, fullPath);
+  if (offset === ".." || offset.startsWith(`..${sep}`) || resolve(fullPath) === resolve(rootPath, "..")) return null;
+  return fullPath;
+}
+
+function etagFor(body) {
+  return `"${createHash("sha256").update(body).digest("base64url")}"`;
+}
+
+function isHashedAsset(pathname) {
+  return /^\/assets\/.+-[A-Za-z0-9_-]{8,}\.[^/]+$/.test(pathname);
+}
+
+function cacheControlFor(pathname) {
+  return isHashedAsset(pathname)
+    ? "public, max-age=31536000, immutable"
+    : "no-cache";
+}
+
+function acceptsSpaFallback(req, pathname) {
+  if (pathname.startsWith("/assets/") || extname(pathname)) return false;
+  const accept = req.headers.accept;
+  return !accept || accept.includes("text/html") || accept.includes("*/*");
+}
+
+async function readStaticFile(filePath) {
+  let fileStat = await stat(filePath);
+  let finalPath = filePath;
+  if (fileStat.isDirectory()) {
+    finalPath = resolve(filePath, "index.html");
+    fileStat = await stat(finalPath);
+  }
+  if (!fileStat.isFile()) return null;
+  return { finalPath, body: await readFile(finalPath) };
+}
+
+export function createStaticHandler(root, { spaFallback = true } = {}) {
   return async function serveStatic(req, res) {
     if (req.method !== "GET" && req.method !== "HEAD") return false;
 
-    const url = new URL(req.url, "http://localhost");
-    const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
+    const rawPathname = (req.url || "/").split(/[?#]/, 1)[0] || "/";
+    const decoded = decodeSafePath(rawPathname);
+    if (decoded === null) return false;
+    const pathname = decoded === "/" ? "/index.html" : decoded;
     let filePath = resolveSafePath(root, pathname);
     if (!filePath) return false;
 
+    let file;
     try {
-      let fileStat = await stat(filePath);
-      if (fileStat.isDirectory()) {
-        filePath = join(filePath, "index.html");
-        fileStat = await stat(filePath);
-      }
-      const body = await readFile(filePath);
-      const contentType = MIME_TYPES[extname(filePath).toLowerCase()] || "application/octet-stream";
-      // no-store：防浏览器与 CDN 边缘缓存旧资源（api-contract.md 系统表；Phase 6 换 ETag）。
-      res.writeHead(200, {
-        "Content-Type": contentType,
-        "Content-Length": body.length,
-        "Cache-Control": "no-store",
-      });
-      res.end(req.method === "HEAD" ? undefined : body);
-      return true;
+      file = await readStaticFile(filePath);
     } catch (err) {
-      if (err.code === "ENOENT" || err.code === "ENOTDIR") return false;
-      throw err;
+      if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
     }
+
+    if (!file && spaFallback && acceptsSpaFallback(req, pathname)) {
+      filePath = resolveSafePath(root, "/index.html");
+      try {
+        file = await readStaticFile(filePath);
+      } catch (err) {
+        if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
+      }
+    }
+    if (!file) return false;
+
+    const etag = etagFor(file.body);
+    const responsePath = file.finalPath.endsWith(`${sep}index.html`) ? "/index.html" : pathname;
+    const headers = {
+      "Content-Type": MIME_TYPES[extname(file.finalPath).toLowerCase()] || "application/octet-stream",
+      "Content-Length": file.body.length,
+      "Cache-Control": cacheControlFor(responsePath),
+      ETag: etag,
+    };
+    if (req.headers["if-none-match"] === etag) {
+      res.writeHead(304, { "Cache-Control": headers["Cache-Control"], ETag: etag });
+      res.end();
+      return true;
+    }
+    res.writeHead(200, headers);
+    res.end(req.method === "HEAD" ? undefined : file.body);
+    return true;
   };
 }

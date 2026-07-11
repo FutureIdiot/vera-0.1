@@ -93,8 +93,8 @@
 - [x] **4.5 系统配置**：新增 `GET/PATCH /api/settings`，字段以 ground truth 4.1 为唯一清单（数据隔离规则、记忆整理触发/注入预算、消息呈现等），严格遵守不扩；运维参数仍走 env 不进前端（ground truth 4.1 末段边界注记）。持久化进 `data/settings.json`（store 新集合），config 作启动默认、settings 作运行时覆盖。
 - [ ] **4.6 前端正式布局**：按 ground truth 5.1–5.4 分阶段推进，手机竖屏第一公民；使用简单hash路由，不为路由引入UI框架。
   - [x] **4.6.0 文档契约（2026-07-10）**：ground truth 已定全屏聊天主页、当前Space设置、右滑双栏Space导航、全局Settings、Account组合管理、配置闭环、提前拆分与页面完成标准；API契约已补 Appearance（含Theme/Profile边界与安全导入导出）、Space提醒、Space归档/恢复及Account组合读取边界。本步不改前端代码。
-  - [ ] **4.6.1 可调雏形 + Shell**：先在Codex对话可视化或Figma中制作不依赖repo的交互雏形，至少可预览全屏聊天、右滑双栏导航、当前Space设置和Settings目录，并允许用户调主题、字体、间距、气泡和窗口边距。确认后实现 `views/shell.js` + `state/router.js`：无底部标签；左上只进当前Space设置，右上只进Settings；手机单主区，桌面复用同一路由自适应。旧时间线先完整挂入新Shell，保证每一步可用。
-  - [ ] **4.6.2 基础层提前拆分**：在继续加功能前，把现 `api/gateway-client.js` 拆为 `api/http-client.js` + `spaces-client.js` / `agents-client.js` / `accounts-client.js` / `settings-client.js` / `memory-client.js` / `extensions-client.js` / `status-client.js` / `events-client.js`；state 至少拆成 `router.js` / `space-navigator-state.js` / `spaces-state.js` / `accounts-state.js` / `settings-state.js` / `extensions-state.js`，现有 `timeline-store.js` 保持独立。样式拆为 `tokens.css`（变量唯一来源）/ `base.css` / `shell.css` / 按领域样式，废止同时承担token与所有组件规则的巨型 `theme.css`。
+  - [ ] **4.6.1 可调雏形 + Shell**：可调雏形与默认tokens已由F0完成；F2已落全局app runtime、route lifecycle与旧时间线挂载。无底部标签、左上当前Space设置、右上全局Settings及手机/桌面Shell交互随F3闭环后再标完成，不因基础层已存在提前打勾。
+  - [x] **4.6.2 基础层提前拆分（2026-07-11）**：已移除 `api/gateway-client.js`，按领域拆成 `http` / `spaces` / `agents` / `accounts` / `settings` / `memory` / `extensions` / `status` / `events` clients；state 已拆 router、全局app runtime、platform、Space导航/时间线、Account、Settings、Extension边界；样式已拆 `tokens.css`（变量唯一来源）/ `base.css` / `shell.css` / `chat.css`，旧巨型 `theme.css` 已移除。聊天route显式mount/unmount，全局runtime唯一持有SSE并处理reset水位，timeline state与DOM同步限制200项。
   - [ ] **4.6.3 全屏聊天 + Space导航/设置闭环**：`views/space-view.js`、`space-navigator-view.js`、`space-settings-view.js` 分开。手机右滑或点顶栏Space名称打开导航，桌面可用导航左下图钉切换覆盖/常驻；左栏为Agent/群头像投影，右栏为相同成员集合的活跃Space列表；完成切换、新增、重命名、二次确认归档与恢复，不提供永久删除。当前Space设置完成参与Agent、Seat响应规则和notifications；Space Module区等Phase 6契约/后端就绪后再显示，不建假开关。composer只属于聊天主页，设置路由替换聊天主区而不与时间线纵向叠放。
   - [ ] **4.6.4 Account组合管理 + Agent Memory闭环**：只有 `#/settings/accounts` 一个管理入口；`account-list-view.js`、`account-detail-view.js`、`agent-memory-view.js` 分开。详情组合显示Agent身份/状态/Memory与其一个或多个Account连接，但API/state仍按Agent和Account分域；删除连接与删除Agent是两个明确动作。Memory只在进入对应Agent子路由时加载正文。
   - [ ] **4.6.5 Setting子页闭环**：`settings-index-view.js`、`system-settings-view.js`、`appearance-view.js`、`path-settings-view.js`、`control-center-view.js` 分开；设置首页只显示普通分组列表，不预取子页数据。Appearance预览只改内存CSS变量，保存走gateway，按组恢复默认传 `null`。中控台进入时才取状态/轮询，离开即停止；当前file store显示存储状态，不虚构数据库连接。Extension Package管理等Phase 6契约落地后加入。
@@ -120,7 +120,7 @@
 
 ## 前端与三端交付总路线（新窗口执行入口）
 
-> 当前起点（2026-07-10）：Phase 4.1–4.5已完成；4.6.0文档契约已完成；前端仍是原生ES Modules最简聊天页，`package.json`无前端依赖/构建脚本，仓库无Android/iOS壳。按下列顺序推进，每阶段独立commit并更新本节状态；上一阶段未验收不进入下一阶段。
+> 当前起点（2026-07-11）：F0–F2已完成，前端保持原生ES Modules并已落Vite构建、全局app runtime、route lifecycle、platform Web adapter、领域拆分与production dist伺服；下一步进入F3 Web核心体验。仓库仍无Android/iOS壳。按下列顺序推进，每阶段独立commit并更新本节状态；上一阶段未验收不进入下一阶段。
 
 ### F0 — 参考图与可调UI Lab
 
@@ -143,13 +143,13 @@
 
 ### F2 — 共享Web基础与提前拆分
 
-- [ ] 保持原生ES Modules，不引入React/Vue等UI框架；加入Vite仅负责dev/build、动态import和bundle报告，输出到 `frontend/dist/`。
-- [ ] 建立 `npm run dev:web` / `build:web` / `analyze:web`；gateway开发期仍用3210，Vite代理或runtime gateway配置不得写死地址。
-- [ ] 按4.6.2拆 `views/api/state/styles`；`tokens.css`唯一视觉参数源，建立route lifecycle（mount/unmount）和platform adapter Web实现。
-- [ ] 旧时间线完整迁入新store/route，保留keyed局部更新、SSE reset/reconnect和Approval，不在重构中重写业务语义。
-- [ ] 添加路由、store、timeline上限、cleanup单测；生成首份bundle基线。
+- [x] 保持原生ES Modules，不引入React/Vue等UI框架；加入Vite仅负责dev/build、动态import和bundle报告，输出到 `frontend/dist/`。
+- [x] 建立 `npm run dev:web` / `build:web` / `analyze:web`；gateway开发期仍用3210，Vite代理或runtime gateway配置不得写死地址。
+- [x] 按4.6.2拆 `views/api/state/styles`；`tokens.css`唯一视觉参数源，建立route lifecycle（mount/unmount）和platform adapter Web实现。
+- [x] 旧时间线完整迁入新store/route，保留keyed局部更新、SSE reset/reconnect和Approval，不在重构中重写业务语义。
+- [x] 添加路由、store、timeline上限、cleanup单测；生成首份bundle基线。
 
-**验收**：`npm test` + `build:web`通过；旧单Space聊天行为无回归；首屏无Settings/Memory/Extension主体代码；任何页面文件都未跨越ground truth 5.3边界。
+**验收（2026-07-11完成）**：`npm test` 92/92、`scripts/verify.mjs` 62/62、`build:web`、`git diff --check`通过；Vite→3210真实代理下页面/API与SSE `stream.reset`逐帧通过。默认聊天首屏（Shell + Web platform + chat route + CSS）gzip 9,758 bytes / 200 KiB；首屏无Settings/Memory/Extension主体代码，production gateway仅伺服`frontend/dist/`，hash资源immutable且HTML走ETag协商缓存。
 
 ### F3 — Web核心体验：聊天、Space导航、当前Space设置
 

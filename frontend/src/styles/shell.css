@@ -1,0 +1,25 @@
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  padding-top: var(--vera-safe-area-top);
+  padding-right: var(--vera-safe-area-right);
+  padding-bottom: var(--vera-safe-area-bottom);
+  padding-left: var(--vera-safe-area-left);
+}
+
+.vera-route {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.vera-status-bar,
+.vera-route-error {
+  color: var(--vera-color-text-muted);
+  font-size: var(--vera-font-size-small);
+  padding: var(--vera-space-xs) var(--vera-window-margin);
+  border-bottom: var(--vera-border-width) solid var(--vera-color-border);
+}

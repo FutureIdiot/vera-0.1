@@ -27,7 +27,12 @@ export function applyApprovalCard(el, item, { onAnswer } = {}) {
     button.type = "button";
     button.className = `vera-approval__button vera-approval__button--${option}`;
     button.textContent = option;
-    button.addEventListener("click", () => onAnswer?.(item.id, option));
+    button.addEventListener("click", () => {
+      for (const action of actions.querySelectorAll("button")) action.disabled = true;
+      Promise.resolve(onAnswer?.(item.id, option)).catch(() => {
+        for (const action of actions.querySelectorAll("button")) action.disabled = false;
+      });
+    });
     actions.appendChild(button);
   }
   el.appendChild(actions);
