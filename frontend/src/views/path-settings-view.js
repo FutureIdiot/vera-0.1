@@ -1,6 +1,6 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createPathsClient } from "../api/paths-client.js";
-import { createManagementHeader, createNotice, field, input, setBusy } from "../components/management-ui.js";
+import { createNotice, field, input, setBusy } from "../components/management-ui.js";
 
 function formatBytes(value = 0) {
   if (value < 1024) return `${value} B`;
@@ -8,12 +8,12 @@ function formatBytes(value = 0) {
   return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
-export async function mountPathSettingsView({ root, platform } = {}) {
+export async function mountPathSettingsView({ root, platform, shell } = {}) {
   root.dataset.routeScope = "management";
   const client = createPathsClient(createHttpClient(platform));
   let paths = null;
   let disposed = false;
-  root.appendChild(createManagementHeader({ title: "Paths", backHref: "#/settings" }));
+  shell?.setManagementHeader({ title: "Paths", backHref: "#/settings", backLabel: "返回" });
   const content = document.createElement("div");
   content.className = "vera-management-content";
   const notice = createNotice("正在读取路径状态…");

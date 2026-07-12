@@ -103,12 +103,11 @@
   border-top: var(--vera-border-width) solid var(--vera-color-border);
   display: grid;
   gap: var(--vera-space-sm);
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   min-height: var(--vera-composer-height);
   padding: var(--vera-space-sm) var(--vera-window-margin);
 }
 
-.vera-composer__target { background: var(--vera-color-bg); border: var(--vera-border-width) solid var(--vera-color-border); border-radius: var(--vera-control-radius); color: var(--vera-color-text); min-height: var(--vera-touch-target); max-width: calc(var(--vera-touch-target) * 2); }
 .vera-work-status { align-items: center; background: var(--vera-color-surface); color: var(--vera-color-text-muted); display: flex; font-size: var(--vera-font-size-small); justify-content: space-between; min-height: var(--vera-touch-target); padding: 0 var(--vera-window-margin); }
 
 .vera-composer__input {

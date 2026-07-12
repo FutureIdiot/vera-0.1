@@ -57,14 +57,19 @@
 }
 
 .vera-shell__title {
+  align-items: center;
   background: transparent;
   border: 0;
+  display: flex;
   font-weight: 600;
+  justify-content: center;
   min-height: var(--vera-touch-target);
   overflow: hidden;
+  text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.vera-shell[data-route-scope="management"] .vera-shell__title { cursor: default; }
 
 .vera-icon-button {
   align-items: center;
@@ -95,3 +100,5 @@
   padding: var(--vera-space-xs) var(--vera-window-margin);
   border-bottom: var(--vera-border-width) solid var(--vera-color-border);
 }
+.vera-route-error { align-content: center; display: grid; gap: var(--vera-space-md); justify-items: center; margin: auto; text-align: center; }
+.vera-route-error p { margin: 0; }

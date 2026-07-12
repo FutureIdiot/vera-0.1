@@ -21,6 +21,11 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   let saving = false;
   let mounted = true;
   root.dataset.routeScope = "management";
+  shell?.setManagementHeader({
+    title: "当前 Space 设置",
+    backHref: `#/spaces/${encodeURIComponent(spaceId)}`,
+    backLabel: "返回",
+  });
 
   if (!space) {
     const missing = document.createElement("p");
@@ -29,16 +34,6 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
     root.appendChild(missing);
     return () => root.replaceChildren();
   }
-
-  const header = document.createElement("header");
-  header.className = "vera-management-header";
-  const back = document.createElement("a");
-  back.href = `#/spaces/${encodeURIComponent(space.id)}`;
-  back.className = "vera-text-button";
-  back.textContent = "返回聊天";
-  const title = document.createElement("h1");
-  title.textContent = "当前 Space 设置";
-  header.append(back, title);
 
   const form = document.createElement("form");
   form.className = "vera-space-form";
@@ -109,9 +104,6 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   const includeErrors = checkbox("仍提醒错误 Activity", space.notifications?.includeActivityErrors !== false);
   notifications.append(notificationLegend, notificationMode, includeErrors.label);
 
-  const future = document.createElement("p");
-  future.className = "vera-management-note";
-  future.textContent = "Space Module 将在 Phase 6 开放。";
   const error = document.createElement("p");
   error.className = "vera-inline-error";
   error.hidden = true;
@@ -119,8 +111,8 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   save.type = "submit";
   save.className = "vera-primary-button";
   save.textContent = "保存设置";
-  form.append(basic, participants, notifications, future, error, save);
-  root.append(header, form);
+  form.append(basic, participants, notifications, error, save);
+  root.appendChild(form);
 
   function applyExternalSpace(nextSpace) {
     space = nextSpace;
@@ -194,7 +186,6 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   }, { since: bootstrap.seq });
   return () => {
     if (dirty && !window.confirm("有未保存的 Space 设置，确定离开？")) {
-      window.location.hash = `#/spaces/${encodeURIComponent(space.id)}/settings`;
       return false;
     }
     mounted = false;

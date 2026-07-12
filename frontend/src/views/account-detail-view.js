@@ -1,7 +1,7 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createAccountsClient } from "../api/accounts-client.js";
 import { createAgentsClient } from "../api/agents-client.js";
-import { createManagementHeader, createNotice, field, input, select, setBusy } from "../components/management-ui.js";
+import { createNotice, field, input, select, setBusy } from "../components/management-ui.js";
 
 function accountEditor(account, { onSave, onDelete }) {
   const form = document.createElement("form");
@@ -46,7 +46,7 @@ function accountEditor(account, { onSave, onDelete }) {
   return form;
 }
 
-export async function mountAccountDetailView({ root, platform, runtime, agentId } = {}) {
+export async function mountAccountDetailView({ root, platform, runtime, agentId, shell } = {}) {
   root.dataset.routeScope = "management";
   const http = createHttpClient(platform);
   const accountsClient = createAccountsClient(http);
@@ -56,10 +56,11 @@ export async function mountAccountDetailView({ root, platform, runtime, agentId 
   let states = [];
   let disposed = false;
   if (!agent) {
-    root.append(createManagementHeader({ title: "Account", backHref: "#/settings/accounts" }), createNotice("Agent 不存在", "danger"));
+    shell?.setManagementHeader({ title: "Account", backHref: "#/settings/accounts", backLabel: "返回" });
+    root.appendChild(createNotice("Agent 不存在", "danger"));
     return () => root.replaceChildren();
   }
-  root.appendChild(createManagementHeader({ title: agent.name, backHref: "#/settings/accounts", backLabel: "Account" }));
+  shell?.setManagementHeader({ title: agent.name, backHref: "#/settings/accounts", backLabel: "返回" });
   const content = document.createElement("div");
   content.className = "vera-management-content";
   const feedback = createNotice("正在读取连接与状态…");

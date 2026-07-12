@@ -2,7 +2,7 @@ import { createHttpClient } from "../api/http-client.js";
 import { createSettingsClient } from "../api/settings-client.js";
 import { createThemesClient } from "../api/themes-client.js";
 import { applyAppearanceSettings, applyResolvedAppearance, applyThemePalette } from "../state/settings-state.js";
-import { createManagementHeader, createNotice, downloadText, field, input, readFileText, select, setBusy } from "../components/management-ui.js";
+import { createNotice, downloadText, field, input, readFileText, select, setBusy } from "../components/management-ui.js";
 
 const FIELD_GROUPS = [
   ["全局", [
@@ -25,7 +25,7 @@ const FIELD_GROUPS = [
 
 function joinUrl(baseUrl, path) { return new URL(path, `${baseUrl.replace(/\/$/, "")}/`).toString(); }
 
-export async function mountAppearanceView({ root, platform } = {}) {
+export async function mountAppearanceView({ root, platform, shell } = {}) {
   root.dataset.routeScope = "management";
   const http = createHttpClient(platform);
   const settingsClient = createSettingsClient(http);
@@ -37,7 +37,7 @@ export async function mountAppearanceView({ root, platform } = {}) {
   let disposed = false;
   let dirty = false;
   const controls = new Map();
-  root.appendChild(createManagementHeader({ title: "Appearance", backHref: "#/settings" }));
+  shell?.setManagementHeader({ title: "Appearance", backHref: "#/settings", backLabel: "返回" });
   const form = document.createElement("form");
   form.className = "vera-management-form";
   const notice = createNotice("正在读取外观配置…");

@@ -170,6 +170,9 @@ export function createAppRuntime({
       }
       return () => listeners.delete(listener);
     },
+    reconnect() {
+      stream?.reconnectNow();
+    },
     close() {
       if (closed) return;
       closed = true;

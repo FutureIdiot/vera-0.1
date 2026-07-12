@@ -55,11 +55,41 @@ export function createAppRouter({
   let shell = null;
   let started = false;
   let transition = 0;
+  let activeHash = null;
+  let revertingHash = null;
+
+  function renderFailure(messageText, { retry = false } = {}) {
+    const outlet = shell?.outlet ?? root;
+    outlet.replaceChildren();
+    const page = windowTarget.document?.createElement?.("section") ?? document.createElement("section");
+    page.className = "vera-route-error";
+    page.setAttribute("role", "alert");
+    const message = windowTarget.document?.createElement?.("p") ?? document.createElement("p");
+    message.textContent = messageText;
+    page.appendChild(message);
+    if (retry) {
+      const button = windowTarget.document?.createElement?.("button") ?? document.createElement("button");
+      button.type = "button";
+      button.className = "vera-primary-button";
+      button.textContent = "重试";
+      button.addEventListener("click", onHashChange);
+      page.appendChild(button);
+    }
+    outlet.appendChild(page);
+    activeCleanup = () => page.remove();
+  }
 
   async function render() {
-    const route = parseRoute(windowTarget.location.hash);
+    const targetHash = windowTarget.location.hash;
+    const route = parseRoute(targetHash);
     const currentTransition = ++transition;
-    if (activeCleanup?.() === false) return;
+    if (activeCleanup?.() === false) {
+      if (activeHash !== null && targetHash !== activeHash) {
+        revertingHash = activeHash;
+        if (windowTarget.location.hash !== activeHash) windowTarget.location.hash = activeHash;
+      }
+      return;
+    }
     activeCleanup = null;
     const outlet = shell?.outlet ?? root;
     outlet.replaceChildren();
@@ -67,7 +97,7 @@ export function createAppRouter({
 
     let loader = null;
     let mountName = null;
-    if (route.name === "space") { loader = loadSpaceView; mountName = "mountSpaceView"; }
+    if (route.name === "space" || route.name === "spaces") { loader = loadSpaceView; mountName = "mountSpaceView"; }
     else if (route.name === "space-settings") { loader = loadSpaceSettingsView; mountName = "mountSpaceSettingsView"; }
     else if (route.name === "settings") { loader = loadSettingsView; mountName = "mountSettingsIndexView"; }
     else if (route.name === "accounts") { loader = loadAccountsView; mountName = "mountAccountListView"; }
@@ -77,14 +107,6 @@ export function createAppRouter({
     else if (route.name === "appearance") { loader = loadAppearanceView; mountName = "mountAppearanceView"; }
     else if (route.name === "path-settings") { loader = loadPathSettingsView; mountName = "mountPathSettingsView"; }
     else if (route.name === "control-center") { loader = loadControlCenterView; mountName = "mountControlCenterView"; }
-    else if (route.name === "spaces") {
-      const hint = windowTarget.document?.createElement?.("p") ?? document.createElement("p");
-      hint.className = "vera-route-hint";
-      hint.textContent = "从 Space 导航选择一项";
-      outlet.appendChild(hint);
-      activeCleanup = () => hint.remove();
-      return;
-    }
 
     if (loader) {
       const routeRoot = windowTarget.document?.createElement?.("main") ?? document.createElement("main");
@@ -99,26 +121,24 @@ export function createAppRouter({
         if (result !== false) routeRoot.remove();
         return result;
       };
+      activeHash = targetHash;
       return;
     }
 
-    const message = windowTarget.document?.createElement?.("p") ?? document.createElement("p");
-    message.className = "vera-route-error";
-    message.textContent = "页面不存在";
-    outlet.appendChild(message);
-    activeCleanup = () => message.remove();
+    renderFailure("页面不存在");
+    activeHash = targetHash;
   }
 
   function onHashChange() {
+    if (revertingHash !== null && windowTarget.location.hash === revertingHash) {
+      revertingHash = null;
+      return;
+    }
+    revertingHash = null;
     const expectedTransition = transition + 1;
     void render().catch((err) => {
       if (transition !== expectedTransition) return;
-      const outlet = shell?.outlet ?? root;
-      outlet.replaceChildren();
-      const message = windowTarget.document?.createElement?.("p") ?? document.createElement("p");
-      message.className = "vera-route-error";
-      message.textContent = `页面加载失败：${err.message}`;
-      outlet.appendChild(message);
+      renderFailure(`页面加载失败：${err.message}`, { retry: true });
     });
   }
 
@@ -128,7 +148,11 @@ export function createAppRouter({
       started = true;
       shell = createShell({ root, platform, runtime });
       windowTarget.addEventListener("hashchange", onHashChange);
-      await render();
+      try {
+        await render();
+      } catch (err) {
+        renderFailure(`页面加载失败：${err.message}`, { retry: true });
+      }
     },
     stop() {
       if (!started) return;
@@ -137,6 +161,8 @@ export function createAppRouter({
       windowTarget.removeEventListener("hashchange", onHashChange);
       activeCleanup?.();
       activeCleanup = null;
+      activeHash = null;
+      revertingHash = null;
       shell?.destroy?.();
       shell = null;
       root.replaceChildren();

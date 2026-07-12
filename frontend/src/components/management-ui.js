@@ -1,16 +1,3 @@
-export function createManagementHeader({ title, backHref = "#/settings", backLabel = "返回" }) {
-  const header = document.createElement("header");
-  header.className = "vera-management-header";
-  const back = document.createElement("a");
-  back.href = backHref;
-  back.className = "vera-text-button";
-  back.textContent = backLabel;
-  const heading = document.createElement("h1");
-  heading.textContent = title;
-  header.append(back, heading);
-  return header;
-}
-
 export function createNotice(message, tone = "muted") {
   const notice = document.createElement("p");
   notice.className = "vera-management-notice";

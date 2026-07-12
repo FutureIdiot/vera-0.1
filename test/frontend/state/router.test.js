@@ -24,6 +24,11 @@ function createFixture({ hash = "#/", loadSpaceView, loadSpaceSettingsView } = {
           className: "",
           textContent: "",
           children: [],
+          attributes: {},
+          listeners: new Map(),
+          setAttribute(name, value) { this.attributes[name] = String(value); },
+          addEventListener(type, listener) { this.listeners.set(type, listener); },
+          removeEventListener(type, listener) { if (this.listeners.get(type) === listener) this.listeners.delete(type); },
           appendChild(child) {
             child.parentNode = node;
             node.children.push(child);
@@ -85,6 +90,20 @@ test("parseRoute recognizes the chat root and encoded Space ids", () => {
 
 test("parseRoute returns a not-found route for unsupported paths", () => {
   assert.deepEqual(parseRoute("#/settings/nope"), { name: "not-found", path: "/settings/nope" });
+});
+
+test("the Space directory deep link keeps the chat mounted behind the navigator", async () => {
+  let mounts = 0;
+  const fixture = createFixture({
+    hash: "#/spaces",
+    loadSpaceView: async () => ({
+      mountSpaceView() { mounts += 1; return () => {}; },
+    }),
+  });
+  await fixture.router.start();
+  assert.equal(mounts, 1);
+  assert.equal(fixture.root.children[0].className, "vera-route");
+  fixture.router.stop();
 });
 
 test("start mounts the current route once and stop removes listener and view", async () => {
@@ -167,8 +186,33 @@ test("unknown routes replace the active view with a lightweight error", async ()
   assert.equal(cleanupCount, 1);
   assert.equal(fixture.root.children.length, 1);
   assert.equal(fixture.root.children[0].className, "vera-route-error");
-  assert.equal(fixture.root.children[0].textContent, "页面不存在");
+  assert.equal(fixture.root.children[0].children[0].textContent, "页面不存在");
+  assert.equal(fixture.root.children[0].attributes.role, "alert");
 
+  fixture.router.stop();
+});
+
+test("route load failures render a retryable error boundary", async () => {
+  let attempts = 0;
+  const fixture = createFixture({
+    hash: "#/spaces/spc_retry",
+    loadSpaceView: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("chunk unavailable");
+      return { mountSpaceView() { return () => {}; } };
+    },
+  });
+
+  await fixture.router.start();
+  const error = fixture.root.children[0];
+  assert.equal(error.className, "vera-route-error");
+  assert.equal(error.children[0].textContent, "页面加载失败：chunk unavailable");
+  assert.equal(error.children[1].textContent, "重试");
+
+  error.children[1].listeners.get("click")();
+  await flushAsyncWork();
+  assert.equal(attempts, 2);
+  assert.equal(fixture.root.children[0].className, "vera-route");
   fixture.router.stop();
 });
 
@@ -211,12 +255,16 @@ test("a stale async route load cannot mount after a newer navigation", async () 
 
 test("a route cleanup can veto navigation to preserve unsaved settings", async () => {
   let chatMounts = 0;
+  let cleanupCount = 0;
   const fixture = createFixture({
     hash: "#/spaces/spc_1/settings",
     loadSpaceSettingsView: async () => ({
       mountSpaceSettingsView({ root }) {
         root.appendChild({ route: "settings" });
-        return () => false;
+        return () => {
+          cleanupCount += 1;
+          return false;
+        };
       },
     }),
     loadSpaceView: async () => ({
@@ -229,4 +277,10 @@ test("a route cleanup can veto navigation to preserve unsaved settings", async (
   await flushAsyncWork();
   assert.equal(chatMounts, 0);
   assert.equal(fixture.root.children[0].children[0].route, "settings");
+  assert.equal(fixture.windowTarget.location.hash, "#/spaces/spc_1/settings");
+
+  fixture.listeners.get("hashchange")();
+  await flushAsyncWork();
+  assert.equal(cleanupCount, 1);
+  assert.equal(chatMounts, 0);
 });

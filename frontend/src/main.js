@@ -37,7 +37,23 @@ async function boot() {
   const runtime = createAppRuntime({ platform });
   await runtime.start();
   const router = createAppRouter({ root, platform, runtime });
-  window.addEventListener("pagehide", () => runtime.close(), { once: true });
+  const onOnline = () => runtime.reconnect();
+  let suspended = false;
+
+  window.addEventListener("online", onOnline);
+  window.addEventListener("pagehide", (event) => {
+    if (event.persisted) {
+      suspended = true;
+      return;
+    }
+    window.removeEventListener("online", onOnline);
+    runtime.close();
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted || !suspended) return;
+    suspended = false;
+    runtime.reconnect();
+  });
   await router.start();
 }
 

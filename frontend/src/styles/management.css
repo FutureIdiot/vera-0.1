@@ -1,4 +1,3 @@
-.vera-management-header,
 .vera-space-form,
 .vera-management-empty,
 .vera-management-content,
@@ -9,8 +8,6 @@
   max-width: var(--vera-content-max-width);
   width: 100%;
 }
-.vera-management-header { align-items: center; display: flex; gap: var(--vera-space-md); padding: var(--vera-space-md) var(--vera-window-margin); }
-.vera-management-header h1 { font-size: var(--vera-font-size-large); margin: 0; }
 .vera-space-form { display: grid; gap: var(--vera-space-lg); overflow-y: auto; padding: var(--vera-space-md) var(--vera-window-margin) var(--vera-space-lg); }
 .vera-space-form fieldset { border: 0; display: grid; gap: var(--vera-space-md); margin: 0; min-width: 0; padding: 0; }
 .vera-space-form legend { font-weight: 600; margin-bottom: var(--vera-space-sm); }
@@ -20,15 +17,13 @@
 .vera-agent-rule__details { display: flex; flex-wrap: wrap; gap: var(--vera-space-sm) var(--vera-space-lg); }
 .vera-check { align-items: center; display: flex; gap: var(--vera-space-sm); min-height: var(--vera-touch-target); }
 .vera-primary-button { background: var(--vera-color-accent); border: 0; border-radius: var(--vera-control-radius); color: var(--vera-color-accent-text); min-height: var(--vera-touch-target); padding: var(--vera-space-sm) var(--vera-space-lg); }
-.vera-management-note, .vera-management-empty { color: var(--vera-color-text-muted); padding: var(--vera-window-margin); }
+.vera-management-empty { color: var(--vera-color-text-muted); padding: var(--vera-window-margin); }
 
 .vera-settings-index,
 .vera-management-content,
 .vera-management-form { display: grid; gap: var(--vera-space-lg); overflow-y: auto; padding: var(--vera-space-md) var(--vera-window-margin) var(--vera-space-lg); }
-.vera-settings-group,
 .vera-management-section,
 .vera-status-card { min-width: 0; }
-.vera-settings-group h2,
 .vera-management-section h2,
 .vera-status-card h2 { font-size: var(--vera-font-size-base); margin: 0 0 var(--vera-space-sm); }
 .vera-settings-list { border-block: var(--vera-border-width) solid var(--vera-color-border); }
@@ -41,7 +36,6 @@
 .vera-settings-row small,
 .vera-account-row small,
 .vera-field small { color: var(--vera-color-text-muted); }
-.vera-settings-row[aria-disabled="true"] { color: var(--vera-color-text-muted); }
 
 .vera-management-form fieldset,
 .vera-management-section,

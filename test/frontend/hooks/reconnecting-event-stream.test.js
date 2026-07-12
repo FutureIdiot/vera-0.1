@@ -211,6 +211,27 @@ test("close cancels reconnect work and makes callbacks from old sources inert", 
   assert.equal(connector.connections.length, 1);
 });
 
+test("reconnectNow cancels backoff and reconnects immediately with the latest watermark", async () => {
+  const connector = createFakeConnector();
+  const timers = createFakeTimers();
+  const stream = createReconnectingEventStream({
+    connect: connector.connect,
+    initialSince: 5,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  await flushAsyncWork();
+  connector.connections[0].callbacks.onEvent({ seq: 6, type: "message.created", data: {} });
+  connector.connections[0].callbacks.onError();
+  assert.equal(timers.pending.size, 1);
+
+  stream.reconnectNow();
+  await flushAsyncWork();
+  assert.equal(timers.pending.size, 0);
+  assert.equal(connector.connections[1].callbacks.since, 6);
+  stream.close();
+});
+
 test("a rejected connection enters backoff instead of becoming an unhandled rejection", async () => {
   const timers = createFakeTimers();
   let attempts = 0;

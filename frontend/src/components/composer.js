@@ -1,7 +1,27 @@
 // 底部输入框：发消息（POST /api/spaces/:id/messages，广播）。
 // 只负责收集输入、调用 onSend，不知道 gateway 的 URL 形状。
 
+function mentionMatchesAt(content, index, targets) {
+  const matches = targets
+    .filter((target) => target?.id && target?.name && content.startsWith(`@${target.name}`, index))
+    .sort((left, right) => right.name.length - left.name.length);
+  if (matches.length === 0) return [];
+  const longestName = matches[0].name;
+  return matches.filter((target) => target.name === longestName);
+}
+
+export function resolveMessageTarget(content, targets = []) {
+  const agentIds = new Set();
+  for (let index = content.indexOf("@"); index !== -1; index = content.indexOf("@", index + 1)) {
+    for (const target of mentionMatchesAt(content, index, targets)) agentIds.add(target.id);
+  }
+  return agentIds.size > 0
+    ? { type: "direct", agentIds: [...agentIds] }
+    : { type: "broadcast" };
+}
+
 export function createComposer({ onSend, targets = [] } = {}) {
+  let currentTargets = [...targets];
   const form = document.createElement("form");
   form.className = "vera-composer";
 
@@ -9,6 +29,7 @@ export function createComposer({ onSend, targets = [] } = {}) {
   input.className = "vera-composer__input";
   input.type = "text";
   input.placeholder = "跟 agent 说点什么…";
+  input.setAttribute("aria-label", "消息内容");
   input.autocomplete = "off";
 
   const button = document.createElement("button");
@@ -16,31 +37,15 @@ export function createComposer({ onSend, targets = [] } = {}) {
   button.className = "vera-composer__send";
   button.textContent = "发送";
 
-  const target = document.createElement("select");
-  target.className = "vera-composer__target";
-  target.setAttribute("aria-label", "消息发送对象");
   function setTargets(nextTargets) {
-    const selected = target.value;
-    target.replaceChildren();
-    const broadcast = document.createElement("option");
-    broadcast.value = "broadcast";
-    broadcast.textContent = "全部";
-    target.appendChild(broadcast);
-    for (const item of nextTargets) {
-      const option = document.createElement("option");
-      option.value = item.id;
-      option.textContent = `@${item.name}`;
-      target.appendChild(option);
-    }
-    target.value = [...target.options].some((option) => option.value === selected) ? selected : "broadcast";
+    currentTargets = [...nextTargets];
   }
-  setTargets(targets);
 
-  form.append(target, input);
-  form.appendChild(button);
+  form.append(input, button);
 
   const error = document.createElement("p");
   error.className = "vera-composer__error";
+  error.setAttribute("role", "alert");
   error.hidden = true;
   form.appendChild(error);
 
@@ -50,7 +55,7 @@ export function createComposer({ onSend, targets = [] } = {}) {
     if (!content) return;
     button.disabled = true;
     error.hidden = true;
-    Promise.resolve(onSend?.(content, target.value === "broadcast" ? { type: "broadcast" } : { type: "direct", agentIds: [target.value] }))
+    Promise.resolve(onSend?.(content, resolveMessageTarget(content, currentTargets)))
       .then(() => { input.value = ""; })
       .catch((err) => {
         console.error("vera: send message failed", err);
@@ -65,7 +70,6 @@ export function createComposer({ onSend, targets = [] } = {}) {
 
   function setDisabled(disabled) {
     input.disabled = disabled;
-    target.disabled = disabled;
     button.disabled = disabled;
   }
 

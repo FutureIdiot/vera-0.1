@@ -1,9 +1,72 @@
 import { createSpaceNavigator } from "./space-navigator.js";
 
+const MANAGEMENT_ROUTES = new Set([
+  "space-settings",
+  "settings",
+  "accounts",
+  "account-detail",
+  "agent-memory",
+  "system-settings",
+  "appearance",
+  "path-settings",
+  "control-center",
+]);
+
+export function isChatRouteName(routeName) {
+  return routeName === "space" || routeName === "spaces";
+}
+
+function defaultManagementHeader(routeName, currentSpace) {
+  const currentChat = currentSpace ? `#/spaces/${encodeURIComponent(currentSpace.id)}` : "#/";
+  const defaults = {
+    "space-settings": { title: "当前 Space 设置", backHref: currentChat, backLabel: "返回" },
+    settings: { title: "Settings", backHref: currentChat, backLabel: "返回" },
+    accounts: { title: "Account", backHref: "#/settings", backLabel: "返回" },
+    "account-detail": { title: "Account", backHref: "#/settings/accounts", backLabel: "返回" },
+    "agent-memory": { title: "Agent Memory", backHref: "#/settings/accounts", backLabel: "返回" },
+    "system-settings": { title: "System", backHref: "#/settings", backLabel: "返回" },
+    appearance: { title: "Appearance", backHref: "#/settings", backLabel: "返回" },
+    "path-settings": { title: "Paths", backHref: "#/settings", backLabel: "返回" },
+    "control-center": { title: "Control Center", backHref: "#/settings", backLabel: "返回" },
+  };
+  return defaults[routeName] ?? { title: "Vera", backHref: currentChat, backLabel: "返回" };
+}
+
+export function resolveShellHeader({ routeName, currentSpace, navigatorOpen = false, managementHeader = null } = {}) {
+  if (isChatRouteName(routeName)) {
+    return {
+      leadingText: navigatorOpen ? "收起" : "目录",
+      leadingHref: "#/spaces",
+      leadingLabel: navigatorOpen ? "收起 Space 目录" : "打开 Space 目录",
+      title: currentSpace?.name ?? "选择 Space",
+      titleHref: currentSpace ? `#/spaces/${encodeURIComponent(currentSpace.id)}/settings` : "#/spaces",
+      titleLabel: currentSpace ? `打开 ${currentSpace.name} 的设置` : "选择 Space",
+      titleIsHeading: false,
+      settingsVisible: true,
+    };
+  }
+  const header = managementHeader ?? defaultManagementHeader(routeName, currentSpace);
+  return {
+    leadingText: header.backLabel ?? "返回",
+    leadingHref: header.backHref,
+    leadingLabel: header.backLabel ?? "返回",
+    title: header.title,
+    titleHref: null,
+    titleLabel: header.title,
+    titleIsHeading: true,
+    settingsVisible: false,
+  };
+}
+
+export function resolveNavigatorState({ routeName, navigatorOpen = false } = {}) {
+  return { visible: isChatRouteName(routeName) && navigatorOpen };
+}
+
 export function createAppShell({ root, platform, runtime } = {}) {
   let currentSpace = runtime.getBootstrap().spaces[0] ?? null;
+  let activeRouteName = "space";
   let navigatorOpen = false;
-  let pinned = window.localStorage.getItem("vera.navigatorPinned") === "true";
+  let managementHeader = null;
 
   const shell = document.createElement("section");
   shell.className = "vera-shell";
@@ -11,15 +74,16 @@ export function createAppShell({ root, platform, runtime } = {}) {
   const header = document.createElement("header");
   header.className = "vera-shell__header";
 
-  const spaceSettings = document.createElement("a");
-  spaceSettings.className = "vera-icon-button vera-shell__space-settings";
-  spaceSettings.textContent = "Space";
-  spaceSettings.setAttribute("aria-label", "当前 Space 设置");
+  const leading = document.createElement("a");
+  leading.className = "vera-icon-button vera-shell__leading";
+  leading.addEventListener("click", (event) => {
+    if (!isChatRoute()) return;
+    event.preventDefault();
+    toggleNavigator();
+  });
 
-  const title = document.createElement("button");
-  title.type = "button";
+  const title = document.createElement("a");
   title.className = "vera-shell__title";
-  title.addEventListener("click", openNavigator);
 
   const settings = document.createElement("a");
   settings.className = "vera-icon-button";
@@ -29,38 +93,51 @@ export function createAppShell({ root, platform, runtime } = {}) {
 
   const connection = document.createElement("span");
   connection.className = "vera-shell__connection";
+  connection.setAttribute("role", "status");
+  connection.setAttribute("aria-live", "polite");
   connection.hidden = true;
 
   const main = document.createElement("div");
   main.className = "vera-shell__main";
-  const backdrop = document.createElement("button");
-  backdrop.type = "button";
-  backdrop.className = "vera-navigator-backdrop";
-  backdrop.setAttribute("aria-label", "关闭 Space 导航");
-  backdrop.addEventListener("click", closeNavigator);
 
   const navigator = createSpaceNavigator({
     platform,
     runtime,
     currentSpaceId: currentSpace?.id,
-    pinned,
-    onClose: closeNavigator,
   });
-  navigator.element.addEventListener("vera:navigator-pin", (event) => {
-    pinned = event.detail.pinned;
-    applyNavigatorState();
-  });
-  header.append(spaceSettings, title, settings, connection);
-  shell.append(navigator.element, header, main, backdrop);
+
+  header.append(leading, title, settings, connection);
+  shell.append(navigator.element, header, main);
   root.replaceChildren(shell);
+
+  function isChatRoute() {
+    return isChatRouteName(activeRouteName);
+  }
+
+  function updateHeader() {
+    const headerState = resolveShellHeader({ routeName: activeRouteName, currentSpace, navigatorOpen, managementHeader });
+    leading.textContent = headerState.leadingText;
+    leading.href = headerState.leadingHref;
+    leading.setAttribute("aria-label", headerState.leadingLabel);
+    title.textContent = headerState.title;
+    if (headerState.titleHref) title.href = headerState.titleHref;
+    else title.removeAttribute("href");
+    title.setAttribute("aria-label", headerState.titleLabel);
+    title.toggleAttribute("role", headerState.titleIsHeading);
+    if (headerState.titleIsHeading) {
+      title.setAttribute("role", "heading");
+      title.setAttribute("aria-level", "1");
+    } else {
+      title.removeAttribute("role");
+      title.removeAttribute("aria-level");
+    }
+    settings.hidden = !headerState.settingsVisible;
+  }
 
   function setSpace(nextSpace) {
     currentSpace = nextSpace;
-    title.textContent = currentSpace?.name ?? "选择 Space";
-    title.setAttribute("aria-label", currentSpace ? `打开 ${currentSpace.name} 的 Space 导航` : "打开 Space 导航");
-    spaceSettings.href = currentSpace ? `#/spaces/${encodeURIComponent(currentSpace.id)}/settings` : "#/spaces";
-    spaceSettings.toggleAttribute("aria-disabled", !currentSpace);
     navigator.setCurrentSpace(currentSpace?.id ?? null);
+    updateHeader();
   }
 
   function setConnection(message, tone = "muted") {
@@ -70,41 +147,59 @@ export function createAppShell({ root, platform, runtime } = {}) {
   }
 
   function applyNavigatorState() {
-    const desktop = window.matchMedia("(min-width: 768px)").matches;
-    shell.classList.toggle("is-navigator-open", navigatorOpen || (pinned && desktop));
-    shell.classList.toggle("is-navigator-pinned", pinned && desktop);
-    backdrop.hidden = !(navigatorOpen && !(pinned && desktop));
+    const { visible } = resolveNavigatorState({ routeName: activeRouteName, navigatorOpen });
+    shell.classList.toggle("is-navigator-open", visible);
+    navigator.element.toggleAttribute("inert", !visible);
+    navigator.element.setAttribute("aria-hidden", String(!visible));
+    updateHeader();
   }
 
   function openNavigator() {
+    if (!isChatRoute()) return;
     navigatorOpen = true;
     applyNavigatorState();
+    navigator.focusFirst();
   }
 
   function closeNavigator() {
+    if (!navigatorOpen) return;
     navigatorOpen = false;
     applyNavigatorState();
+    leading.focus();
     if (window.location.hash === "#/spaces") {
       window.location.hash = currentSpace ? `#/spaces/${encodeURIComponent(currentSpace.id)}` : "#/";
     }
   }
 
+  function toggleNavigator() {
+    if (navigatorOpen) closeNavigator();
+    else openNavigator();
+  }
+
+  function setManagementHeader(nextHeader) {
+    managementHeader = nextHeader;
+    if (MANAGEMENT_ROUTES.has(activeRouteName)) updateHeader();
+  }
+
   function setRoute(route) {
+    activeRouteName = route.name;
+    managementHeader = null;
     const bootstrap = runtime.getBootstrap();
     const routeSpace = route.spaceId ? bootstrap.spaces.find((space) => space.id === route.spaceId) : null;
     if (routeSpace) setSpace(routeSpace);
-    shell.dataset.routeScope = route.name === "space" ? "chat" : "management";
-    spaceSettings.hidden = route.name !== "space" || !currentSpace;
-    const inSettings = ["settings", "accounts", "account-detail", "agent-memory", "system-settings", "appearance", "path-settings", "control-center"].includes(route.name);
-    title.hidden = inSettings;
-    settings.hidden = inSettings;
-    if (route.name === "spaces") openNavigator();
-    else if (!pinned) { navigatorOpen = false; applyNavigatorState(); }
+    shell.dataset.routeScope = isChatRoute() ? "chat" : "management";
+    if (route.name === "spaces") navigatorOpen = true;
+    else if (!isChatRoute()) navigatorOpen = false;
+    updateHeader();
+    applyNavigatorState();
+    if (route.name === "spaces") navigator.focusFirst();
   }
 
   const onOnline = () => setConnection(null);
   const onOffline = () => setConnection("离线", "danger");
-  const onKeyDown = (event) => { if (event.key === "Escape" && navigatorOpen) closeNavigator(); };
+  const onKeyDown = (event) => {
+    if (event.key === "Escape" && navigatorOpen) closeNavigator();
+  };
   const onResize = () => applyNavigatorState();
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
@@ -131,7 +226,9 @@ export function createAppShell({ root, platform, runtime } = {}) {
     setRoute,
     setSpace,
     setConnection,
+    setManagementHeader,
     openNavigator,
+    toggleNavigator,
     getCurrentSpace() { return currentSpace; },
     destroy() {
       unsubscribeRuntime();

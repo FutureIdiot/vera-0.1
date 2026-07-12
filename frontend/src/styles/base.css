@@ -17,6 +17,13 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
+}
+
+:where(a, button, input, select, textarea):focus-visible {
+  outline: calc(var(--vera-border-width) * 2) solid var(--vera-color-accent);
+  outline-offset: calc(var(--vera-border-width) * 2);
 }

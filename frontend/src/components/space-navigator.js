@@ -6,6 +6,8 @@ function memberKey(space) {
   return ids.length > 1 ? `group:${ids.join(",")}` : `agent:${ids[0] ?? "none"}`;
 }
 
+let dialogSequence = 0;
+
 function memberProjection(agents, spaces) {
   const byId = new Map(agents.map((agent) => [agent.id, agent]));
   const entries = agents.map((agent) => ({ key: `agent:${agent.id}`, label: agent.name, agentIds: [agent.id] }));
@@ -20,28 +22,62 @@ function memberProjection(agents, spaces) {
   return entries;
 }
 
-export function createSpaceNavigator({ platform, runtime, currentSpaceId, pinned = false, onClose } = {}) {
+export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {}) {
   const client = createSpacesClient(createHttpClient(platform));
   let spaces = [...runtime.getBootstrap().spaces];
   let archived = null;
   let selectedKey = memberKey(spaces.find((space) => space.id === currentSpaceId) ?? spaces[0] ?? { seats: [] });
-  let isPinned = pinned;
 
   const panel = document.createElement("aside");
   panel.className = "vera-navigator";
-  panel.setAttribute("aria-label", "Space 导航");
+  panel.setAttribute("aria-label", "Space 目录");
   const contacts = document.createElement("nav");
   contacts.className = "vera-navigator__contacts";
   const spacesPanel = document.createElement("section");
   spacesPanel.className = "vera-navigator__spaces";
   panel.append(contacts, spacesPanel);
 
+  function activateDialog(dialog, initialFocus, onCancel) {
+    const previousFocus = document.activeElement;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onCancel();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [...dialog.querySelectorAll("button, input, select, textarea, a[href]")]
+        .filter((element) => !element.disabled && !element.hidden);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    dialog.addEventListener("keydown", onKeyDown);
+    queueMicrotask(() => initialFocus.focus());
+    return () => {
+      dialog.removeEventListener("keydown", onKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }
+
   function requestText(title, initialValue = "") {
     return new Promise((resolve) => {
       const dialog = document.createElement("form");
       dialog.className = "vera-dialog";
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
       const heading = document.createElement("strong");
       heading.textContent = title;
+      heading.id = `vera-dialog-title-${++dialogSequence}`;
+      dialog.setAttribute("aria-labelledby", heading.id);
       const input = document.createElement("input");
       input.value = initialValue;
       input.required = true;
@@ -56,8 +92,8 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId, pinned
       actions.append(cancel, submit);
       dialog.append(heading, input, actions);
       panel.appendChild(dialog);
-      input.focus();
-      function finish(value) { dialog.remove(); resolve(value); }
+      const deactivate = activateDialog(dialog, input, () => finish(null));
+      function finish(value) { deactivate(); dialog.remove(); resolve(value); }
       dialog.addEventListener("submit", (event) => { event.preventDefault(); finish(input.value.trim() || null); });
     });
   }
@@ -67,23 +103,27 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId, pinned
       const dialog = document.createElement("section");
       dialog.className = "vera-dialog";
       dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
       const text = document.createElement("p");
       text.textContent = message;
+      text.id = `vera-dialog-description-${++dialogSequence}`;
+      dialog.setAttribute("aria-describedby", text.id);
       const actions = document.createElement("div");
       actions.className = "vera-dialog__actions";
-      const finish = (value) => { dialog.remove(); resolve(value); };
+      const cancel = button("取消", "vera-text-button", () => finish(false));
       actions.append(
-        button("取消", "vera-text-button", () => finish(false)),
+        cancel,
         button("确认归档", "vera-primary-button vera-primary-button--danger", () => finish(true)),
       );
       dialog.append(text, actions);
       panel.appendChild(dialog);
+      const deactivate = activateDialog(dialog, cancel, () => finish(false));
+      function finish(value) { deactivate(); dialog.remove(); resolve(value); }
     });
   }
 
   function navigate(spaceId) {
     window.location.hash = `#/spaces/${encodeURIComponent(spaceId)}`;
-    if (!isPinned) onClose?.();
   }
 
   function button(label, className, onClick) {
@@ -192,13 +232,6 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId, pinned
       item.setAttribute("aria-label", entry.label);
       contacts.appendChild(item);
     }
-    const pin = button(isPinned ? "取消固定" : "固定", "vera-navigator__pin", () => {
-      isPinned = !isPinned;
-      window.localStorage.setItem("vera.navigatorPinned", String(isPinned));
-      panel.dispatchEvent(new CustomEvent("vera:navigator-pin", { detail: { pinned: isPinned } }));
-      renderContacts();
-    });
-    contacts.appendChild(pin);
   }
 
   function renderSpaceRow(space, { archived: isArchived = false } = {}) {
@@ -222,7 +255,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId, pinned
     const heading = document.createElement("div");
     heading.className = "vera-navigator__heading";
     const title = document.createElement("strong");
-    title.textContent = "Spaces";
+    title.textContent = "Space 目录";
     heading.append(title, button("新建", "vera-text-button", () => void createSpace()));
     spacesPanel.appendChild(heading);
     const visible = spaces.filter((space) => memberKey(space) === selectedKey);
@@ -263,6 +296,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId, pinned
 
   return {
     element: panel,
+    focusFirst() { panel.querySelector("button")?.focus(); },
     setCurrentSpace(spaceId) { currentSpaceId = spaceId; selectedKey = memberKey(spaces.find((space) => space.id === spaceId) ?? { seats: [] }); render(); },
     destroy() { unsubscribe(); panel.remove(); },
   };

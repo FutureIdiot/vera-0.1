@@ -34,6 +34,8 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
 
   const statusBar = document.createElement("div");
   statusBar.className = "vera-status-bar";
+  statusBar.setAttribute("role", "status");
+  statusBar.setAttribute("aria-live", "polite");
   statusBar.textContent = "连接中…";
   const setStatus = (message) => {
     statusBar.textContent = message;
@@ -50,6 +52,10 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
   };
   const timelineEl = document.createElement("div");
   timelineEl.className = "vera-timeline";
+  timelineEl.setAttribute("role", "log");
+  timelineEl.setAttribute("aria-live", "polite");
+  timelineEl.setAttribute("aria-relevant", "additions text");
+  timelineEl.setAttribute("aria-label", "Space 消息时间线");
   const olderButton = document.createElement("button");
   olderButton.type = "button";
   olderButton.className = "vera-load-older";

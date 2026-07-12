@@ -1,6 +1,6 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createSettingsClient } from "../api/settings-client.js";
-import { createManagementHeader, createNotice, field, input, select, setBusy } from "../components/management-ui.js";
+import { createNotice, field, input, select, setBusy } from "../components/management-ui.js";
 
 const GROUPS = [
   {
@@ -29,7 +29,7 @@ const GROUPS = [
   },
 ];
 
-export async function mountSystemSettingsView({ root, platform } = {}) {
+export async function mountSystemSettingsView({ root, platform, shell } = {}) {
   root.dataset.routeScope = "management";
   const client = createSettingsClient(createHttpClient(platform));
   let disposed = false;
@@ -38,7 +38,7 @@ export async function mountSystemSettingsView({ root, platform } = {}) {
   const controls = new Map();
   const onBeforeUnload = (event) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } };
   window.addEventListener("beforeunload", onBeforeUnload);
-  root.appendChild(createManagementHeader({ title: "System", backHref: "#/settings" }));
+  shell?.setManagementHeader({ title: "System", backHref: "#/settings", backLabel: "返回" });
   const form = document.createElement("form");
   form.className = "vera-management-form";
   const notice = createNotice("正在读取设置…");

@@ -1,6 +1,6 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createStatusClient } from "../api/status-client.js";
-import { createManagementHeader, createNotice } from "../components/management-ui.js";
+import { createNotice } from "../components/management-ui.js";
 import { createPagePoller } from "../hooks/page-poller.js";
 
 function item(label, value) {
@@ -14,11 +14,11 @@ function item(label, value) {
   return row;
 }
 
-export async function mountControlCenterView({ root, platform } = {}) {
+export async function mountControlCenterView({ root, platform, shell } = {}) {
   root.dataset.routeScope = "management";
   const client = createStatusClient(createHttpClient(platform));
   let disposed = false;
-  root.appendChild(createManagementHeader({ title: "Control Center", backHref: "#/settings" }));
+  shell?.setManagementHeader({ title: "Control Center", backHref: "#/settings", backLabel: "返回" });
   const content = document.createElement("div");
   content.className = "vera-management-content";
   const notice = createNotice("正在连接 gateway…");

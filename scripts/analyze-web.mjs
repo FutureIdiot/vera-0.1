@@ -41,6 +41,19 @@ const defaultChat = await measure(defaultChatFiles);
 const routeChunks = Object.entries(manifest)
   .filter(([, chunk]) => chunk.isDynamicEntry)
   .map(([source, chunk]) => ({ source, file: chunk.file }));
+const requiredLazyRoutes = [
+  "src/views/settings-index-view.js",
+  "src/views/account-list-view.js",
+  "src/views/account-detail-view.js",
+  "src/views/agent-memory-view.js",
+  "src/views/system-settings-view.js",
+  "src/views/appearance-view.js",
+  "src/views/path-settings-view.js",
+  "src/views/control-center-view.js",
+];
+const missingLazyRoutes = requiredLazyRoutes.filter((suffix) => !findChunk(suffix)?.isDynamicEntry);
+const spaceViewSource = await readFile(new URL("../frontend/src/views/space-view.js", import.meta.url), "utf8");
+const timelineLimit = Number(spaceViewSource.match(/TIMELINE_DOM_LIMIT\s*=\s*(\d+)/)?.[1]);
 const budgetGzipBytes = 200 * 1024;
 const report = {
   generatedAt: new Date().toISOString(),
@@ -49,11 +62,22 @@ const report = {
   shell,
   defaultChat,
   routeChunks,
+  requiredLazyRoutes,
+  timelineDomLimit: timelineLimit,
 };
 
 await writeFile(new URL("bundle-report.json", distRoot), `${JSON.stringify(report, null, 2)}\n`);
 for (const row of defaultChat.files) console.log(`${row.file}: ${row.gzipBytes} bytes gzip`);
 console.log(`shell: ${shell.totalGzipBytes} bytes gzip`);
 console.log(`default chat: ${defaultChat.totalGzipBytes} / ${budgetGzipBytes} bytes gzip`);
+console.log(`dynamic routes: ${routeChunks.length}; timeline DOM limit: ${timelineLimit}`);
 
 if (defaultChat.totalGzipBytes > budgetGzipBytes) process.exitCode = 1;
+if (missingLazyRoutes.length) {
+  console.error(`routes missing dynamic chunks: ${missingLazyRoutes.join(", ")}`);
+  process.exitCode = 1;
+}
+if (timelineLimit !== 200) {
+  console.error(`timeline DOM limit must remain 200, received ${timelineLimit || "unknown"}`);
+  process.exitCode = 1;
+}

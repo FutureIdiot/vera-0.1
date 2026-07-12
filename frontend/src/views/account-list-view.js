@@ -1,13 +1,13 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createAgentsClient } from "../api/agents-client.js";
-import { createManagementHeader, createNotice, field, input, setBusy } from "../components/management-ui.js";
+import { createNotice, field, input, setBusy } from "../components/management-ui.js";
 
-export function mountAccountListView({ root, platform, runtime } = {}) {
+export function mountAccountListView({ root, platform, runtime, shell } = {}) {
   root.dataset.routeScope = "management";
   const agentsClient = createAgentsClient(createHttpClient(platform));
   let agents = [...runtime.getBootstrap().agents];
   let accounts = [...runtime.getBootstrap().accounts];
-  root.appendChild(createManagementHeader({ title: "Account", backHref: "#/settings" }));
+  shell?.setManagementHeader({ title: "Account", backHref: "#/settings", backLabel: "返回" });
   const content = document.createElement("div");
   content.className = "vera-management-content";
   const toolbar = document.createElement("form");

@@ -91,14 +91,14 @@
 - [x] **4.3 响应规则收口**：`silent` 的 `respondTo` 字段从 `[P4]` 落地——seat 形 `{agentId, responseMode, respondTo?, blockAgentIds?}`，`respondTo` 成员为 `"user"` 或 `agt_...`；新增 `blockAgentIds: ["agt_..."]` 屏蔽名单（ground truth 2.3 2026-07-04 补"响应规则统一语义"）。判定逻辑两层：`messages.js` 的 `shouldRespond` 看 responseMode/respondTo/target 决定要不要建 run；编译层 `compilePrompt` 内按 `blockAgentIds` 过滤声告段（被 block 的 agent 气泡不进段，但定向 @ 仍穿透 blockAgentIds 创建 run——不穿透 silent/focused）。AgentState 层确认 bootstrap/GA 已完整返回（Phase 2–3 已建 tracker，对勾即可）。
 - [x] **4.4 Space 管理**：`normalizeSeat` **去掉** `accountId`（账户归属改为登录级或默认 owning account，见 ground truth 2.2 修订 / api-contract Seat 段）；store 启动一次性清理 4.1 backfill 到 spaces 下 seats 上的 `accountId` 字段（`migrateAgentAccountsIfNeeded` 里的 seat.accountId backfill 逻辑撤掉），session-states 键不动。
 - [x] **4.5 系统配置**：新增 `GET/PATCH /api/settings`，字段以 ground truth 4.1 为唯一清单（数据隔离规则、记忆整理触发/注入预算、消息呈现等），严格遵守不扩；运维参数仍走 env 不进前端（ground truth 4.1 末段边界注记）。持久化进 `data/settings.json`（store 新集合），config 作启动默认、settings 作运行时覆盖。
-- [ ] **4.6 前端正式布局**：按 ground truth 5.1–5.4 分阶段推进，手机竖屏第一公民；使用简单hash路由，不为路由引入UI框架。
+- [x] **4.6 前端正式布局**：按 ground truth 5.1–5.4 分阶段推进，手机竖屏第一公民；使用简单hash路由，不为路由引入UI框架。
   - [x] **4.6.0 文档契约（2026-07-10）**：ground truth 已定全屏聊天主页、当前Space设置、右滑双栏Space导航、全局Settings、Account组合管理、配置闭环、提前拆分与页面完成标准；API契约已补 Appearance（含Theme/Profile边界与安全导入导出）、Space提醒、Space归档/恢复及Account组合读取边界。本步不改前端代码。
   - [x] **4.6.1 可调雏形 + Shell（2026-07-11）**：可调雏形与默认tokens由F0完成，F2落全局app runtime、route lifecycle与旧时间线挂载；F3已完成无底部标签、左上当前Space设置、右上全局Settings及手机/桌面Shell交互并通过真实浏览器验收。
   - [x] **4.6.2 基础层提前拆分（2026-07-11）**：已移除 `api/gateway-client.js`，按领域拆成 `http` / `spaces` / `agents` / `accounts` / `settings` / `memory` / `extensions` / `status` / `events` clients；state 已拆 router、全局app runtime、platform、Space导航/时间线、Account、Settings、Extension边界；样式已拆 `tokens.css`（变量唯一来源）/ `base.css` / `shell.css` / `chat.css`，旧巨型 `theme.css` 已移除。聊天route显式mount/unmount，全局runtime唯一持有SSE并处理reset水位，timeline state与DOM同步限制200项。
-  - [x] **4.6.3 全屏聊天 + Space导航/设置闭环（2026-07-11）**：F3已拆分聊天、导航与Space设置职责；手机右滑或点顶栏Space名称打开导航，桌面图钉切换覆盖/常驻；已完成Space切换、新增、重命名、二次确认归档与恢复，以及参与Agent、Seat响应规则和notifications。Space Module区继续等Phase 6契约/后端就绪后再显示，不建假开关；composer只属于聊天主页，设置路由替换聊天主区而不与时间线纵向叠放。
+  - [x] **4.6.3 全屏聊天 + Space导航/设置闭环（2026-07-11，2026-07-13简化导航状态）**：F3已拆分聊天、导航与Space设置职责；手机右滑或点顶栏左上开关打开导航，打开期间切换Space保持展开，不再提供图钉或持久化固定状态；已完成Space切换、新增、重命名、二次确认归档与恢复，以及参与Agent、Seat响应规则和notifications。Space Module区继续等Phase 6契约/后端就绪后再显示，不建假开关；composer只属于聊天主页，设置路由替换聊天主区而不与时间线纵向叠放。
   - [x] **4.6.4 Account组合管理 + Agent Memory闭环（2026-07-12）**：只有 `#/settings/accounts` 一个管理入口；`account-list-view.js`、`account-detail-view.js`、`agent-memory-view.js` 分开。详情组合显示Agent身份/状态/Memory与其一个或多个Account连接，但API/state仍按Agent和Account分域；删除连接与删除Agent是两个明确动作。Memory只在进入对应Agent子路由时加载正文。
-  - [x] **4.6.5 Setting子页闭环（2026-07-12）**：`settings-index-view.js`、`system-settings-view.js`、`appearance-view.js`、`path-settings-view.js`、`control-center-view.js` 分开；设置首页只显示普通分组列表，不预取子页数据。Appearance预览只改内存CSS变量，保存走gateway，按组恢复默认传 `null`。中控台进入时才取状态/轮询，离开即停止；当前file store显示存储状态，不虚构数据库连接。Extension Package管理等Phase 6契约落地后加入。
-  - [ ] **4.6.6 真实运行与性能验收**：补路由/state单测和 `scripts/verify.mjs` 端到端；启动临时gateway于3210实测API与逐条SSE，再在390px中档Android/WebView和桌面宽屏验证deep-link刷新、前进后退、虚拟键盘、安全区、loading/empty/error/offline/长内容与最新消息可见。记录bundle/Performance trace：首屏自有JS+CSS gzip目标≤200 KiB，缓存后聊天可交互≤1.5s、模拟4G冷启动≤3s、时间线DOM≤200 items、无连续>50ms long task；路由离页后timer/poller/listener归零。不得以静态文件检查或build成功代替验收。
+  - [x] **4.6.5 Setting子页闭环（2026-07-12，2026-07-13移除无依据分组）**：`settings-index-view.js`、`system-settings-view.js`、`appearance-view.js`、`path-settings-view.js`、`control-center-view.js` 分开；设置首页只平铺入口，不预取子页数据。Appearance预览只改内存CSS变量，保存走gateway，按组恢复默认传 `null`。中控台进入时才取状态/轮询，离开即停止；当前file store显示存储状态，不虚构数据库连接。Extension Package管理等Phase 6契约落地后加入。
+  - [x] **4.6.6 真实运行与性能验收（2026-07-13）**：路由/state单测和 `scripts/verify.mjs` 端到端已补齐；临时gateway实测API与逐条SSE通过。Chrome/Safari桌面与Android Chrome/iOS Safari Web人工矩阵已由用户确认结束，覆盖deep-link刷新、前进后退、虚拟键盘、安全区、loading/empty/error/offline/长内容与最新消息可见；Android WebView/iOS WKWebView留Phase 6原生壳回归。bundle/Performance trace达到ground truth 6.1预算，时间线DOM保持≤200 items，路由离页资源清理已纳入测试。
 
 **前端配置覆盖表**（每行必须打通“默认值 → API → 控件 → 持久化 → consumer → 恢复默认 → 实测”才可标完成）：
 
@@ -116,16 +116,16 @@
 | Agent Plugin | per-Agent `[Phase 6]` | Account详情Plugins | agent daemon | 分类已定，manifest/API待Phase 6契约 |
 | Space Module | per-Space `[Phase 6]` | `#/settings/extensions` + 当前Space设置 | 沙箱Module host | 分类已定，manifest/API待Phase 6契约 |
 
-**完成标准**：手机蜂窝网络下，主页无底部标签且当前Space聊天占满主区；右滑双栏可按Agent/群切换、新增、重命名、归档和恢复Space，历史与sessionState不丢；桌面图钉常驻切换正确；左上当前Space设置与右上全局Settings职责不串且设置页替换聊天主区；≥2 agents 的 Space 完成一次广播 + 一次定向，被 @ 的 agent 回复prompt含他人署名发言且无误用assistant角色；4.6范围内配置项前端可达且consumer真实生效。`scripts/verify.mjs` 加对应端到端。
+**完成标准**：手机蜂窝网络下，主页无底部标签且当前Space聊天占满主区；右滑双栏可按Agent/群切换、新增、重命名、归档和恢复Space，打开期间切换Space不收起，历史与sessionState不丢；左上目录开关、中间当前Space设置与右上全局Settings职责不串且设置页替换聊天主区；≥2 agents 的 Space 完成一次广播 + 一次定向，被 @ 的 agent 回复prompt含他人署名发言且无误用assistant角色；4.6范围内配置项前端可达且consumer真实生效。`scripts/verify.mjs` 加对应端到端。
 
 ## Phase 4.6 Web交付路线（新窗口执行入口）
 
-> 当前起点（2026-07-12）：F0–F4已完成，Web端已有全屏聊天Shell、双栏Space导航、当前Space设置，以及按路由拆分的Settings、Account、Agent Memory、Appearance、Paths与Control Center；下一步进入F5 Web发布与性能基线。F0–F5只细化Phase 4.6的Web交付，不再跨入Phase 5/5.5/6；每个F独立commit并更新本节状态，上一项未验收不进入下一项。Android/iOS壳统一留到Phase 6，至少等F5冻结Web外观、交互和性能基线后再生成。
+> 交付状态（2026-07-13）：F0–F5已完成，Web共享核心已冻结；下一步回到总体主线进入Phase 5。Android/iOS壳统一留到Phase 6，须继续遵守Phase 5 → Phase 5.5 → Phase 6的阶段顺序。
 
 ### F0 — 参考图与可调UI Lab
 
 - [x] 收齐用户已有示意图（2026-07-10：4张手机参考图，用户未提供单独桌面图），已在本轮UI Lab逐张标注“保留结构 / 只借视觉 / 不采用”；桌面形态由同一雏形响应式推演，不另造业务实现。
-- [x] 在Codex可视化制作可交互雏形（2026-07-10，按用户反馈修订）：全屏聊天、右滑双栏Space导航、当前Space设置、Settings目录、Account组合页；手机无边缘常驻按钮，顶栏Space名称提供非手势入口；桌面导航可由左下图钉切换覆盖/常驻；设置路由替换聊天主区。支持390px手机与桌面宽屏切换。
+- [x] 在Codex可视化制作可交互雏形（2026-07-10，后续交互以2026-07-13最终边界为准）：全屏聊天、右滑双栏Space导航、当前Space设置、Settings目录、Account组合页；手机无边缘常驻按钮，顶栏左上提供非手势目录开关；目录打开期间常驻，不再提供图钉状态；设置路由替换聊天主区。支持390px手机与桌面宽屏切换。
 - [x] UI Lab可调theme/font/font-size/bubble-radius/bubble-gap/window-margin，并可在本轮状态中记录/导出未提交候选tokens；font-size/window-margin按`phone/desktop × chat/management`分域，bubble-radius/gap按phone/desktop分域且只作用聊天。当前候选：手机chat/management字号14px、聊天gap 4px、margin 12px；桌面聊天margin先取64px、management margin取8px继续调。未写入正式前端。
 - [x] 用户已确认信息架构与默认视觉（2026-07-10）；响应式Appearance默认值已回写ground truth与API契约。F0完成，下一步从F1契约/后端闸门开始，不把UI Lab源码直接搬进正式前端。
 
@@ -154,11 +154,11 @@
 ### F3 — Web核心体验：聊天、Space导航、当前Space设置
 
 - [x] 全屏聊天Shell：无底部标签；左上当前Space设置、右上全局Settings；composer、最新消息可见、Activity/Approval状态正确。
-- [x] 右滑双栏导航：左侧Agent/群头像投影，右侧对应活跃Space列表；手机右滑+顶栏Space名称入口，桌面左下图钉切换覆盖/常驻；支持切换、新增、重命名、二次确认归档及从“已归档Spaces”恢复，不提供永久删除。
+- [x] 右滑双栏导航：左侧Agent/群头像投影，右侧对应活跃Space列表；手机右滑+顶栏左上目录开关，打开期间切换Space保持展开，不再提供图钉或持久化固定状态；支持切换、新增、重命名、二次确认归档及从“已归档Spaces”恢复，不提供永久删除。
 - [x] 当前Space设置：参与Agent、Seat responseMode/respondTo/blockAgentIds、消息提醒；Space Module区在Phase 6前不显示。
 - [x] 真实gateway/SSE运行验证手机浏览器与桌面浏览器；处理loading/empty/error/offline/长时间线。
 
-**验收（2026-07-11完成）**：完整单测96/96、gateway/SSE黑盒65/65通过；subagent最终审查后的竞态/reset/多Run修正另跑前端与Space纯单测37/37、`analyze:web`与`git diff --check`通过，默认聊天16,854 / 204,800 bytes gzip。真实浏览器完成390×844与1280×900验收：无横向溢出，消息发送、Space设置保存回显、新建/改名/归档/恢复且历史不丢、桌面固定导航、前进后退、断开启动错误与重试恢复均通过。最终修正后的整套端口测试复跑因Codex授权额度耗尽未获执行许可；不是测试失败，增量路径已由上述纯单测与构建覆盖。
+**验收（2026-07-11完成；导航固定控件于2026-07-13移除）**：完整单测96/96、gateway/SSE黑盒65/65通过；subagent最终审查后的竞态/reset/多Run修正另跑前端与Space纯单测37/37、`analyze:web`与`git diff --check`通过，默认聊天16,854 / 204,800 bytes gzip。真实浏览器完成390×844与1280×900验收：无横向溢出，消息发送、Space设置保存回显、新建/改名/归档/恢复且历史不丢、目录展开布局、前进后退、断开启动错误与重试恢复均通过。最终修正后的整套端口测试复跑因Codex授权额度耗尽未获执行许可；不是测试失败，增量路径已由上述纯单测与构建覆盖。
 
 ### F4 — Web管理体验：Settings、Account、Memory、Appearance
 
@@ -171,9 +171,15 @@
 
 ### F5 — Web发布与性能基线
 
-- [ ] 在F2已有production build与hash/ETag基础上完成发布复核，并补齐错误边界、断线恢复、无障碍和键盘导航；开发期`no-store`与生产缓存策略继续严格分开，不另造第二套缓存实现。
-- [ ] 主页bundle、route chunks、DOM数量、listener/timer/poller和Performance trace纳入自动/人工验收。
-- [ ] Chrome桌面、Safari桌面、Android Chrome、iOS Safari跑同一核心场景；把平台差异修在adapter/tokens，不fork页面。
+- [x] 在F2已有production build与hash/ETag基础上完成发布复核，并补齐错误边界、断线恢复、无障碍和键盘导航；开发期`no-store`与生产缓存策略继续严格分开，不另造第二套缓存实现。
+- [x] 主页bundle、route chunks、DOM数量、listener/timer/poller和Performance trace纳入自动/人工验收。自动验收负责bundle预算、route chunk隔离、DOM上限及route lifecycle资源清理；Performance trace保留设备/浏览器人工证据。
+- [x] Chrome桌面、Safari桌面、Android Chrome、iOS Safari跑同一核心场景；把平台差异修在adapter/tokens，不fork页面。统一场景为冷启动进入聊天、发送消息、打开/关闭Space导航、进入并返回Settings、断线后恢复；桌面同时验收完整键盘路径，移动端同时验收390px、安全区与虚拟键盘。
+
+> 2026-07-12 执行顺序：用户确认F5先完成电脑端（Chrome桌面 + Safari桌面），再补Android Chrome与iOS Safari。Android WebView / iOS WKWebView不属于F5，统一留到Phase 6原生壳生成后的共享核心回归。
+
+**验收（2026-07-13完成）**：共享Web核心已补页面级可重试错误边界、联网后立即SSE重连、bfcache恢复、导航与dialog焦点闭环、live region、可见键盘焦点，以及取消脏表单离页时的URL回退；管理route动态隔离和时间线200-item DOM上限已纳入`analyze:web`断言。最终自动验收为`npm test` 113/113、gateway/SSE黑盒68/68、默认聊天19,434 / 204,800 bytes gzip、11个dynamic route chunks、`git diff --check`通过；production HTML保持`no-cache` + ETag，hash资源保持一年immutable。Chrome/Safari桌面与Android Chrome/iOS Safari人工矩阵及Performance trace由用户确认验收结束，Web共享核心冻结。
+
+> 2026-07-13 导航/设置最终边界（用户再次确认，前一版“全屏目录页”和pin状态均作废）：Space目录是聊天页内可折叠的左侧双列抽屉，右滑与聊天顶栏左上按钮共用开关；展开时把聊天向右挤窄，打开期间切换Space保持展开，不再提供pin或持久化固定状态。顶栏Space名称进入当前Space设置。目录不进入任何设置路由；当前Space设置与所有全局Settings页面均为独立全屏页，顶栏左上统一放返回、中央放唯一页面标题，正文不再重复标题/返回。
 
 **验收**：ground truth 6.1预算达成；Web版作为三端共享核心冻结一个可回退commit。
 

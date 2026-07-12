@@ -1,8 +1,8 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createMemoryClient } from "../api/memory-client.js";
-import { createManagementHeader, createNotice, field, input, select, setBusy } from "../components/management-ui.js";
+import { createNotice, field, input, select, setBusy } from "../components/management-ui.js";
 
-export async function mountAgentMemoryView({ root, platform, runtime, agentId } = {}) {
+export async function mountAgentMemoryView({ root, platform, runtime, agentId, shell } = {}) {
   root.dataset.routeScope = "management";
   const agent = runtime.getBootstrap().agents.find((item) => item.id === agentId);
   const client = createMemoryClient(createHttpClient(platform));
@@ -11,7 +11,7 @@ export async function mountAgentMemoryView({ root, platform, runtime, agentId } 
   let disposed = false;
   let dirty = false;
   const back = `#/settings/accounts/${encodeURIComponent(agentId)}`;
-  root.appendChild(createManagementHeader({ title: `${agent?.name ?? "Agent"} Memory`, backHref: back, backLabel: "Account" }));
+  shell?.setManagementHeader({ title: `${agent?.name ?? "Agent"} Memory`, backHref: back, backLabel: "返回" });
   if (!agent) {
     root.appendChild(createNotice("Agent 不存在", "danger"));
     return () => root.replaceChildren();

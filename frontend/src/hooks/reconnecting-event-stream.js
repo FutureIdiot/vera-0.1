@@ -84,6 +84,15 @@ export function createReconnectingEventStream({
     resetSince(newSince) {
       since = newSince;
     },
+    reconnectNow() {
+      if (stopped) return;
+      attempt = 0;
+      if (reconnectTimer !== null) clearTimer(reconnectTimer);
+      reconnectTimer = null;
+      source?.close();
+      source = null;
+      void open();
+    },
     close() {
       stopped = true;
       generation += 1;
