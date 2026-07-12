@@ -17,6 +17,7 @@
 }
 
 .vera-shell {
+  font-size: var(--vera-font-size-base);
   display: grid;
   flex: 1;
   grid-template-areas: "header" "main";

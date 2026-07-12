@@ -95,8 +95,9 @@ export function createAppShell({ root, platform, runtime } = {}) {
     if (routeSpace) setSpace(routeSpace);
     shell.dataset.routeScope = route.name === "space" ? "chat" : "management";
     spaceSettings.hidden = route.name !== "space" || !currentSpace;
-    title.hidden = route.name === "settings";
-    settings.hidden = route.name === "settings";
+    const inSettings = ["settings", "accounts", "account-detail", "agent-memory", "system-settings", "appearance", "path-settings", "control-center"].includes(route.name);
+    title.hidden = inSettings;
+    settings.hidden = inSettings;
     if (route.name === "spaces") openNavigator();
     else if (!pinned) { navigatorOpen = false; applyNavigatorState(); }
   }

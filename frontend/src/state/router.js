@@ -6,6 +6,21 @@ export function parseRoute(hash = "") {
   if (path === "/" || path === "//") return { name: "space", spaceId: null };
   if (path === "/spaces" || path === "/spaces/") return { name: "spaces", spaceId: null };
   if (path === "/settings" || path === "/settings/") return { name: "settings" };
+  const memoryMatch = path.match(/^\/settings\/accounts\/([^/]+)\/memory\/?$/);
+  if (memoryMatch) {
+    try { return { name: "agent-memory", agentId: decodeURIComponent(memoryMatch[1]) }; }
+    catch { return { name: "not-found", path }; }
+  }
+  const accountMatch = path.match(/^\/settings\/accounts\/([^/]+)\/?$/);
+  if (accountMatch) {
+    try { return { name: "account-detail", agentId: decodeURIComponent(accountMatch[1]) }; }
+    catch { return { name: "not-found", path }; }
+  }
+  if (path === "/settings/accounts" || path === "/settings/accounts/") return { name: "accounts" };
+  if (path === "/settings/system" || path === "/settings/system/") return { name: "system-settings" };
+  if (path === "/settings/appearance" || path === "/settings/appearance/") return { name: "appearance" };
+  if (path === "/settings/paths" || path === "/settings/paths/") return { name: "path-settings" };
+  if (path === "/settings/control-center" || path === "/settings/control-center/") return { name: "control-center" };
   const settingsMatch = path.match(/^\/spaces\/([^/]+)\/settings\/?$/);
   if (settingsMatch) {
     try { return { name: "space-settings", spaceId: decodeURIComponent(settingsMatch[1]) }; }
@@ -27,7 +42,14 @@ export function createAppRouter({
   createShell = (options) => createAppShell(options),
   loadSpaceView = () => import("../views/space-view.js"),
   loadSpaceSettingsView = () => import("../views/space-settings-view.js"),
-  loadSettingsView = () => import("../views/settings-view.js"),
+  loadSettingsView = () => import("../views/settings-index-view.js"),
+  loadAccountsView = () => import("../views/account-list-view.js"),
+  loadAccountDetailView = () => import("../views/account-detail-view.js"),
+  loadAgentMemoryView = () => import("../views/agent-memory-view.js"),
+  loadSystemSettingsView = () => import("../views/system-settings-view.js"),
+  loadAppearanceView = () => import("../views/appearance-view.js"),
+  loadPathSettingsView = () => import("../views/path-settings-view.js"),
+  loadControlCenterView = () => import("../views/control-center-view.js"),
 } = {}) {
   let activeCleanup = null;
   let shell = null;
@@ -47,7 +69,14 @@ export function createAppRouter({
     let mountName = null;
     if (route.name === "space") { loader = loadSpaceView; mountName = "mountSpaceView"; }
     else if (route.name === "space-settings") { loader = loadSpaceSettingsView; mountName = "mountSpaceSettingsView"; }
-    else if (route.name === "settings") { loader = loadSettingsView; mountName = "mountSettingsView"; }
+    else if (route.name === "settings") { loader = loadSettingsView; mountName = "mountSettingsIndexView"; }
+    else if (route.name === "accounts") { loader = loadAccountsView; mountName = "mountAccountListView"; }
+    else if (route.name === "account-detail") { loader = loadAccountDetailView; mountName = "mountAccountDetailView"; }
+    else if (route.name === "agent-memory") { loader = loadAgentMemoryView; mountName = "mountAgentMemoryView"; }
+    else if (route.name === "system-settings") { loader = loadSystemSettingsView; mountName = "mountSystemSettingsView"; }
+    else if (route.name === "appearance") { loader = loadAppearanceView; mountName = "mountAppearanceView"; }
+    else if (route.name === "path-settings") { loader = loadPathSettingsView; mountName = "mountPathSettingsView"; }
+    else if (route.name === "control-center") { loader = loadControlCenterView; mountName = "mountControlCenterView"; }
     else if (route.name === "spaces") {
       const hint = windowTarget.document?.createElement?.("p") ?? document.createElement("p");
       hint.className = "vera-route-hint";
@@ -63,7 +92,7 @@ export function createAppRouter({
       outlet.appendChild(routeRoot);
       const module = await loader();
       if (currentTransition !== transition) { routeRoot.remove(); return; }
-      const cleanup = await module[mountName]({ root: routeRoot, platform, runtime, spaceId: route.spaceId, shell });
+      const cleanup = await module[mountName]({ root: routeRoot, platform, runtime, spaceId: route.spaceId, agentId: route.agentId, shell });
       if (currentTransition !== transition) { cleanup?.(); routeRoot.remove(); return; }
       activeCleanup = () => {
         const result = cleanup?.();

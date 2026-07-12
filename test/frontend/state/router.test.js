@@ -73,6 +73,13 @@ test("parseRoute recognizes the chat root and encoded Space ids", () => {
   assert.deepEqual(parseRoute("#/spaces/%zz"), { name: "not-found", path: "/spaces/%zz" });
   assert.deepEqual(parseRoute("#/spaces"), { name: "spaces", spaceId: null });
   assert.deepEqual(parseRoute("#/settings"), { name: "settings" });
+  assert.deepEqual(parseRoute("#/settings/accounts"), { name: "accounts" });
+  assert.deepEqual(parseRoute("#/settings/accounts/agt_one"), { name: "account-detail", agentId: "agt_one" });
+  assert.deepEqual(parseRoute("#/settings/accounts/agt_one/memory"), { name: "agent-memory", agentId: "agt_one" });
+  assert.deepEqual(parseRoute("#/settings/system"), { name: "system-settings" });
+  assert.deepEqual(parseRoute("#/settings/appearance"), { name: "appearance" });
+  assert.deepEqual(parseRoute("#/settings/paths"), { name: "path-settings" });
+  assert.deepEqual(parseRoute("#/settings/control-center"), { name: "control-center" });
   assert.deepEqual(parseRoute("#/spaces/spc_1/settings"), { name: "space-settings", spaceId: "spc_1" });
 });
 

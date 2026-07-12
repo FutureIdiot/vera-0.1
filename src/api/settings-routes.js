@@ -5,7 +5,7 @@
 import { asHandler, readJsonBody, sendJson } from "./http.js";
 import { ApiError } from "../core/errors.js";
 
-export function registerSettingsRoutes(router, { settingsStore }) {
+export function registerSettingsRoutes(router, { settingsStore, onSettingsChanged }) {
   router.get(
     "/api/settings",
     asHandler(async ({ res }) => {
@@ -28,6 +28,7 @@ export function registerSettingsRoutes(router, { settingsStore }) {
         throw new ApiError("invalid_request", "request body must be { settings: <object> }");
       }
       const merged = await settingsStore.setAll(body.settings);
+      onSettingsChanged?.(merged);
       sendJson(res, 200, { settings: merged });
     }),
   );

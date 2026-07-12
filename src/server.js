@@ -23,6 +23,8 @@ import { createStatusTracker } from "./core/status.js";
 import { registerStatusRoutes } from "./api/status-routes.js";
 import { registerPathsRoutes } from "./api/paths-routes.js";
 import { registerThemesRoutes } from "./api/themes-routes.js";
+import { applyRuntimeSettings } from "./core/runtime-settings.js";
+import { listAccounts } from "./agents/accounts.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 
@@ -65,7 +67,7 @@ router.get("/api/health", ({ res }) => sendJson(res, 200, { app: "vera", ok: tru
 router.get("/api/bootstrap", ({ res }) => {
   sendJson(res, 200, {
     agents: store.list("agents").map(({ _seq, ...rest }) => rest),
-    accounts: store.list("accounts").map(({ _seq, ...rest }) => rest),
+    accounts: listAccounts(store),
     spaces: listSpaces(store), // 默认只返活跃（api-contract.md 260）
     agentStates: agentStates.list(),
     seq: hub.currentSeq(),
@@ -82,7 +84,11 @@ registerMemoryRoutes(router, { memory, store });
 // 系统设置（Phase 4.5）：独立 settings.json 模块，不进 store.js（避免与 4.3+4.4 并行分支冲突）。
 // boot 顺序：store → hub/agentStates/memory → settingsStore → 路由注册。
 const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
-registerSettingsRoutes(router, { settingsStore });
+applyRuntimeSettings({ settings: settingsStore.getAll(), config, memory });
+registerSettingsRoutes(router, {
+  settingsStore,
+  onSettingsChanged: (settings) => applyRuntimeSettings({ settings, config, memory }),
+});
 
 const statusTracker = createStatusTracker({ config });
 registerStatusRoutes(router, { statusTracker, store, hub, config, memory, settingsStore });

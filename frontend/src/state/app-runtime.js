@@ -144,6 +144,25 @@ export function createAppRuntime({
       applyBootstrapEvent(envelope);
       for (const listener of listeners) listener(envelope);
     },
+    mergeAgent(agent) {
+      const envelope = { type: "agent.updated", seq: bootstrap?.seq ?? 0, data: { agent } };
+      applyBootstrapEvent(envelope);
+      for (const listener of listeners) listener(envelope);
+    },
+    mergeAccount(account) {
+      const envelope = { type: "account.upserted", seq: bootstrap?.seq ?? 0, data: { account } };
+      applyBootstrapEvent(envelope);
+      for (const listener of listeners) listener(envelope);
+    },
+    removeAgent(agentId) {
+      if (!bootstrap) return;
+      bootstrap.agents = bootstrap.agents.filter((agent) => agent.id !== agentId);
+      bootstrap.accounts = bootstrap.accounts.filter((account) => account.owningAgentId !== agentId);
+    },
+    removeAccount(accountId) {
+      if (!bootstrap) return;
+      bootstrap.accounts = bootstrap.accounts.filter((account) => account.id !== accountId);
+    },
     subscribe(listener, { since = null } = {}) {
       listeners.add(listener);
       for (const envelope of recentEvents) {

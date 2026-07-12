@@ -96,22 +96,22 @@
   - [x] **4.6.1 可调雏形 + Shell（2026-07-11）**：可调雏形与默认tokens由F0完成，F2落全局app runtime、route lifecycle与旧时间线挂载；F3已完成无底部标签、左上当前Space设置、右上全局Settings及手机/桌面Shell交互并通过真实浏览器验收。
   - [x] **4.6.2 基础层提前拆分（2026-07-11）**：已移除 `api/gateway-client.js`，按领域拆成 `http` / `spaces` / `agents` / `accounts` / `settings` / `memory` / `extensions` / `status` / `events` clients；state 已拆 router、全局app runtime、platform、Space导航/时间线、Account、Settings、Extension边界；样式已拆 `tokens.css`（变量唯一来源）/ `base.css` / `shell.css` / `chat.css`，旧巨型 `theme.css` 已移除。聊天route显式mount/unmount，全局runtime唯一持有SSE并处理reset水位，timeline state与DOM同步限制200项。
   - [x] **4.6.3 全屏聊天 + Space导航/设置闭环（2026-07-11）**：F3已拆分聊天、导航与Space设置职责；手机右滑或点顶栏Space名称打开导航，桌面图钉切换覆盖/常驻；已完成Space切换、新增、重命名、二次确认归档与恢复，以及参与Agent、Seat响应规则和notifications。Space Module区继续等Phase 6契约/后端就绪后再显示，不建假开关；composer只属于聊天主页，设置路由替换聊天主区而不与时间线纵向叠放。
-  - [ ] **4.6.4 Account组合管理 + Agent Memory闭环**：只有 `#/settings/accounts` 一个管理入口；`account-list-view.js`、`account-detail-view.js`、`agent-memory-view.js` 分开。详情组合显示Agent身份/状态/Memory与其一个或多个Account连接，但API/state仍按Agent和Account分域；删除连接与删除Agent是两个明确动作。Memory只在进入对应Agent子路由时加载正文。
-  - [ ] **4.6.5 Setting子页闭环**：`settings-index-view.js`、`system-settings-view.js`、`appearance-view.js`、`path-settings-view.js`、`control-center-view.js` 分开；设置首页只显示普通分组列表，不预取子页数据。Appearance预览只改内存CSS变量，保存走gateway，按组恢复默认传 `null`。中控台进入时才取状态/轮询，离开即停止；当前file store显示存储状态，不虚构数据库连接。Extension Package管理等Phase 6契约落地后加入。
+  - [x] **4.6.4 Account组合管理 + Agent Memory闭环（2026-07-12）**：只有 `#/settings/accounts` 一个管理入口；`account-list-view.js`、`account-detail-view.js`、`agent-memory-view.js` 分开。详情组合显示Agent身份/状态/Memory与其一个或多个Account连接，但API/state仍按Agent和Account分域；删除连接与删除Agent是两个明确动作。Memory只在进入对应Agent子路由时加载正文。
+  - [x] **4.6.5 Setting子页闭环（2026-07-12）**：`settings-index-view.js`、`system-settings-view.js`、`appearance-view.js`、`path-settings-view.js`、`control-center-view.js` 分开；设置首页只显示普通分组列表，不预取子页数据。Appearance预览只改内存CSS变量，保存走gateway，按组恢复默认传 `null`。中控台进入时才取状态/轮询，离开即停止；当前file store显示存储状态，不虚构数据库连接。Extension Package管理等Phase 6契约落地后加入。
   - [ ] **4.6.6 真实运行与性能验收**：补路由/state单测和 `scripts/verify.mjs` 端到端；启动临时gateway于3210实测API与逐条SSE，再在390px中档Android/WebView和桌面宽屏验证deep-link刷新、前进后退、虚拟键盘、安全区、loading/empty/error/offline/长内容与最新消息可见。记录bundle/Performance trace：首屏自有JS+CSS gzip目标≤200 KiB，缓存后聊天可交互≤1.5s、模拟4G冷启动≤3s、时间线DOM≤200 items、无连续>50ms long task；路由离页后timer/poller/listener归零。不得以静态文件检查或build成功代替验收。
 
 **前端配置覆盖表**（每行必须打通“默认值 → API → 控件 → 持久化 → consumer → 恢复默认 → 实测”才可标完成）：
 
 | 配置组 | 作用域 / API | 前端入口 | consumer | 当前状态 |
 |---|---|---|---|---|
-| 数据隔离 | 全局 `/api/settings` | `#/settings/system` | Memory / Files / AgentState各自模块 | API已落，控件与consumer待4.6/Phase 5 |
-| 记忆整理与注入预算 | 全局 `/api/settings` | `#/settings/system` | memory整理器 / resident index | API已落，控件与完整consumer待4.6/Phase 5 |
-| 消息呈现 | 全局 `/api/settings` | `#/settings/system` | bubble-stream / bubble-splitter | API已落，运行时覆盖接入待4.6.5 |
+| 数据隔离 | 全局 `/api/settings` | `#/settings/system` | Memory / Files / AgentState各自模块 | F4控件、持久化与恢复默认已落；模块consumer按计划待Phase 5 |
+| 记忆整理与注入预算 | 全局 `/api/settings` | `#/settings/system` | memory整理器 / resident index | F4控件与resident index热更新已闭环；完整整理器待Phase 5 |
+| 消息呈现 | 全局 `/api/settings` | `#/settings/system` | bubble-stream / bubble-splitter | F4已完成运行时热更新、恢复默认与黑盒实测 |
 | Seat响应规则 | per-Space `/api/spaces/:id` | `#/spaces/:spaceId/settings` | shouldRespond / view-compiler | 4.6.3已完成并于2026-07-11验收 |
 | Space消息提醒 | per-Space `/api/spaces/:id` `[P4.6]` | `#/spaces/:spaceId/settings` | 客户端通知桥 | 4.6.3已完成Web控件与持久化；Android/iOS原生通知桥归Phase 6 |
-| Agent / Account | 各对象API | `#/settings/accounts/...` | adapter / 联邦登录 / Memory | 后端已落，组合前端待4.6.4 |
+| Agent / Account | 各对象API | `#/settings/accounts/...` | adapter / 联邦登录 / Memory | F4组合管理与Agent Memory已闭环；联邦能力快照待Phase 5.5 |
 | Tools与运行时能力 | per-Agent daemon login + policy `[Phase 5.5/6]` | Account详情Capabilities | CLI/provider/daemon tool host | 命名和执行边界已定，capability上报与policy待实现 |
-| Appearance | 全局 `/api/settings` `[P4.6]` | `#/settings/appearance` | CSS token loader | 契约已落，实现与验收待4.6.5 |
+| Appearance | 全局 `/api/settings` `[P4.6]` | `#/settings/appearance` | CSS token loader | F4已完成预览/保存/null恢复、Theme/Profile交换与响应式实测 |
 | Skill | per-Agent `[Phase 6]` | `#/settings/accounts/:agentId/skills` | agent daemon | 未到阶段，不建空壳 |
 | Agent Plugin | per-Agent `[Phase 6]` | Account详情Plugins | agent daemon | 分类已定，manifest/API待Phase 6契约 |
 | Space Module | per-Space `[Phase 6]` | `#/settings/extensions` + 当前Space设置 | 沙箱Module host | 分类已定，manifest/API待Phase 6契约 |
@@ -120,7 +120,7 @@
 
 ## Phase 4.6 Web交付路线（新窗口执行入口）
 
-> 当前起点（2026-07-11）：F0–F3已完成，Web端已有全屏聊天Shell、双栏Space导航、当前Space设置、长时间线与断线恢复；下一步进入F4 Web管理体验。F0–F5只细化Phase 4.6的Web交付，不再跨入Phase 5/5.5/6；每个F独立commit并更新本节状态，上一项未验收不进入下一项。Android/iOS壳统一留到Phase 6，至少等F5冻结Web外观、交互和性能基线后再生成。
+> 当前起点（2026-07-12）：F0–F4已完成，Web端已有全屏聊天Shell、双栏Space导航、当前Space设置，以及按路由拆分的Settings、Account、Agent Memory、Appearance、Paths与Control Center；下一步进入F5 Web发布与性能基线。F0–F5只细化Phase 4.6的Web交付，不再跨入Phase 5/5.5/6；每个F独立commit并更新本节状态，上一项未验收不进入下一项。Android/iOS壳统一留到Phase 6，至少等F5冻结Web外观、交互和性能基线后再生成。
 
 ### F0 — 参考图与可调UI Lab
 
@@ -162,12 +162,12 @@
 
 ### F4 — Web管理体验：Settings、Account、Memory、Appearance
 
-- [ ] Settings根页只做轻量分组列表；子页动态import、进页取数、离页清理。
-- [ ] Account组合页：Agent身份/状态/Memory摘要 + 1:N Account连接；删除Agent与删除连接分开；Memory正文只在Agent Memory路由加载。`runtimeCapabilities`真实快照归Phase 5.5，F4只按现有契约实现`null`时的“未连接，能力未知”空态，不虚构能力数据。
-- [ ] System/Appearance/Paths/Control Center分别独立；配置逐项闭环，Appearance实时预览/保存/null恢复默认，Theme Palette与Appearance Profile分别导入导出；中控台离页停止轮询。
-- [ ] 路径高风险迁移使用校验/迁移/验证/回滚流程，不提供直接生效文本框。
+- [x] Settings根页只做轻量分组列表；子页动态import、进页取数、离页清理。
+- [x] Account组合页：Agent身份/状态/Memory摘要 + 1:N Account连接；删除Agent与删除连接分开；Memory正文只在Agent Memory路由加载。`runtimeCapabilities`真实快照归Phase 5.5，F4只按现有契约实现`null`时的“未连接，能力未知”空态，不虚构能力数据。
+- [x] System/Appearance/Paths/Control Center分别独立；配置逐项闭环，Appearance实时预览/保存/null恢复默认，Theme Palette与Appearance Profile分别导入导出；中控台离页停止轮询。
+- [x] 路径高风险迁移使用校验/迁移/验证/回滚流程，不提供直接生效文本框。
 
-**验收**：4.6配置覆盖表中非Phase5/6项全部闭环；Agent Memory只验收当前已提前落地的最小编辑闭环，检索注入、Files与派生整理仍归Phase 5；跨手机浏览器/桌面浏览器读取同一gateway设置；无无效入口或假状态。
+**验收（2026-07-12完成）**：`npm test` 104/104、gateway/SSE黑盒68/68、`analyze:web`与`git diff --check`通过；默认聊天18,511 / 204,800 bytes gzip，所有F4主体保持独立route chunk。真实浏览器以390×844与1280×900检查全部管理入口，无横向溢出；Account创建→详情、Agent Memory创建、System与Appearance保存后刷新回显、Path受控迁移闸门、Control Center真实file store/联邦未启用空态均通过，浏览器console无error/warn。配置覆盖表中非Phase5/6项已闭环；Agent Memory只验收当前已提前落地的最小编辑闭环，检索注入、Files与派生整理仍归Phase 5；无无效入口或假状态。
 
 ### F5 — Web发布与性能基线
 

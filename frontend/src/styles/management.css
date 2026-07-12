@@ -1,6 +1,10 @@
 .vera-management-header,
 .vera-space-form,
-.vera-management-empty {
+.vera-management-empty,
+.vera-management-content,
+.vera-management-form,
+.vera-settings-index,
+.vera-memory-layout {
   margin-inline: auto;
   max-width: var(--vera-content-max-width);
   width: 100%;
@@ -17,3 +21,66 @@
 .vera-check { align-items: center; display: flex; gap: var(--vera-space-sm); min-height: var(--vera-touch-target); }
 .vera-primary-button { background: var(--vera-color-accent); border: 0; border-radius: var(--vera-control-radius); color: var(--vera-color-accent-text); min-height: var(--vera-touch-target); padding: var(--vera-space-sm) var(--vera-space-lg); }
 .vera-management-note, .vera-management-empty { color: var(--vera-color-text-muted); padding: var(--vera-window-margin); }
+
+.vera-settings-index,
+.vera-management-content,
+.vera-management-form { display: grid; gap: var(--vera-space-lg); overflow-y: auto; padding: var(--vera-space-md) var(--vera-window-margin) var(--vera-space-lg); }
+.vera-settings-group,
+.vera-management-section,
+.vera-status-card { min-width: 0; }
+.vera-settings-group h2,
+.vera-management-section h2,
+.vera-status-card h2 { font-size: var(--vera-font-size-base); margin: 0 0 var(--vera-space-sm); }
+.vera-settings-list { border-block: var(--vera-border-width) solid var(--vera-color-border); }
+.vera-settings-row,
+.vera-account-row { align-items: center; color: inherit; display: flex; gap: var(--vera-space-md); justify-content: space-between; min-height: var(--vera-touch-target); padding: var(--vera-space-md) var(--vera-space-sm); text-decoration: none; }
+.vera-settings-row + .vera-settings-row,
+.vera-account-row + .vera-account-row { border-top: var(--vera-border-width) solid var(--vera-color-border); }
+.vera-settings-row > span:first-child,
+.vera-account-row > span:first-child { display: grid; gap: var(--vera-space-xs); min-width: 0; }
+.vera-settings-row small,
+.vera-account-row small,
+.vera-field small { color: var(--vera-color-text-muted); }
+.vera-settings-row[aria-disabled="true"] { color: var(--vera-color-text-muted); }
+
+.vera-management-form fieldset,
+.vera-management-section,
+.vera-account-card,
+.vera-status-card { background: var(--vera-color-surface); border: 0; border-radius: var(--vera-control-radius); display: grid; gap: var(--vera-space-md); margin: 0; min-width: 0; padding: var(--vera-space-md); }
+.vera-management-form legend { font-weight: 600; padding: 0 var(--vera-space-xs); }
+.vera-field { display: grid; gap: var(--vera-space-xs); min-width: 0; }
+.vera-field input,
+.vera-field select,
+.vera-field textarea,
+.vera-import-row input,
+.vera-import-row select { background: var(--vera-color-bg); border: var(--vera-border-width) solid var(--vera-color-border); border-radius: var(--vera-control-radius); color: var(--vera-color-text); min-height: var(--vera-touch-target); min-width: 0; padding: var(--vera-space-sm); width: 100%; }
+.vera-field textarea { resize: vertical; }
+.vera-management-notice { color: var(--vera-color-text-muted); margin: 0; overflow-wrap: anywhere; }
+.vera-management-notice[data-tone="danger"] { color: var(--vera-color-danger); }
+.vera-management-notice[data-tone="success"] { color: var(--vera-color-success); }
+.vera-secondary-button,
+.vera-danger-button,
+.vera-memory-row { background: transparent; border: var(--vera-border-width) solid var(--vera-color-border); border-radius: var(--vera-control-radius); color: var(--vera-color-text); min-height: var(--vera-touch-target); padding: var(--vera-space-sm) var(--vera-space-md); }
+.vera-danger-button { border-color: var(--vera-color-danger); color: var(--vera-color-danger); }
+.vera-button-link { align-items: center; display: inline-flex; justify-content: center; text-decoration: none; }
+.vera-inline-form,
+.vera-form-actions,
+.vera-import-row { align-items: end; display: flex; flex-wrap: wrap; gap: var(--vera-space-sm); }
+.vera-inline-form .vera-field { flex: 1 1 auto; }
+.vera-account-list { border-block: var(--vera-border-width) solid var(--vera-color-border); }
+.vera-account-grid,
+.vera-status-grid { display: grid; gap: var(--vera-space-md); }
+.vera-memory-layout { display: grid; gap: var(--vera-space-md); grid-template-columns: minmax(0, 1fr); overflow: auto; }
+.vera-memory-list,
+.vera-memory-editor { display: grid; gap: var(--vera-space-sm); min-width: 0; }
+.vera-memory-list { align-content: start; }
+.vera-memory-row { display: grid; gap: var(--vera-space-xs); text-align: start; }
+.vera-memory-row.is-active { border-color: var(--vera-color-accent); }
+.vera-status-row { align-items: start; display: flex; gap: var(--vera-space-md); justify-content: space-between; overflow-wrap: anywhere; }
+.vera-status-row span { color: var(--vera-color-text-muted); }
+
+@media (min-width: 768px) {
+  .vera-account-grid,
+  .vera-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vera-memory-layout { grid-template-columns: minmax(180px, 0.35fr) minmax(0, 1fr); }
+}

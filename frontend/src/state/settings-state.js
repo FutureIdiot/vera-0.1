@@ -1,6 +1,4 @@
 const TOKEN_MAP = {
-  "appearance.themeColor": "--vera-color-theme",
-  "appearance.accentColor": "--vera-color-accent",
   "appearance.fontSize.phone.chat": "--vera-font-size-phone-chat",
   "appearance.fontSize.phone.management": "--vera-font-size-phone-management",
   "appearance.fontSize.desktop.chat": "--vera-font-size-desktop-chat",
@@ -15,6 +13,22 @@ const TOKEN_MAP = {
   "appearance.windowMargin.desktop.management": "--vera-window-margin-desktop-management",
 };
 
+const COLOR_SETTING_MAP = {
+  "appearance.themeColor": "--vera-color-theme",
+  "appearance.accentColor": "--vera-color-accent",
+};
+
+const THEME_COLOR_MAP = {
+  background: "--vera-color-bg",
+  surface: "--vera-color-surface",
+  text: "--vera-color-text",
+  mutedText: "--vera-color-text-muted",
+  border: "--vera-color-border",
+  accent: "--vera-color-accent",
+  success: "--vera-color-success",
+  error: "--vera-color-danger",
+};
+
 const SYSTEM_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 
 function cssValue(key, value) {
@@ -24,16 +38,36 @@ function cssValue(key, value) {
   return String(value);
 }
 
-export function applyAppearanceSettings(settings, root = document.documentElement) {
+export function applyAppearanceSettings(settings, root = document.documentElement, { preservePalette = false } = {}) {
   const theme = settings?.["appearance.theme"];
   if (theme === "light" || theme === "dark") root.dataset.theme = theme;
   else delete root.dataset.theme;
 
   const font = settings?.["appearance.fontFamily"];
   if (font) root.style.setProperty("--vera-font-family", font === "system" ? SYSTEM_FONT : font);
+  else root.style.removeProperty("--vera-font-family");
 
   for (const [key, property] of Object.entries(TOKEN_MAP)) {
     const value = settings?.[key];
     if (value !== undefined && value !== null && value !== "") root.style.setProperty(property, cssValue(key, value));
+    else root.style.removeProperty(property);
   }
+  for (const [key, property] of Object.entries(COLOR_SETTING_MAP)) {
+    const value = settings?.[key];
+    if (value !== undefined && value !== null && value !== "") root.style.setProperty(property, String(value));
+    else if (!preservePalette) root.style.removeProperty(property);
+  }
+}
+
+export function applyThemePalette(theme, root = document.documentElement) {
+  for (const [key, property] of Object.entries(THEME_COLOR_MAP)) {
+    const value = theme?.colors?.[key];
+    if (value) root.style.setProperty(property, value);
+    else root.style.removeProperty(property);
+  }
+}
+
+export function applyResolvedAppearance(settings, theme = null, root = document.documentElement) {
+  applyThemePalette(theme, root);
+  applyAppearanceSettings(settings, root, { preservePalette: Boolean(theme) });
 }

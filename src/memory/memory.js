@@ -29,6 +29,7 @@ function updatedAtSortValue(updatedAt) {
 
 export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25 }) {
   let activeVaultPath = resolve(vaultPath);
+  let activeResidentIndexMaxLines = residentIndexMaxLines;
 
   const agentPathFor = (agentId) => {
     assertAgentId(agentId);
@@ -137,7 +138,7 @@ export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25 }) {
   async function residentIndex(agentId) {
     const active = (await listMemories(agentId)).filter((memory) => memory.status !== "archived");
     if (active.length === 0) return null;
-    const lines = active.slice(0, residentIndexMaxLines).map((memory) => `- [[${memory.slug}]] — ${memory.description || "（无钩子行）"}`);
+    const lines = active.slice(0, activeResidentIndexMaxLines).map((memory) => `- [[${memory.slug}]] — ${memory.description || "（无钩子行）"}`);
     return [
       `Vera 记忆库常驻索引（文件库：${agentPathFor(agentId)}）：`,
       "相关时用你的文件工具展开 [[slug]] 查看详情。",
@@ -173,8 +174,13 @@ export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25 }) {
     return activeVaultPath;
   }
 
+  function setResidentIndexMaxLines(value) {
+    if (!Number.isFinite(value) || value < 0) throw new Error("resident index max lines must be a non-negative number");
+    activeResidentIndexMaxLines = value;
+  }
+
   return {
     listMemories, saveMemory, getMemory, updateMemory, deleteMemory, residentIndex,
-    inspect, reopen, getVaultPath: () => activeVaultPath,
+    inspect, reopen, setResidentIndexMaxLines, getVaultPath: () => activeVaultPath,
   };
 }

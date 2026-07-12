@@ -9,7 +9,8 @@ import { createAppRouter } from "./state/router.js";
 import { initializePlatform } from "./state/platform.js";
 import { createHttpClient } from "./api/http-client.js";
 import { createSettingsClient } from "./api/settings-client.js";
-import { applyAppearanceSettings } from "./state/settings-state.js";
+import { createThemesClient } from "./api/themes-client.js";
+import { applyAppearanceSettings, applyResolvedAppearance } from "./state/settings-state.js";
 import { createAppRuntime } from "./state/app-runtime.js";
 
 async function boot() {
@@ -18,8 +19,18 @@ async function boot() {
 
   const platform = await initializePlatform();
   try {
-    const response = await createSettingsClient(createHttpClient(platform)).get();
+    const http = createHttpClient(platform);
+    const response = await createSettingsClient(http).get();
     applyAppearanceSettings(response.settings);
+    const themeId = response.settings["appearance.themeId"];
+    if (response.settings["appearance.theme"] === "custom" && themeId) {
+      try {
+        const theme = await createThemesClient(http).get(themeId);
+        applyResolvedAppearance(response.settings, theme.theme);
+      } catch (err) {
+        console.warn("vera: saved custom theme is unavailable", err);
+      }
+    }
   } catch (err) {
     console.warn("vera: using bundled appearance defaults", err);
   }

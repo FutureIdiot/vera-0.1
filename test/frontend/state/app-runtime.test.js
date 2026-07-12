@@ -174,3 +174,27 @@ test("local Space merges and presence events update the canonical bootstrap proj
   assert.deepEqual(runtime.getBootstrap().accounts[0], { id: "acc_1", presence: "online", lastSeenAt: "now" });
   runtime.close();
 });
+
+test("local Agent and Account mutations keep route transitions on the canonical projection", async () => {
+  const platform = {
+    async getGatewayUrl() { return "https://vera.test"; },
+    async fetch() { return jsonResponse({ agents: [], accounts: [], spaces: [], agentStates: [], seq: 1 }); },
+    createEventSource() { return { close() {} }; },
+  };
+  const runtime = createAppRuntime({ platform });
+  await runtime.start();
+  await flushAsyncWork();
+  const agent = { id: "agt_new", name: "New" };
+  const account = { id: "acc_new", owningAgentId: agent.id, name: "New account" };
+  runtime.mergeAgent(agent);
+  runtime.mergeAccount(account);
+  assert.deepEqual(runtime.getBootstrap().agents.find((item) => item.id === agent.id), agent);
+  assert.deepEqual(runtime.getBootstrap().accounts.find((item) => item.id === account.id), account);
+  runtime.removeAccount(account.id);
+  assert.equal(runtime.getBootstrap().accounts.some((item) => item.id === account.id), false);
+  runtime.mergeAccount(account);
+  runtime.removeAgent(agent.id);
+  assert.equal(runtime.getBootstrap().agents.some((item) => item.id === agent.id), false);
+  assert.equal(runtime.getBootstrap().accounts.some((item) => item.owningAgentId === agent.id), false);
+  runtime.close();
+});

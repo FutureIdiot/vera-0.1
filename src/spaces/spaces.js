@@ -55,7 +55,7 @@ const NOTIFICATION_MODES = ["all", "agentMessages", "off"];
 
 function normalizeNotifications(notifications) {
   if (notifications === undefined) return { ...DEFAULT_NOTIFICATIONS };
-  if (typeof notifications !== "object" || !NOTIFICATION_MODES.includes(notifications.mode)) {
+  if (!notifications || typeof notifications !== "object" || !NOTIFICATION_MODES.includes(notifications.mode)) {
     throw new ApiError("invalid_request", "notifications.mode must be all, agentMessages, or off");
   }
   if (notifications.includeActivityErrors !== undefined && typeof notifications.includeActivityErrors !== "boolean") {
