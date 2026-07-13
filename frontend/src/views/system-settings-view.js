@@ -16,6 +16,7 @@ const GROUPS = [
     fields: [
       ["memory.digestTrigger", "触发方式", "select", [["scheduled", "定时"], ["realtime", "实时同步"], ["manual", "手动"]]],
       ["memory.digestSchedule", "定时表达式", "text"],
+      ["memory.digestRealtimeThresholdChars", "实时整理字符阈值", "number", { min: 1, step: 1 }],
       ["memory.injectionBudgetResidentLines", "常驻索引行数", "number", { min: 0, step: 1 }],
     ],
   },

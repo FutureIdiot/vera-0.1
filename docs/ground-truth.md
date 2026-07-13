@@ -41,7 +41,7 @@ Vera是单用户、自部署的多agent协作空间。
 | 字段 | 说明 |
 |------|------|
 | 来源 | API / CLI |
-| 位置 | API → 供应商 + Key；CLI → 供应商 + 调用路径 |
+| 位置 | API → provider endpoint + 可选Key引用；CLI → 供应商 + daemon宿主调用路径 |
 | 模型名 | 当前使用的底层模型 |
 | 会话/项目上下文 | 供应商侧的会话连续性与项目数据，随账户不随agent |
 | Workspace | 每个Account恰有一个Workspace；项目文件与执行边界随Account，不随Agent |
@@ -58,6 +58,8 @@ Vera是单用户、自部署的多agent协作空间。
 - Workspace实际文件位于承载该Account的daemon宿主；gateway只保存Account到Workspace的绑定、策略、状态与校验信息，不复制项目内容，也不把宿主绝对路径当成跨设备可用数据
 - 换Key、换供应商、换模型改的是账户，agent身份与记忆不变
 - CLI供应商示例：Claude Code、Codex、OpenCode等；调用路径示例：build路径、`opencode go`
+- API供应商示例：本机Ollama Account使用`connection.baseUrl=http://127.0.0.1:11434`且`secretRef=null`；远程API使用对应endpoint和`secretRef`。Gemma/Ollama API Account与OpenCode/Navy CLI Account是两个独立Account，不共享连接、会话或额度。
+- adapter按provider协议与运行生命周期划分，不按Account、endpoint或模型划分；同一Ollama adapter服务多个Ollama模型/Account。新增adapter先遵守`adapter-interface.md` 1.2的行为与三层验收规范，server保持显式import和普通provider map，不引入基类、动态注册表或无第二真实用例的兼容抽象。
 - 命名纪律：Agent、Account、Execution、Workspace各占一名，不得互作别名。Phase 4已经完成Agent/Account对象拆分，但当时落地的 `Agent 1:N Account` 管理形态现为待迁移旧形态，不代表当前设计
 
 ### 2.3 消息
@@ -109,6 +111,7 @@ Vera是单用户、自部署的多agent协作空间。
 | lastSeenAt | 上次心跳或 SSE 收到时刻 |
 | sessionState 归属 | 仍在 gateway 持久化（`/api/agent/sync-state` 备份），agent daemon 在线时本地持有最新副本 |
 | connection.command | **从 Account 形状里移除**——gateway 不 spawn，CLI 路径是 agent daemon 的事 |
+| connection.baseUrl / secretRef | API Account保留provider endpoint和可选密钥引用；本机无鉴权Ollama的secretRef为null，endpoint由承载该Account的adapter/daemon从自身网络视角访问 |
 | kind/provider/model | 保留，但只对 agent daemon 自己有意义（决定怎么 spawn/调 API），gateway 只是元信息 |
 | workspace | gateway持久化该Account唯一Workspace的宿主标识、绑定、策略、状态与校验时间；实际文件只在daemon宿主 |
 
@@ -166,11 +169,17 @@ Vera是单用户、自部署的多agent协作空间。
 **记忆整理流程：**
 - 各agent由自身subagent负责整理和提炼
 - 流程环节：分块（程序）→ 标签（subagent）→ 提炼写入（subagent）
-- 各环节执行者可配置，不硬编码
+- 分块与阈值固定由gateway程序执行、写入固定经gateway单写者；标签/提炼使用该Agent Home Account当前配置的provider/model与adapter隔离`digestMemory`能力。可信adapter控制层可读取Account路由字段，但送入模型的payload只能包含Agent最小身份、Message chunks、fact catalog和proposal schema，绝不包含Account connection/secret、sessionState或Workspace。Account本身可配置，不为每个环节预建第二套executor注册表。
+- M2按Home Account的真实provider选择完整adapter：`kind=api, provider=ollama, model=gemma4:e4b`由原生Ollama adapter直连`connection.baseUrl`，并按实测provider能力下沉structured-output schema；`kind=cli, provider=opencode, model=navy/deepseek-v4-pro`由OpenCode adapter创建独立无Tools会话。两条路径不共享Account、sessionState、连接或fallback，也不得为了整理Memory新增缺少聊天`run(ctx)`的digest-only provider。只有Navy primary返回经结构化机器码确认的额度耗尽信号时，才允许同一digest job用配置的免费模型再尝试一次；该后备模型不是Account模型、聊天模型、通用provider fallback或第二Execution，不修改Account.model/sessionState，下一job仍从Account.model开始。本地Ollama失败不走此fallback。
+- M2 digest job不是聊天Run/Execution，不创建subagent、不取得Account lease，也不依赖Phase 5.5的daemon/token/presence/Tailscale/Workspace接线；5.5只迁移同一adapter能力的执行位置，不改变本条语义。
 - 触发机制：hook（详见《Memory Hook设计文档》）
+- `memory.digestTrigger` 只选择一种自动策略：`scheduled` 与 `realtime` 互斥，`manual` 表示关闭自动整理；无论选择哪种策略，owner 与可信 Agent 都始终可以手动提交整理。`realtime` 不是每轮都跑模型，而是按 `(agentId, Space)` 统计尚未整理、已完整保存的 Message 正文 Unicode 字符数，达到配置阈值后异步排队；Activity、流式 delta、工具过程与 provider token 估算都不进入水位。聊天 Run 不等待整理。
+- M2 的 Message 整理与 M4 的 dream 是两种 job：Run 结束不等于外部 session 结束，M2 不把每次 Run 结束伪装成 session-end dream，也不提前增加 dream 兜底开关。
 - 存储形态（2026-07-02定稿）：**文件即真相**——每条记忆一个markdown文件、语义化slug、`[[双链]]`互联，记忆库即Obsidian vault；数据库仅为派生索引。详见memory-hook.md《修订：文件库架构》
 - vault内按 `agentId` 分区；slug在对应Agent分区内创建后永久不可改名，纠错使用正文更新、归档或新建正确slug，不提供rename兼容别名
 - slug是Agent可见的稳定公共指针，不是跨job、跨措辞的事实去重身份。M2自动提炼必须先由程序使用独立于slug的确定性事实身份或等价规则匹配既有Memory：同一事实优先update/merge，纠错或新事实取代旧事实时走可追溯的supersede/archive语义，不得仅因模型换了slug就创建平行重复Memory。
+- M2 的事实地址由模型提议的结构槽（subject / relation / qualifiers）经 gateway 规范化后派生；事实值单独规范化。两者都只进入可重建派生索引与 job 审计，不进 Memory frontmatter。地址和值相同即合入既有 slug；地址相同但值冲突时，只有来源中存在明确纠错证据才允许 supersede。模糊或多候选时必须跳过/拒绝，不得靠 suggested slug 猜测。
+- 写入时的`type`分层是Memory的结构化元信息，用于后续聚类去重、粒度选择和软配额重排，并只作为语义簇兼容性的辅助信号；单轮置信仍只来自独立一级方向的并集。`type`不进入事实身份，不把召回切成互不相通的类型分区，也不是检索过滤门槛。新类型允许扩展，未配置类型进入默认软配额组，不得因未知类型丢弃Memory。
 - 所有程序写入（主Agent、subagent、CLI adapter、hook与dream）只能向gateway提交proposal/operation，由Memory单写者校验并原子落盘；不得直接写vault。用户通过Obsidian所做的外部编辑由gateway重扫、校验并刷新派生索引，不构成第二个程序写入通道
 - **Vera Memory 本身是 gateway 托管的第一方 per-Agent MCP 服务**：Agent runtime 的读取、写入提议、检索、横向扩展和正文展开只走 Vera Memory MCP tools，不使用 `fs.read/fs.write` 直接碰 vault。MCP工具参数不接受 `agentId`，gateway从可信Execution/agent token上下文绑定身份；切换Account不切换Memory。owner前端继续使用HTTP管理API，但HTTP与MCP必须调用同一Memory facade和单写队列，不得复制业务实现。
 
@@ -181,10 +190,15 @@ Vera是单用户、自部署的多agent协作空间。
 - **索引**：关键词、embedding、双链图、派生权重等可重建的程序结构；索引帮助程序选出召回节点，不是Agent纵向深入时看到的内容层。
 - 横向扩展只发生在同层长期Memory之间：节点可沿关联方向召回其他节点；纵向只有“召回节点 → 记忆正文 → 来源原文”。纵向展开和溯源都不参与横向路径数计算。
 
-**召回ranking三项依据：**
-- **派生权重**：该Memory跨轮稳定的长期权重，由图结构、使用统计、用户信号和按type的时间衰减派生；不得由Agent手工填写。
-- **本轮相关性**：当前query与该Memory的关键词、向量等匹配程度，只服务本轮。
-- **单轮交汇置信度**：同一候选节点在本轮被多少个相互独立的一级召回方向共同命中。程序按Agent分区内的稳定slug去重，节点只返回和计费一次，但保留独立方向集合并给予递减、封顶的本轮排序增益；同一一级方向内的多条路径只计一次。它不表示Memory内容真假，不写入frontmatter、不写回派生权重，本轮结束即丢弃。
+**召回顺序与ranking依据：**
+- 顺序固定为：scope/status/session过滤 → 关键词、向量等宽召回取得出发节点 → 沿Memory图做有界多hop开放扩散并记录方向、路径与hop距离 → 按稳定slug归并同一节点的重复命中 → 计算候选基础分 → 按事实/语义簇做结果去重、合并独立方向置信并选择合适粒度 → 按query自适应的type软配额做边际重排 → 先尝试更短但仍可独立理解的节点投影，再按token预算确定性截断并输出；未装入项进入稳定`fetch_more`游标。前段slug归并只为汇总同一节点的路径证据，不是最终结果截断；内部扩散必须有最大hop、逐跳衰减和候选上限，且不得递归注入正文；`fetch_detail`显式关联仍只返回一跳。正文展开和SourceRef溯源不参与横向扩散或计分。
+- 候选基础分的形状固定为五项归一化后的加权和：`baseScore = wq·queryRelevance + wg·graphProximity + wl·derivedWeight + wc·intersectionConfidence + wt·typeFit`。最终选择使用`marginalScore = baseScore - redundancyPenalty - boundedSoftQuotaPenalty`逐项重排；精确权重、距离衰减、惩罚函数和封顶值在M3契约先行时冻结，不得临时改成硬过滤或乘法门槛。
+- **查询相关性（queryRelevance）**：当前query与候选的关键词、向量等直接语义匹配程度，只服务本轮。
+- **图接近度（graphProximity）**：候选相对出发节点的hop距离和冻结的边关系强度经单调衰减后的本轮信号；直接关联优于等条件的远跳节点，同一节点多路径取最有利的有效距离，但其他独立方向仍保留给置信度。关键词/向量直接命中却没有图路径时取中性值，不得因此被排除。它不同于长期派生权重中的图中心性。
+- **长期派生权重（derivedWeight）**：该Memory跨轮稳定的长期权重，由图结构、使用统计、用户信号和按type的时间衰减派生；不得由Agent手工填写。
+- **单轮交汇置信度（intersectionConfidence）**：同一候选节点或同一语义簇在本轮被多少个相互独立的一级召回方向共同命中。合并时取独立方向并集，同一方向内的重复路径只计一次；增益递减且封顶。它不表示内容真假，不写入frontmatter、不写回长期权重，本轮结束即丢弃。
+- **类型适配（typeFit）**：只表示候选`type`与当前query意图、所需抽象粒度的匹配程度；它是软排序信号，不是可见性规则、事实身份或类型白名单。
+- type配额是最终重排的**可借用软目标**，优先用token占比和边际增益表达，不设“某类最多N条”的硬上限，也不预留不可借用槽位。某类超过目标后只施加随超额单调增加但封顶的边际惩罚，使其后续边际收益递减；其他类型没有更高边际收益、当前query对该类需求强或候选基础分明显更高时，该类可继续借用剩余预算。因而5条彼此独立且当前确实需要的规则类Memory不得仅因软目标为3而被截成3条；只有语义重复合并、同session已注入、综合边际收益不足或总token预算才可减少它们。
 
 ### 3.2 Files
 附件、原始材料。内容存储层。

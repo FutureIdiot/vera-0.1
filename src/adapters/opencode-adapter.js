@@ -17,10 +17,14 @@
 
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
-import { access, constants } from "node:fs/promises";
+import { access, constants, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { AdapterError } from "../core/errors.js";
 import { spawnProcess, killProcessTree } from "../core/spawn.js";
+import { buildMemoryDigestPrompt, MEMORY_DIGEST_SYSTEM_PROMPT, parseMemoryDigestEnvelope } from "../memory/memory-digest-prompt.js";
+import { MEMORY_DIGEST_OUTPUT_JSON_SCHEMA } from "../memory/memory-proposals.js";
 
 const HEALTH_POLL_INTERVAL_MS = 200;
 const POLLER_RECONNECT_DELAY_MS = 500;
@@ -73,6 +77,8 @@ export function createOpencodeAdapter({ config }) {
     daemonPort = 0,
     idleShutdownMs = 5 * 60 * 1000,
     watchdogMs = 30 * 60 * 1000,
+    digestTimeoutMs = 5 * 60 * 1000,
+    memoryDigestQuotaFallbacks = {},
     // 以下两项主要供测试注入，不走环境变量
     healthCheckTimeoutMs = 5000,
     shutdownGraceMs = 5000,
@@ -88,6 +94,43 @@ export function createOpencodeAdapter({ config }) {
     const command = account?.connection?.command;
     if (command && (command.split("/").pop() || "") === "opencode") return command;
     return defaultBinary;
+  }
+
+  function splitModelId(value) {
+    const model = String(value ?? "").trim();
+    const slash = model.indexOf("/");
+    if (slash <= 0 || slash === model.length - 1) throw new AdapterError("executor_unavailable", "OpenCode memory digest model is unavailable");
+    return { model, providerID: model.slice(0, slash), modelID: model.slice(slash + 1) };
+  }
+
+  function quotaExhausted(error) {
+    const source = error?.data ?? error ?? {};
+    const status = Number(source.statusCode ?? source.status ?? 0);
+    if (![402, 403, 429].includes(status)) return false;
+    let responseBody = null;
+    if (typeof source.responseBody === "string") {
+      try { responseBody = JSON.parse(source.responseBody); } catch {}
+    } else if (source.responseBody && typeof source.responseBody === "object") {
+      responseBody = source.responseBody;
+    }
+    const codes = [
+      source.code,
+      source.type,
+      source.metadata?.code,
+      source.metadata?.type,
+      responseBody?.code,
+      responseBody?.error?.code,
+      responseBody?.error?.type,
+    ].filter((value) => typeof value === "string").map((value) => value.toLocaleLowerCase("und"));
+    return codes.some((code) => new Set(["insufficient_quota", "quota_exhausted", "quota_exceeded"]).has(code));
+  }
+
+  function digestFailure(error, code = "executor_failed") {
+    const wrapped = new AdapterError(code, code === "executor_unavailable"
+      ? "OpenCode memory digest executor is unavailable"
+      : "OpenCode memory digest executor failed");
+    wrapped.quotaExhausted = quotaExhausted(error);
+    return wrapped;
   }
 
   function clearIdleTimer() {
@@ -290,6 +333,138 @@ export function createOpencodeAdapter({ config }) {
     return id;
   }
 
+  async function requestDigestJson(handle, path, { method = "GET", body, signal } = {}) {
+    let response;
+    try {
+      response = await fetch(`${handle.baseUrl}${path}`, {
+        method,
+        headers: {
+          authorization: handle.authHeader,
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal,
+      });
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      throw digestFailure(error, "executor_unavailable");
+    }
+    let parsed = null;
+    try { parsed = await response.json(); } catch {}
+    if (!response.ok) {
+      const error = parsed?.error ?? parsed ?? { statusCode: response.status };
+      if (error && typeof error === "object" && error.statusCode === undefined) error.statusCode = response.status;
+      throw digestFailure(error);
+    }
+    return parsed?.data ?? parsed;
+  }
+
+  async function runDigestAttempt({ binary, model, payload, signal }) {
+    const parsedModel = splitModelId(model);
+    const directory = await mkdtemp(join(tmpdir(), "vera-memory-digest-"));
+    let sessionId = null;
+    let digestListener = null;
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(() => timeoutController.abort(), digestTimeoutMs);
+    timeout.unref?.();
+    const combinedSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
+    clearIdleTimer();
+    inFlight += 1;
+    try {
+      if (signal?.aborted) throw new AdapterError("cancelled", "memory digest cancelled");
+      const handle = await ensureDaemon(binary);
+      const directoryQuery = `?directory=${encodeURIComponent(directory)}`;
+      const toolIds = await requestDigestJson(handle, `/experimental/tool/ids${directoryQuery}`, { signal: combinedSignal });
+      if (!Array.isArray(toolIds) || !toolIds.every((id) => typeof id === "string" && id)) {
+        throw digestFailure(null, "executor_unavailable");
+      }
+      const session = await requestDigestJson(handle, `/session${directoryQuery}`, {
+        method: "POST",
+        signal: combinedSignal,
+        body: {
+          title: "vera-memory-digest",
+          model: { id: parsedModel.modelID, providerID: parsedModel.providerID },
+          permission: [{ permission: "*", pattern: "*", action: "deny" }],
+        },
+      });
+      sessionId = session?.id;
+      if (!sessionId) throw digestFailure(null, "executor_unavailable");
+
+      let rejectEvent;
+      const eventFailure = new Promise((_, reject) => { rejectEvent = reject; });
+      eventFailure.catch(() => {});
+      digestListener = (event) => {
+        const data = event?.data ?? {};
+        if (event?.type === "message.part.updated" && data.part?.type === "tool") {
+          rejectEvent(digestFailure({ message: "tool_violation" }));
+        }
+        if (event?.type === "session.error" || event?.type === "message.error") {
+          rejectEvent(digestFailure(data.error ?? data));
+        }
+      };
+      sessionListeners.set(sessionId, digestListener);
+      const tools = Object.fromEntries(toolIds.map((id) => [id, false]));
+      const response = await Promise.race([
+        requestDigestJson(handle, `/session/${encodeURIComponent(sessionId)}/message${directoryQuery}`, {
+          method: "POST",
+          signal: combinedSignal,
+          body: {
+            model: { providerID: parsedModel.providerID, modelID: parsedModel.modelID },
+            tools,
+            format: { type: "json_schema", schema: MEMORY_DIGEST_OUTPUT_JSON_SCHEMA, retryCount: 2 },
+            system: MEMORY_DIGEST_SYSTEM_PROMPT,
+            parts: [{ type: "text", text: buildMemoryDigestPrompt(payload) }],
+          },
+        }),
+        eventFailure,
+      ]);
+      if (response?.info?.error) throw digestFailure(response.info.error);
+      const envelope = parseMemoryDigestEnvelope(response?.info?.structured);
+      return envelope;
+    } catch (error) {
+      if (signal?.aborted) throw new AdapterError("cancelled", "memory digest cancelled");
+      if (timeoutController.signal.aborted) throw new AdapterError("timed_out", "OpenCode memory digest timed out");
+      if (error instanceof AdapterError) {
+        if (error.code === "unavailable") throw digestFailure(null, "executor_unavailable");
+        throw error;
+      }
+      throw digestFailure(error);
+    } finally {
+      clearTimeout(timeout);
+      if (sessionId) {
+        sessionListeners.delete(sessionId);
+        const handle = daemon;
+        if (handle) {
+          const query = `?directory=${encodeURIComponent(directory)}`;
+          try { await requestDigestJson(handle, `/session/${encodeURIComponent(sessionId)}${query}`, { method: "DELETE", signal: AbortSignal.timeout(3000) }); } catch {}
+        }
+      }
+      await rm(directory, { recursive: true, force: true });
+      inFlight -= 1;
+      if (inFlight === 0) scheduleIdleShutdown();
+    }
+  }
+
+  async function digestMemory({ account, payload, signal }) {
+    const primary = splitModelId(account?.model).model;
+    const binary = resolveBinary(account);
+    try {
+      const result = await runDigestAttempt({ binary, model: primary, payload, signal });
+      return {
+        ...result,
+        execution: { adapter: "opencode", primaryModel: primary, effectiveModel: primary, fallbackUsed: false, fallbackReason: null, attempts: 1 },
+      };
+    } catch (error) {
+      const fallback = String(memoryDigestQuotaFallbacks[primary] ?? "").trim();
+      if (!error?.quotaExhausted || !primary.startsWith("navy/") || !fallback || signal?.aborted) throw error;
+      const result = await runDigestAttempt({ binary, model: fallback, payload, signal });
+      return {
+        ...result,
+        execution: { adapter: "opencode", primaryModel: primary, effectiveModel: fallback, fallbackUsed: true, fallbackReason: "quota_exhausted", attempts: 2 },
+      };
+    }
+  }
+
   function buildRunnerArgs(handle, account, sessionId, promptText) {
     const args = ["run", "--attach", handle.baseUrl, "-u", "opencode", "-p", handle.password];
     const model = String(account?.model || "").trim();
@@ -455,5 +630,5 @@ export function createOpencodeAdapter({ config }) {
     await stopDaemon();
   }
 
-  return { run, shutdown };
+  return { run, digestMemory, shutdown };
 }

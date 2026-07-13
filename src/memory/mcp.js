@@ -32,6 +32,11 @@ const TOOL_SPECS = [
     slug: { type: "string" },
     ifMatch: { type: "string" },
   }, ["slug", "ifMatch"]),
+  tool("memory_digest", "Create an asynchronous digest job from saved Messages.", {
+    fromMessageId: { type: "string" },
+    toMessageId: { type: "string" },
+    mode: { type: "string", enum: ["incremental", "range"] },
+  }, ["mode"]),
 ];
 
 const SPEC_BY_NAME = new Map(TOOL_SPECS.map((spec) => [spec.name, spec]));
@@ -111,7 +116,7 @@ function toolError(error) {
   };
 }
 
-export function createMemoryMcpDispatcher({ memory }) {
+export function createMemoryMcpDispatcher({ memory, digestService = null }) {
   if (!memory) throw new Error("createMemoryMcpDispatcher requires memory");
 
   async function callTool({ context, name, arguments: rawArguments }) {
@@ -147,6 +152,26 @@ export function createMemoryMcpDispatcher({ memory }) {
           patch: {},
         }));
         return toolResult({ memory: archived });
+      }
+      if (name === "memory_digest") {
+        if (!digestService) throw new ApiError("adapter_unavailable", "Memory digest service is unavailable");
+        if (typeof trusted.spaceId !== "string" || !trusted.spaceId) {
+          throw invalid("trusted Memory MCP context requires spaceId for memory_digest");
+        }
+        if (args.mode === "range" && (!args.fromMessageId || !args.toMessageId)) {
+          throw invalid("memory_digest range mode requires fromMessageId and toMessageId");
+        }
+        const toMessageId = args.toMessageId ?? trusted.triggerMessageId;
+        if (!toMessageId) throw invalid("memory_digest requires toMessageId or trusted triggerMessageId");
+        const job = await digestService.enqueue({
+          agentId: trusted.agentId,
+          spaceId: trusted.spaceId,
+          mode: args.mode,
+          trigger: "manual",
+          fromMessageId: args.fromMessageId,
+          toMessageId,
+        });
+        return toolResult({ job });
       }
       throw invalid(`unknown Memory MCP tool: ${name}`);
     } catch (error) {

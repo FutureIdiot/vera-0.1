@@ -35,6 +35,7 @@
   - OpenCode（daemon 型：会话活在常驻 HTTP 服务里）
   - Claude Code（resume 型：进程一次一命，靠 `--resume` 续会话）
   - 接口只承诺"adapter 自己负责会话连续性"，不得泄漏任何一种生命周期假设
+  - 2026-07-14补充provider adapter创建规范：按协议/生命周期复用而非按模型建文件；固定run/digest、schema下沉、错误/取消/secret边界与stub→临时gateway→真实provider三层闸门，不增加BaseAdapter或动态注册表
 
 **完成标准**：两份文档经 Theta 过目认可。此后接口变更遵循"文档先于代码"。
 
@@ -229,28 +230,37 @@
 
 ### P5-M2 — memory_write_hook 与触发器
 
-- [ ] **M2契约先行**：钉死`realtime`是否等价context容量阈值、scheduled/realtime互斥关系、manual是否始终可用、session-end dream兜底开关，以及context水位按token/字符/adapter容量的唯一口径；冻结独立于slug的跨job确定性事实身份或等价匹配规则、同事实update/merge、纠错supersede/archive及SourceRefs保留语义。
-- [ ] M2只从gateway已全量保存的Message范围创建`memory_digest` job，不引入Aelios式重复Raw ingest；MCP tool只提交消息范围/模式，SourceRefs由gateway从可信run/message上下文生成。
-- [ ] 程序负责确定性分块、去重、阈值和 job 状态；模型只做标签/提炼/操作提议，不能直接写 store/vault。proposal 必须经过 schema、scope、source、slug/钩子行、双链和幂等校验后由 M1 单写者应用。
-- [ ] 接通 `memory.digestTrigger` 的 `scheduled` / `realtime` / `manual` consumer 与 `digestSchedule`；context 容量触发的计算口径、session 结束兜底和手动整理入口先写契约。各环节执行者按 ground truth 做成配置字段，但只接真实执行者，不预建插件系统。
-- [ ] slug 与一行钩子质量作为首要验收：无复用价值、无来源推断、agent 自创偏好不得写入；相同事实优先 update/merge，不制造平行重复记忆；stain 只以裸 hex 元数据写入。
-- [ ] hook 失败不阻塞聊天，不产生半条记忆；失败/重试/取消有可观察 job 状态与去重键，重试不得重复应用同一 proposal。
+- [x] **M2契约先行**：`scheduled/realtime`为互斥自动策略、manual始终可用；realtime统一按已保存completed Message的Unicode字符水位，默认16000；Run结束不冒充session-end dream，兜底归M4。事实地址/值由结构槽规范化后派生且不进frontmatter；同事实保留原slug并合并SourceRefs，明确纠错才允许同slug supersede，模糊匹配跳过。
+- [x] M2只从gateway已全量保存的Message范围创建`memory_digest` job，不引入Aelios式重复Raw ingest；MCP tool只提交消息范围/模式，SourceRefs由gateway从可信run/message上下文生成。
+- [x] 程序侧已完成确定性分块、per-Agent事实目录、proposal全量预校验、持久proposal/receipt与M1单写者应用；模型只能返回严格proposal，不能接触store/vault。现有OpenCode adapter已完成独立临时目录、全Tools deny、structured session与仅Navy结构化额度机器码触发一次免费V4 Flash的stub闭环，绝不改变聊天或Account模型。
+- [x] 已接通 `memory.digestTrigger` 的 `scheduled` / `realtime` / `manual` consumer 与五段cron；实时阈值只用Unicode字符水位，M2不实现session-end dream。无关Settings更新不越过cron触发catch-up，成功watermark使用持久toSeq不因后续可见性变化倒退。
+- [x] 新provider adapter规范已冻结：一个adapter对应一套协议/生命周期，同provider多Account/模型复用；生产provider必须有`run(ctx)`，承担M2时再实现隔离`digestMemory`；固定kind/provider fail-fast、会话/stream、schema下沉、错误、取消、secret、资源清理和三层conformance闸门，不预建基类/注册表。
+- [ ] 新增完整原生Ollama adapter：只接受`kind=api, provider=ollama`，以Account `connection.baseUrl`直连`/api/chat`，实现聊天stream/history连续性与隔离digest；对0.23.2使用无`oneOf/patternProperties/pattern`的兼容transport schema，返回后仍走gateway完整validator。不得经过OpenCode，也不得做digest-only adapter。
+- [ ] 在`test/adapters/`固化行为型conformance夹具并同时回归Ollama/OpenCode：共享的只是kind/provider、stream/session、错误/取消/timeout、secret、cleanup和digest隔离断言，不抽取运行时BaseAdapter；再以临时gateway黑盒和各自显式真实provider smoke完成后两层闸门。
+- [ ] slug/钩子行、source、双链、stain裸hex、同事实targetFactId、手动Memory adopt与纠错supersede校验已落地；fact catalog还须把现有`type`提供给executor并验证update/supersede不会因不可见旧分类而无意改类；无复用价值/无来源推断/agent自创偏好的最终语义判断仍等待真实`digestMemory`执行者接入后用固定raw夹具完成生产路径验收。
+- [x] hook入队不阻塞聊天；单Memory写入原子，失败/重试/取消有持久可观察job状态、幂等键与安全SSE，重试复用已flush proposal并续跑未应用receipt，不重复创建Memory。
 
 **M2 验收**：使用固定raw events夹具覆盖create/update/archive/skip/重复重试；同一事实换措辞、换建议slug、跨job再次出现仍只落一条Memory，纠错取代旧事实时双方sources可追溯；定时、容量、手动三种触发走同一pipeline；非法proposal全部拒绝且vault不变；聊天run不等待整理完成；测试日志/API不泄露provider secret或stain解释。
 
+真实executor补充验收分两条独立路径：Ollama/Gemma API Account必须由原生Ollama adapter直连并成功完成chat+digest，OpenCode/Navy CLI Account必须由OpenCode adapter成功完成chat+digest；两条digest请求均无Memory Tools/Workspace且返回再过gateway完整validator，chat则按各provider真实能力与Approval契约执行。Navy primary成功时不调用Flash，结构化额度机器码时恰好用新session重试一次Flash且Account.model不变；单独HTTP 402/403/429、自由文本、timeout、network、auth、model-not-found、invalid structured proposal均不调用Flash；fallback也失败时job安全`executor_failed`且vault不变。两条真实provider smoke显式执行，普通`npm test`不依赖本机模型服务或供应商额度。
+
+- [ ] **真实模型闸门**：原生Ollama adapter以`kind=api, provider=ollama, model=gemma4:e4b`显式跑chat+digest；OpenCode adapter以`kind=cli, provider=opencode, model=navy/deepseek-v4-pro`显式跑chat+digest，且只有结构化机器码明确额度耗尽才允许同job回退`opencode/deepseek-v4-flash-free`。必须断言两条实际transport互不借道，digest返回都再通过gateway权威proposal validator。本项未通过前M2不标完成。
+
+**M2当前验收（2026-07-14，gateway pipeline与OpenCode stub闭环，原生Ollama adapter/Navy真实闸门待完成）**：此前`npm test` 152/152通过、2个旧真实模型smoke默认skip；`build:web`、相关`node --check`与`git diff --check`通过。OpenCode stub已证明独立session/临时目录、session wildcard deny、全部tool id=false、structured response、tool事件即失败、primary成功不fallback、结构化quota机器码恰好fallback一次、单独402/普通429/401/坏结构不fallback，以及取消/超时清理。2026-07-14临时脚本直连Ollama 0.23.2 `/api/chat`与`gemma4:e4b`，简化transport schema后返回1条create proposal并通过Vera完整validator；同时确认完整schema/部分pattern会令Ollama grammar转换崩溃。该smoke只证明兼容路径可行，不等于正式adapter已解决；旧“Gemma通过OpenCode”真实测试语义作废，代码实现时须迁入`ollama-adapter.test.js`。Navy真实请求尚未执行，因此M2未标完成。
+
 ### P5-M3 — 三渠道检索、注入预算、横向扩展与正文展开
 
-- [ ] **M3契约先行**：补齐retrieve/fetch_more/fetch_detail、游标、token预算、同session program-owned去重状态、使用统计、置顶、错误与必要SSE形状；冻结召回节点字段，以及单轮交汇因子的精确函数、上限、配置默认值和游标延续方式；不得污染adapter透明`sessionState`。
+- [ ] **M3契约先行**：补齐retrieve/fetch_more/fetch_detail、游标、token预算、同session program-owned去重状态、使用统计、置顶、错误与必要SSE形状；冻结召回节点字段、查询相关性/图接近度/长期派生权重/单轮交汇置信度/类型适配五项归一化与权重、距离衰减、两阶段去重、粒度选择、query自适应type软配额、稳定tie-break和游标延续方式；不得污染adapter透明`sessionState`。
 - [ ] 常驻索引按 R3 批量换版，只在新外部 session 建立稳定前缀；用户置顶 + 按派生权重选出的top条目合计受 `memory.injectionBudgetResidentLines` 限制，普通编辑不逐条打穿 prompt cache。
-- [ ] 本地关键词 + 向量/等价可替换检索产生候选，按稳定slug合并同一节点并保留独立一级方向集合；ranking形状固定为本轮相关性×派生权重×单轮交汇因子，M4前派生权重输入统一为中性值1，再按 token 而非条数执行逐消息预算。结果去 archived、按冻结 scope 过滤、同一 session 去重，并在当前消息信封尾部追加。索引/检索/日志都不携带 stain 或其自然语言含义。
-- [ ] 落地冻结后的 MCP `memory_search` / `memory_fetch_more`，并增强既有 `memory_fetch_detail`：广度分页游标稳定、方向可复现、双链只展开一跳；深度按slug取权威文件并记录使用统计。所有adapter只消费同一MCP surface，不直接碰store/vault。
+- [ ] 顺序固定为scope/status/session过滤 → 关键词/向量等宽召回取得出发节点 → 跨type开放图扩散并记录方向/路径/hop距离 → 按稳定slug归并命中以汇总路径与置信证据 → 五项加权基础分 → 按事实身份/语义簇做结果去重、合并独立方向置信并选择代表粒度 → query自适应、可借用的type软配额边际重排 → 尽量缩短为仍可独立理解的节点投影 → 按全局token预算截断。M4前长期派生权重贡献统一为不改变相对顺序的加法中性值0；结果在当前消息信封尾部追加，未装入项进入稳定cursor。索引/检索/日志都不携带 stain 或其自然语言含义。
+- [ ] 落地冻结后的 MCP `memory_search` / `memory_fetch_more`，并增强既有 `memory_fetch_detail`：search内部按冻结的最大hop、逐跳衰减和候选上限做有界图扩散，广度分页游标稳定、方向可复现；fetch_detail显式关联仍只返回一跳，深度按slug取权威文件并记录使用统计。所有adapter只消费同一MCP surface，不直接碰store/vault。
 - [ ] 明确物理顺序并做快照测试：adapter 的稳定 system/history 在 `promptText` 之外；本轮 `promptText` 为常驻索引稳定前缀 → 群聊 Message 声告 → 当前触发正文 → 本轮检索块（消息信封尾部）。Activity 永不因 Memory 接入而回流 prompt。
 
-**M3 验收**：跨 Space 命中符合 D0 scope 决定；同一节点由多个独立一级方向命中时只返回/计费一次、保留方向证据并获得有界交汇增益，同一方向的重复路径不刷分，fetch_detail与SourceRef溯源不增加交汇；同 session 不重复注入；超预算确定性截断；stain 在 push、排序、日志和最终回复中均不可见，fetch_detail 深读即使返回裸 hex 也不得解释/引用/参与判断；fetch_more 游标不重不漏、fetch_detail 返回权威正文；逐帧 SSE 仍正常且 prompt cache 稳定前缀不因单条记忆编辑变化。
+**M3 验收**：跨 Space 命中符合 D0 scope 决定，图扩散可跨type且直接语义命中不因无图路径被排除；同一节点由多个独立一级方向命中时只返回/计费一次、保留方向证据并获得有界交汇增益，同一方向的重复路径不刷分，跨slug近重复在基础评分后聚类且只合并独立方向，fetch_detail与SourceRef溯源不增加交汇；同 session 不重复注入。专门固定“当前需要5条彼此独立的规则类Memory、该类软目标为3”的夹具：总token预算容纳且其边际收益领先时必须返回5条，不能按type硬截；未知type取中性适配并进入默认软配额组。预算不足时先选更短但可独立理解的节点投影，再确定性截断并把剩余项放入稳定cursor；stain 在push、排序、日志和最终回复中均不可见，fetch_detail深读即使返回裸hex也不得解释/引用/参与判断；fetch_more游标不重不漏、fetch_detail返回权威正文；逐帧SSE仍正常且prompt cache稳定前缀不因单条记忆编辑变化。
 
 ### P5-M4 — 派生权重与 dream 维护
 
-- [ ] 用可重建的真实派生权重替换M3中性值1；派生权重只来自双链入度、展开/最近使用、用户编辑与置顶、按type的时间衰减。agent无手工importance字段，stain永不参与排序；保留有界随机探索且测试可注入seed。
+- [ ] 用可重建的真实派生权重替换M3加法中性贡献0；派生权重只来自双链入度、展开/最近使用、用户编辑与置顶、按type的时间衰减。M4只替换五项基础分中的长期权重贡献，不改变查询相关性、图接近度、单轮置信、类型适配、两阶段去重或软配额语义。agent无手工importance字段，stain永不参与排序；保留有界随机探索且测试可注入seed。
 - [ ] dream 是聊天外异步维护 job，复用 M1 单写者与 M2 proposal 校验，只执行 keep/update/merge/archive 等冻结操作；默认不物理删除，保留 sources 和双链，失败不影响聊天与现有索引。
 - [ ] dream 后统一重建派生索引并批量发布新的常驻索引版本；整理模型、批量大小、频率、超时和重试均引用配置，使用便宜模型但不把供应商写死。
 
@@ -299,7 +309,7 @@
 - [ ] **5.5.4 Tailscale owner identity + 入口权限**：gateway只信任本机Tailscale Serve注入并去伪造的identity headers；普通API/SSE要求login命中`config.security.ownerTailscaleLogins`；生产列表为空时拒绝业务API。原生CORS使用配置化精确Origin白名单，不自建配对码/device session。
 - [ ] **5.5.5 `/api/agent/*` 路由层**：`src/api/agent-routes.js`新建——Bearer token识别Agent；login只登记daemon、per-Account Workspace/runtimeCapabilities与候选授权Account，不选择Account或取得租约。gateway创建主Run或父Run调用`POST /api/agent/runs/:id/subagents`时生成pending Execution；调度器取得目标Account唯一租约后转running、广播`run.started`并发`run.requested`。daemon不得重复创建/认领Run；终态/登出/超时释放租约，sync-state只接受租约持有者。
 - [ ] **5.5.6 Run触发与调度链路改造**：`src/spaces/messages.js`不再sync调用`executeRun`；主Execution固定Home Account，subagent才可绑定其他授权Account。触发先创建pending Run；Account空闲且Workspace宿主在线时由调度器原子取租约并下发，忙则内部排队，明确要求立即执行的请求返回`account_busy`，离线走error Activity。编译层复用`src/spaces/view-compiler.js`，mock adapter保留给gateway内部一致性测试。
-- [ ] **5.5.7 `scripts/agent-daemon.js`**：新进程，启动读Tailscale私网gateway URL / agent token，并按Account报告唯一Workspace、CLI binary/runtimeCapabilities；收到已获租约的`run.requested`后只执行与回传，不创建Run或自行切Account。心跳缺失3次后exit(0)，不得私网失败后fallback到公网域名。
+- [ ] **5.5.7 `scripts/agent-daemon.js`**：新进程，启动读Tailscale私网gateway URL / agent token，并按Account报告唯一Workspace、CLI binary/runtimeCapabilities；收到已获租约的`run.requested`后只执行与回传，不创建Run或自行切Account。迁移M2前必须先在`adapter-interface.md`冻结并实现专用digest request/result内部通道、取消/超时、安全摘要和fallback配置传递；不得复用聊天Run/Message/Activity/sessionState，迁移验收前不退役进程内digest adapter。心跳缺失3次后exit(0)，不得私网失败后fallback到公网域名。
 - [ ] **5.5.8 mock daemon + verify.mjs 拆分**：起mock daemon走login → run.requested → delta → activity → message → completed → sync-state → logout；gateway内部一致性测试保留旧mock adapter路径。
 - [ ] **5.5.9 VPS纯私网部署落地**：完成数据迁移、gateway systemd、VPS加入tailnet、Tailscale Serve、ACL、owner login配置、SSE逐帧和公网不可达验收；不安装公网反向代理，不启用Funnel。
 - [ ] **5.5.10 本机清理**：停旧Mac gateway与cloudflared自启；旧数据和cloudflared配置只留冷备份；验证Mac daemon与手机客户端均经Tailscale访问VPS，其他手机App仍直连公网。

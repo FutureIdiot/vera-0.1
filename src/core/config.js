@@ -31,10 +31,14 @@ const DEFAULTS = {
     daemonPort: 0, // 0 = 每次启动随机挑空闲端口
     idleShutdownMs: 5 * 60 * 1000, // 无在飞 run 后多久回收 daemon
     watchdogMs: 30 * 60 * 1000, // 单次 run 看门狗（adapter-interface.md 行为规则）
+    digestTimeoutMs: 5 * 60 * 1000,
+    memoryDigestPrimaryModel: "navy/deepseek-v4-pro",
+    memoryDigestQuotaFallbackModel: "opencode/deepseek-v4-flash-free",
   },
   memory: {
     vaultPath: "~/.vera/memory", // Obsidian 兼容 vault，仓库外（api-contract.md Memory 一节）
     residentIndexMaxLines: 25, // 常驻索引截断行数
+    digestRealtimeThresholdChars: 16000,
   },
   // Appearance 默认值（ground truth 4.3「F0确认默认值」/ api-contract.md Appearance 字段）。
   // 这是唯一默认源——settings-store 的 appearance.* deriveDefaults 从这里读，
@@ -80,6 +84,11 @@ function num(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function positiveInt(value, fallback) {
+  const parsed = num(value, fallback);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 // `~` 前缀展开为用户主目录，其余路径原样返回（config 唯一负责展开的地方，
 // 其余模块只拿到已展开的绝对/相对路径）。
 function expandHome(path) {
@@ -90,6 +99,8 @@ function expandHome(path) {
 }
 
 export function loadConfig(env = process.env) {
+  const opencodeDigestPrimaryModel = env.VERA_OPENCODE_MEMORY_DIGEST_PRIMARY_MODEL || DEFAULTS.opencode.memoryDigestPrimaryModel;
+  const opencodeDigestFallbackModel = env.VERA_OPENCODE_MEMORY_DIGEST_QUOTA_FALLBACK_MODEL || DEFAULTS.opencode.memoryDigestQuotaFallbackModel;
   return {
     port: num(env.PORT, DEFAULTS.port),
     dataPath: env.VERA_DATA_PATH || DEFAULTS.dataPath,
@@ -116,10 +127,18 @@ export function loadConfig(env = process.env) {
       daemonPort: num(env.VERA_OPENCODE_DAEMON_PORT, DEFAULTS.opencode.daemonPort),
       idleShutdownMs: num(env.VERA_OPENCODE_IDLE_SHUTDOWN_MS, DEFAULTS.opencode.idleShutdownMs),
       watchdogMs: num(env.VERA_OPENCODE_WATCHDOG_MS, DEFAULTS.opencode.watchdogMs),
+      digestTimeoutMs: num(env.VERA_OPENCODE_MEMORY_DIGEST_TIMEOUT_MS, DEFAULTS.opencode.digestTimeoutMs),
+      memoryDigestQuotaFallbacks: opencodeDigestFallbackModel
+        ? { [opencodeDigestPrimaryModel]: opencodeDigestFallbackModel }
+        : {},
     },
     memory: {
       vaultPath: expandHome(env.VERA_MEMORY_VAULT_PATH || DEFAULTS.memory.vaultPath),
       residentIndexMaxLines: num(env.VERA_MEMORY_INDEX_MAX_LINES, DEFAULTS.memory.residentIndexMaxLines),
+      digestRealtimeThresholdChars: positiveInt(
+        env.VERA_MEMORY_DIGEST_REALTIME_THRESHOLD_CHARS,
+        DEFAULTS.memory.digestRealtimeThresholdChars,
+      ),
     },
     appearance: DEFAULTS.appearance,
     viewCompiler: {

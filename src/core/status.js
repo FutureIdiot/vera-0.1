@@ -65,7 +65,7 @@ export function createStatusTracker({ config, pkgVersion = "0.0.1" }) {
 
     // store 集合计数
     const collections = {};
-    for (const name of ["agents", "accounts", "spaces", "messages", "activities", "approvals", "runs", "themes"]) {
+    for (const name of ["agents", "accounts", "spaces", "messages", "activities", "approvals", "runs", "themes", "memoryDigestJobs"]) {
       collections[name] = store.list(name).length;
     }
 
@@ -96,6 +96,16 @@ export function createStatusTracker({ config, pkgVersion = "0.0.1" }) {
 
     // themes count
     const themesCount = store.list("themes").length;
+
+    const digestJobs = store.list("memoryDigestJobs");
+    memoryStatus.digest = {
+      queued: digestJobs.filter((job) => job.status === "queued").length,
+      running: digestJobs.filter((job) => ["running", "applying"].includes(job.status)).length,
+      failed: digestJobs.filter((job) => job.status === "failed").length,
+      lastSucceededAt: digestJobs
+        .filter((job) => job.status === "succeeded" && job.finishedAt)
+        .sort((a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt))[0]?.finishedAt ?? null,
+    };
 
     return {
       gateway: {

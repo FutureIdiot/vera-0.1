@@ -35,6 +35,7 @@ export async function run(ctx) {
       "isolation.agentState",
       "memory.digestTrigger",
       "memory.digestSchedule",
+      "memory.digestRealtimeThresholdChars",
       "memory.injectionBudgetResidentLines",
       "presentation.bubbleBoundaryPattern",
       "presentation.bubbleMinLength",
@@ -48,6 +49,7 @@ export async function run(ctx) {
     assertEqual(s["isolation.agentState"], "globalVisible");
     assertEqual(s["memory.digestTrigger"], "scheduled");
     assertEqual(s["memory.digestSchedule"], "0 3 * * *");
+    assertEqual(s["memory.digestRealtimeThresholdChars"], 16000);
     assertEqual(s["memory.injectionBudgetResidentLines"], 25);
     assertEqual(s["presentation.bubbleBoundaryPattern"], "\\n\\s*\\n");
     assertEqual(s["presentation.bubbleMinLength"], 1);
@@ -90,6 +92,24 @@ export async function run(ctx) {
     });
     assertEqual(badNumber.status, 400);
     assertEqual(badNumber.json.error.code, "invalid_request");
+
+    const badThreshold = await httpRequest("PATCH", "/api/settings", {
+      settings: { "memory.digestRealtimeThresholdChars": 0 },
+    });
+    assertEqual(badThreshold.status, 400);
+    assertEqual(badThreshold.json.error.code, "invalid_request");
+
+    const fractionalThreshold = await httpRequest("PATCH", "/api/settings", {
+      settings: { "memory.digestRealtimeThresholdChars": 1.5 },
+    });
+    assertEqual(fractionalThreshold.status, 400);
+    assertEqual(fractionalThreshold.json.error.code, "invalid_request");
+
+    const badCron = await httpRequest("PATCH", "/api/settings", {
+      settings: { "memory.digestSchedule": "61 3 * * *" },
+    });
+    assertEqual(badCron.status, 400);
+    assertEqual(badCron.json.error.code, "invalid_request");
 
     const badShape = await httpRequest("PATCH", "/api/settings", {
       notSettings: { "isolation.memory": "globalReadable" },

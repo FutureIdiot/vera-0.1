@@ -9,11 +9,12 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { getEventListeners } from "node:events";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createOpencodeAdapter } from "../../src/adapters/opencode-adapter.js";
+import { MEMORY_DIGEST_OUTPUT_JSON_SCHEMA, validateDigestProposals } from "../../src/memory/memory-proposals.js";
 
 // ---------- stub daemon ----------
 
@@ -21,7 +22,17 @@ async function startStubDaemon() {
   const sessions = new Set();
   let sseClients = [];
   let runHandler = null;
+  let digestHandler = null;
   let sessionCounter = 0;
+  let toolIds = ["bash", "read", "write"];
+  const digestRequests = [];
+  const deletedDigestSessions = [];
+
+  async function readBody(req) {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  }
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -51,6 +62,52 @@ async function startStubDaemon() {
       req.on("close", () => {
         sseClients = sseClients.filter((c) => c !== res);
       });
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/experimental/tool/ids") {
+      digestRequests.push({ kind: "tools", directory: url.searchParams.get("directory") });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: toolIds }));
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/session") {
+      const body = await readBody(req);
+      sessionCounter += 1;
+      const id = `ses_digest_${sessionCounter}`;
+      sessions.add(id);
+      digestRequests.push({ kind: "create", sessionId: id, directory: url.searchParams.get("directory"), body });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: { id } }));
+      return;
+    }
+    const digestMessageMatch = url.pathname.match(/^\/session\/([^/]+)\/message$/);
+    if (req.method === "POST" && digestMessageMatch) {
+      const sessionId = decodeURIComponent(digestMessageMatch[1]);
+      const body = await readBody(req);
+      const request = { kind: "message", sessionId, directory: url.searchParams.get("directory"), body };
+      digestRequests.push(request);
+      if (!digestHandler) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "no digest handler" } }));
+        return;
+      }
+      try {
+        const result = await digestHandler(request);
+        res.writeHead(result?.status ?? 200, { "content-type": "application/json" });
+        res.end(JSON.stringify(result?.body ?? result ?? {}));
+      } catch {
+        if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "stub digest failure" } }));
+      }
+      return;
+    }
+    const digestDeleteMatch = url.pathname.match(/^\/session\/([^/]+)$/);
+    if (req.method === "DELETE" && digestDeleteMatch) {
+      const sessionId = decodeURIComponent(digestDeleteMatch[1]);
+      sessions.delete(sessionId);
+      deletedDigestSessions.push({ sessionId, directory: url.searchParams.get("directory") });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: true }));
       return;
     }
     if (req.method === "POST" && url.pathname === "/control/run") {
@@ -87,6 +144,21 @@ async function startStubDaemon() {
     setRunHandler(fn) {
       runHandler = fn;
     },
+    setDigestHandler(fn) {
+      digestHandler = fn;
+    },
+    setToolIds(ids) {
+      toolIds = ids;
+    },
+    resetDigest() {
+      digestHandler = null;
+      toolIds = ["bash", "read", "write"];
+      digestRequests.length = 0;
+      deletedDigestSessions.length = 0;
+    },
+    digestRequests,
+    deletedDigestSessions,
+    sseClientCount: () => sseClients.length,
     close() {
       return new Promise((resolve) => {
         for (const client of sseClients) client.end();
@@ -190,6 +262,23 @@ function waitFor(predicate, timeoutMs = 3000) {
       }
     }, 20);
   });
+}
+
+function makeDigestCtx({ model = "navy/deepseek-v4-pro", signal } = {}) {
+  return {
+    account: { model, connection: { command: fakeBinary, args: [] } },
+    payload: {
+      agent: { id: "agt_test", name: "T" },
+      chunks: [{ id: "dch_1", messages: [{ messageId: "msg_1", content: "remember this" }] }],
+      facts: [],
+      proposalSchema: { type: "object" },
+    },
+    signal: signal ?? new AbortController().signal,
+  };
+}
+
+function digestSuccess(proposals = []) {
+  return { body: { data: { info: { structured: { proposals } }, parts: [] } } };
 }
 
 // ---------- 用例 ----------
@@ -339,4 +428,266 @@ test("runner args carry -s <sessionId>, --dangerously-skip-permissions and the p
   assert.ok(seenArgs.args.includes("-c"));
   assert.equal(seenArgs.prompt, "只回一个字：好");
   assert.equal(result.content, "done", "零 delta 时 content 用 stdout 兜底");
+});
+
+test("digestMemory uses a fresh isolated session and directory with wildcard/tool deny and structured output", async () => {
+  stub.resetDigest();
+  stub.setToolIds(["bash", "read", "custom.tool"]);
+  stub.setDigestHandler(async () => digestSuccess([{ action: "skip", skipReason: "no_reusable_fact" }]));
+
+  const first = await adapter.digestMemory(makeDigestCtx());
+  const second = await adapter.digestMemory(makeDigestCtx());
+  assert.deepEqual(first.proposals, [{ action: "skip", skipReason: "no_reusable_fact" }]);
+  assert.equal(first.execution.fallbackUsed, false);
+  assert.equal(first.execution.effectiveModel, "navy/deepseek-v4-pro");
+
+  const creates = stub.digestRequests.filter((request) => request.kind === "create");
+  const messages = stub.digestRequests.filter((request) => request.kind === "message");
+  assert.equal(creates.length, 2);
+  assert.equal(messages.length, 2);
+  assert.notEqual(creates[0].sessionId, creates[1].sessionId, "each digest call must create a new session");
+  assert.notEqual(creates[0].directory, creates[1].directory, "each digest call must create a new directory");
+  for (const create of creates) {
+    assert.deepEqual(create.body.permission, [{ permission: "*", pattern: "*", action: "deny" }]);
+    assert.deepEqual(create.body.model, { id: "deepseek-v4-pro", providerID: "navy" });
+  }
+  for (const request of messages) {
+    assert.deepEqual(request.body.tools, { bash: false, read: false, "custom.tool": false });
+    assert.equal(request.body.format.type, "json_schema");
+    assert.equal(request.body.format.retryCount, 2);
+    assert.equal(request.body.format.schema.type, "object");
+    assert.equal(request.body.parts[0].text.includes('"proposalSchema"'), false, "schema must not be duplicated in prompt text");
+    assert.deepEqual(request.body.model, { providerID: "navy", modelID: "deepseek-v4-pro" });
+    assert.equal(request.directory, creates.find((create) => create.sessionId === request.sessionId).directory);
+  }
+  assert.deepEqual(stub.deletedDigestSessions.map((item) => item.sessionId).sort(), creates.map((item) => item.sessionId).sort());
+  for (const create of creates) {
+    await assert.rejects(() => stat(create.directory), (error) => error.code === "ENOENT");
+  }
+  assert.equal(second.execution.attempts, 1, "primary success must not use fallback");
+});
+
+test("digestMemory rejects a missing provider/model id as executor_unavailable", async () => {
+  await assert.rejects(
+    () => adapter.digestMemory(makeDigestCtx({ model: "deepseek-v4-pro" })),
+    (error) => error.code === "executor_unavailable",
+  );
+});
+
+test("digestMemory quota exhaustion retries once in a new session with the configured free model", async () => {
+  for (const quotaError of [
+    { status: 402, error: { name: "APIError", data: { statusCode: 402, responseBody: '{"error":{"code":"quota_exhausted"}}' } } },
+    { status: 429, error: { name: "APIError", data: { statusCode: 429, responseBody: '{"error":{"code":"insufficient_quota"}}' } } },
+  ]) {
+    stub.resetDigest();
+    const fallbackAdapter = createOpencodeAdapter({ config: adapterConfig({
+      memoryDigestQuotaFallbacks: { "navy/deepseek-v4-pro": "opencode/deepseek-v4-flash-free" },
+    }) });
+    extraAdapters.push(fallbackAdapter);
+    stub.setDigestHandler(async ({ body }) => {
+      if (body.model.providerID === "navy") return { status: quotaError.status, body: { error: quotaError.error } };
+      return digestSuccess([]);
+    });
+
+    const result = await fallbackAdapter.digestMemory(makeDigestCtx());
+    assert.deepEqual(result.execution, {
+      adapter: "opencode",
+      primaryModel: "navy/deepseek-v4-pro",
+      effectiveModel: "opencode/deepseek-v4-flash-free",
+      fallbackUsed: true,
+      fallbackReason: "quota_exhausted",
+      attempts: 2,
+    });
+    const creates = stub.digestRequests.filter((request) => request.kind === "create");
+    assert.equal(creates.length, 2);
+    assert.notEqual(creates[0].sessionId, creates[1].sessionId);
+    assert.deepEqual(creates.map((request) => request.body.model), [
+      { id: "deepseek-v4-pro", providerID: "navy" },
+      { id: "deepseek-v4-flash-free", providerID: "opencode" },
+    ]);
+  }
+});
+
+test("ordinary 429, 401, and invalid structured output never trigger quota fallback", async () => {
+  const cases = [
+    async () => ({ status: 402, body: { error: { name: "APIError", data: { statusCode: 402, message: "payment required" } } } }),
+    async () => ({ status: 429, body: { error: { name: "APIError", data: { statusCode: 429, message: "rate limited, retry later" } } } }),
+    async () => ({ status: 401, body: { error: { name: "ProviderAuthError", data: { statusCode: 401, message: "unauthorized" } } } }),
+    async () => ({ body: { data: { info: { structured: { wrong: [] } }, parts: [] } } }),
+  ];
+  for (const handler of cases) {
+    stub.resetDigest();
+    const noFallbackAdapter = createOpencodeAdapter({ config: adapterConfig({
+      memoryDigestQuotaFallbacks: { "navy/deepseek-v4-pro": "opencode/deepseek-v4-flash-free" },
+    }) });
+    extraAdapters.push(noFallbackAdapter);
+    stub.setDigestHandler(handler);
+    await assert.rejects(() => noFallbackAdapter.digestMemory(makeDigestCtx()), (error) => error.code === "executor_failed");
+    assert.equal(stub.digestRequests.filter((request) => request.kind === "create").length, 1);
+  }
+});
+
+test("a local Ollama model never uses the Navy quota fallback mapping", async () => {
+  stub.resetDigest();
+  const localModel = "ollama/gemma4:e4b";
+  const noLocalFallbackAdapter = createOpencodeAdapter({ config: adapterConfig({
+    memoryDigestQuotaFallbacks: { [localModel]: "opencode/deepseek-v4-flash-free" },
+  }) });
+  extraAdapters.push(noLocalFallbackAdapter);
+  stub.setDigestHandler(async () => ({
+    status: 402,
+    body: { error: { name: "APIError", data: { statusCode: 402, type: "quota_exhausted" } } },
+  }));
+  await assert.rejects(
+    () => noLocalFallbackAdapter.digestMemory(makeDigestCtx({ model: localModel })),
+    (error) => error.code === "executor_failed",
+  );
+  assert.equal(stub.digestRequests.filter((request) => request.kind === "create").length, 1);
+});
+
+test("digestMemory rejects any tool event even when the REST response would succeed", async () => {
+  stub.resetDigest();
+  stub.setDigestHandler(async ({ sessionId }) => {
+    await waitFor(() => stub.sseClientCount() > 0);
+    stub.emit("message.part.updated", {
+      sessionID: sessionId,
+      part: { type: "tool", tool: "bash", callID: "forbidden", state: { status: "pending" } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return digestSuccess([]);
+  });
+  await assert.rejects(() => adapter.digestMemory(makeDigestCtx()), (error) => error.code === "executor_failed");
+  assert.equal(stub.digestRequests.filter((request) => request.kind === "create").length, 1);
+});
+
+test("digestMemory aborts and cleans its independent session/directory", async () => {
+  stub.resetDigest();
+  stub.setDigestHandler(async () => new Promise(() => {}));
+  const controller = new AbortController();
+  const pending = adapter.digestMemory(makeDigestCtx({ signal: controller.signal }));
+  await waitFor(() => stub.digestRequests.some((request) => request.kind === "message"));
+  const directory = stub.digestRequests.find((request) => request.kind === "create").directory;
+  controller.abort();
+  await assert.rejects(pending, (error) => error.code === "cancelled");
+  await assert.rejects(() => stat(directory), (error) => error.code === "ENOENT");
+  assert.equal(stub.deletedDigestSessions.length, 1);
+});
+
+test("digestMemory enforces its own timeout without changing chat watchdog behavior", async () => {
+  stub.resetDigest();
+  const timeoutAdapter = createOpencodeAdapter({ config: adapterConfig({ digestTimeoutMs: 50 }) });
+  extraAdapters.push(timeoutAdapter);
+  stub.setDigestHandler(async () => new Promise(() => {}));
+  await assert.rejects(() => timeoutAdapter.digestMemory(makeDigestCtx()), (error) => error.code === "timed_out");
+  assert.equal(stub.deletedDigestSessions.length, 1);
+});
+
+test("opt-in real local Ollama Gemma digestMemory smoke through OpenCode", {
+  skip: process.env.VERA_TEST_OLLAMA !== "1" ? "set VERA_TEST_OLLAMA=1 after starting Ollama" : false,
+  timeout: 190_000,
+}, async () => {
+  const binary = process.env.VERA_OPENCODE_BIN || "/Users/theta/.opencode/bin/opencode";
+  const model = process.env.VERA_TEST_OLLAMA_MODEL || "ollama/gemma4:e4b";
+  const realAdapter = createOpencodeAdapter({ config: {
+    binary,
+    daemonPort: 0,
+    idleShutdownMs: 60_000,
+    watchdogMs: 180_000,
+    digestTimeoutMs: 180_000,
+    healthCheckTimeoutMs: 20_000,
+    shutdownGraceMs: 5_000,
+    memoryDigestQuotaFallbacks: {},
+  } });
+  try {
+    const result = await realAdapter.digestMemory({
+      account: { model, connection: { command: binary, args: [] } },
+      payload: {
+        agent: { id: "agt_gemma_smoke", name: "Gemma Smoke" },
+        chunks: [{
+          id: "dch_gemma_smoke",
+          messages: [{
+            messageId: "msg_gemma_smoke",
+            author: { type: "user" },
+            target: { type: "broadcast" },
+            content: "请记住：Vera 的手工测试端口是 3210。",
+            createdAt: "2026-07-13T00:00:00.000Z",
+          }],
+        }],
+        facts: [],
+        proposalSchema: MEMORY_DIGEST_OUTPUT_JSON_SCHEMA,
+      },
+      signal: AbortSignal.timeout(180_000),
+    });
+    assert.equal(result.execution.effectiveModel, model);
+    assert.equal(result.execution.fallbackUsed, false);
+    validateDigestProposals({
+      proposals: result.proposals,
+      messages: [{ id: "msg_gemma_smoke", spaceId: "spc_smoke", status: "completed", content: "请记住：Vera 的手工测试端口是 3210。" }],
+      agentId: "agt_gemma_smoke",
+      spaceId: "spc_smoke",
+      jobId: "mdj_gemma_smoke",
+    });
+  } finally {
+    await realAdapter.shutdown();
+  }
+});
+
+test("opt-in real OpenCode digestMemory smoke", {
+  skip: process.env.VERA_TEST_OPENCODE !== "1" ? "set VERA_TEST_OPENCODE=1 to spend a real model request" : false,
+  timeout: 190_000,
+}, async () => {
+  const binary = process.env.VERA_OPENCODE_BIN || "/Users/theta/.opencode/bin/opencode";
+  const primaryModel = process.env.VERA_TEST_OPENCODE_PRIMARY_MODEL || "navy/deepseek-v4-pro";
+  const fallbackModel = process.env.VERA_TEST_OPENCODE_FALLBACK_MODEL || "opencode/deepseek-v4-flash-free";
+  const realAdapter = createOpencodeAdapter({
+    config: {
+      binary,
+      daemonPort: 0,
+      idleShutdownMs: 60_000,
+      watchdogMs: 180_000,
+      digestTimeoutMs: 180_000,
+      healthCheckTimeoutMs: 20_000,
+      shutdownGraceMs: 5_000,
+      memoryDigestQuotaFallbacks: { [primaryModel]: fallbackModel },
+    },
+  });
+  try {
+    const result = await realAdapter.digestMemory({
+      account: { model: primaryModel, connection: { command: binary, args: [] } },
+      payload: {
+        agent: { id: "agt_smoke", name: "Smoke" },
+        chunks: [{
+          id: "dch_smoke",
+          fromMessageId: "msg_smoke",
+          toMessageId: "msg_smoke",
+          messageCount: 1,
+          charCount: 26,
+          messages: [{
+            messageId: "msg_smoke",
+            author: { type: "user" },
+            target: { type: "broadcast" },
+            content: "请记住：Vera 的测试颜色是蓝色。",
+            createdAt: "2026-07-13T00:00:00.000Z",
+          }],
+        }],
+        facts: [],
+        proposalSchema: MEMORY_DIGEST_OUTPUT_JSON_SCHEMA,
+      },
+      signal: AbortSignal.timeout(180_000),
+    });
+    assert.ok(Array.isArray(result.proposals));
+    assert.equal(result.execution.adapter, "opencode");
+    assert.equal(result.execution.primaryModel, primaryModel);
+    assert.ok([primaryModel, fallbackModel].includes(result.execution.effectiveModel));
+    assert.equal(result.execution.attempts, result.execution.fallbackUsed ? 2 : 1);
+    validateDigestProposals({
+      proposals: result.proposals,
+      messages: [{ id: "msg_smoke", spaceId: "spc_smoke", status: "completed", content: "请记住：Vera 的测试颜色是蓝色。" }],
+      agentId: "agt_smoke",
+      spaceId: "spc_smoke",
+      jobId: "mdj_smoke",
+    });
+  } finally {
+    await realAdapter.shutdown();
+  }
 });

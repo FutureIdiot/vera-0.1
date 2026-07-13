@@ -38,7 +38,10 @@ import {
   backupSplitFilesAsLegacy,
 } from "./migrations/agent-account.mjs";
 
-const COLLECTIONS = ["agents", "accounts", "spaces", "messages", "activities", "approvals", "runs", "themes"];
+const COLLECTIONS = [
+  "agents", "accounts", "spaces", "messages", "activities", "approvals", "runs", "themes",
+  "memoryDigestJobs",
+];
 
 // 内存键 -> 目录内文件名
 const FILE_NAMES = {

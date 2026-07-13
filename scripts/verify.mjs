@@ -42,6 +42,7 @@ import * as f1Extensions from "../test/checks/f1-extensions.mjs";
 import * as pathMigrations from "../test/checks/path-migrations.mjs";
 import * as f3WebCore from "../test/checks/f3-web-core.mjs";
 import * as f4WebManagement from "../test/checks/f4-web-management.mjs";
+import * as memoryDigest from "../test/checks/memory-digest.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..");
@@ -134,6 +135,7 @@ async function main() {
   await speakerView.run(ctx);
   await responseRules.run(ctx);
   await settings.run(ctx);
+  await memoryDigest.run(ctx);
   await f1Extensions.run(ctx);
   await f3WebCore.run(ctx);
   await f4WebManagement.run(ctx);

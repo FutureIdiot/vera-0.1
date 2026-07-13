@@ -1,8 +1,8 @@
 # Adapter 接口契约
 
-> 本文是 **agent daemon ↔ gateway** 通信协议的唯一基准（2026-07-11 纯私网修订，见 ground-truth 2.4）。
-> 核心承诺：**gateway 不 spawn 任何 agent 进程；agent daemon 在远端独立活着，gateway 只通过 HTTP/SSE 与它通讯**。
-> 旧形态（gateway 同机 spawn CLI 的"adapter 模块"）已迁移至文末附录 A 作历史参考，不再有效；新代码只认本文正文。
+> 本文同时规定 **provider adapter 行为契约** 与 Phase 5.5 的 **agent daemon ↔ gateway** 通信协议（2026-07-14修订，见 ground-truth 2.4）。
+> 目标形态的核心承诺是：**gateway 不 spawn 任何 agent 进程；agent daemon 在远端独立活着，gateway 只通过 HTTP/SSE 与它通讯**。
+> Phase 5.5 落地前，Phase 2–5 代码仍由文末附录 A 的进程内 adapter 承载真实执行；它不是最终部署形态，但在迁移完成前仍是有效实现契约。新 provider 必须先满足本文 1.2 的行为与验收规范，并能逐项翻译到 daemon 协议，不能以“以后会迁移”为由跳过当前闭环。
 
 ---
 
@@ -44,10 +44,21 @@ Vera gateway (VPS, 7×24)
 - **Account 是活跃 Execution 的独占租约单元**：同一`accountId`同一时刻最多有一个`running` Execution；`pending`只表示排队，尚未持有租约。gateway在Run进入`running`前原子获取租约，在`completed`/`failed`/`cancelled`时释放；Account忙时必须排队或明确拒绝，不得通过“让整个Agent切换账户并重登”绕过。
 - **Account 1:1 Workspace**：`workspacePath`、供应商会话、`sessionState`、RuntimeCapabilities 及 CLI/API 运行时数据都随 Account 走，不挂在 Agent 上。`sessionState` 的持久化键仍为 `(accountId, spaceId)`；同一 Account 不得声明多个 Workspace。
 - **Memory 随 Agent，不随 Account**：主 Execution 与它派生的 subagent Execution 只要仍以同一 `agentId` 行动，就读取同一份 per-Agent Memory；更换 Execution 的 `accountId` 不复制、迁移或切换 Memory。
+- **Memory digest executor 与聊天 run 隔离**：M2 整理执行者接收 gateway 给出的确定性 Message chunks、既有 Memory 摘要和严格 JSON proposal schema，只返回 proposal；它不得复用或改写聊天 `sessionState`，不得发 Message/Activity、调用 Tools、读取 Workspace 或直接写 store/vault。可信adapter控制层可以读取Account的provider/model/connection来选择本机执行路径，但这些字段和secret不得进入模型payload。adapter 若不能提供这种无工具、结构化、隔离执行能力，job 明确失败为 `executor_unavailable`，不得退化为普通聊天 `run(ctx)`。
+
+M2 adapter可选方法为`digestMemory({ account, payload, signal }) -> Promise<{ proposals, execution? }>`。`account`只供可信adapter控制层读取`id/kind/provider/connection/model`；`payload`严格为`{agent:{id,name},chunks,facts,proposalSchema}`，这是唯一可送入模型执行请求的内容，不含Account、connection、secret、sessionState、workspacePath、回调或写能力。完整`proposalSchema`或由它确定性派生的provider-compatible transport schema必须经provider structured-output通道传递；完整Schema不在用户文本中重复序列化，且gateway完整validator始终是写入权威。实现必须使用独立无工具会话，遵守signal取消与配置超时，只返回可JSON序列化对象；`execution`若返回，只允许`{adapter,primaryModel,effectiveModel,fallbackUsed,fallbackReason,attempts}`安全路由元数据。provider原始错误由digest service折叠为安全`executor_failed`。Agent的Home Account provider/model仍是当前唯一primary选择；程序分块与gateway写入是固定安全边界，不伪装成可替换插件。adapter未实现该方法时明确`executor_unavailable`。
+
+OpenCode实现只服务`kind=cli, provider=opencode`的Account：每次digest attempt创建独立临时目录与session，session权限全量deny，同时把daemon实际列出的每个tool id显式设为false；任何tool事件都视为契约违规并失败。结果只接受structured response，不从聊天stdout或Markdown猜proposal。
+
+本机Gemma是另一条独立Account：`kind=api, provider=ollama, model=gemma4:e4b`，由完整的原生Ollama adapter直接调用Account `connection.baseUrl`下的HTTP API，不经过OpenCode CLI/daemon，不共享Account、sessionState、连接或额度后备。该adapter必须同时实现聊天`run(ctx)`和隔离的`digestMemory(...)`，不得做成只能整理Memory的残缺provider。
+
+Ollama 0.23.2实测会在把Vera完整proposal schema转换为grammar时被`oneOf`/`patternProperties`/部分`pattern`组合触发进程崩溃。Ollama adapter必须把gateway权威`proposalSchema`下沉为该版本可接受的基础结构schema，禁止把已知不兼容关键字原样发送；该下沉只约束provider输出，不改变Vera契约。模型返回后仍必须由gateway完整proposal validator复核，provider返回200或合法JSON不等于写入合法。未来Ollama版本只有通过1.2的schema能力探针和真实smoke后才能放宽下沉规则，不能按版本号猜测。
+
+OpenCode Memory digest的额度后备由gateway运行配置映射，不进入Account API或Settings UI。只有402/403/429结构化错误的`code/type`精确为`insufficient_quota`、`quota_exhausted`或`quota_exceeded`时，adapter才规范化为`quota_exhausted`，允许丢弃primary残片并用相同不可变payload在新session中重试一次；HTTP状态或自由文本本身不是额度证据。取消、超时、网络、认证、模型不存在、普通rate limit、provider 5xx、坏JSON或非法proposal均不得fallback。后备失败仍由digest service安全折叠。聊天`run(ctx)`永远只使用`account.model`且不读取该映射。
 
 因此，daemon 是一个 Agent 的长连接执行宿主，可同时管理多个已授权 Account 的独立 runtime；登录用于拉齐“这个 Agent 可驾驶哪些 Account”，不是把整个 Agent 切换到某个 Account。
 
-**Gateway 与 daemon 的职责切分**：
+**Gateway 与 daemon 的职责切分（Phase 5.5目标形态）**：下表不描述Phase 2–5当前进程内承载，现状差异以附录A为准。
 
 | 职责 | Gateway | Daemon |
 |---|---|---|
@@ -63,6 +74,57 @@ Vera gateway (VPS, 7×24)
 | sessionState 真值 | 按 `(accountId, spaceId)` 备份兜底 | 每个 Account runtime 在线时持有最新副本 |
 
 上表中的“MCP”默认指第三方或本机MCP；Vera Memory MCP是gateway第一方能力，不属于Account Workspace。Phase 5先实现只接受可信内部`agentId/run/source`上下文的tool dispatcher；Phase 5.5 agent token落地后再绑定私网Streamable HTTP transport。daemon不得在tool参数中提交或切换`agentId`，subagent Execution即使换Account也沿用同一Agent的Memory MCP身份。
+
+### 1.2 Provider adapter 创建与一致性规范
+
+本节规范“如何接一个新provider”，目的是把可重复的边界错误前移到固定验收，不承诺消除provider/version自身的协议差异。
+
+**adapter复用单位**：adapter对应一套真实的provider协议与运行生命周期，不对应单个Account、endpoint或model。多个Ollama Account和`gemma4:e4b`、Qwen、Llama等模型共用一个`ollama` adapter；多个OpenCode Account和模型共用一个`opencode` adapter。鉴权值、base URL、model及可配置参数能仅靠Account/config数据表达、无需在共享代码中按provider名称分支时，应复用既有adapter。若stream帧、会话连续性、tool loop、错误形状、取消清理或structured-output下沉需要provider专属解析与状态机，则新建该provider adapter。不得为单个模型复制adapter，也不得用兼容别名把两个协议伪装成同一provider。
+
+**第一版结构保持显式**：当前形态使用`src/adapters/<provider>-adapter.js`与镜像的`test/adapters/<provider>-adapter.test.js`，由`server.js`显式import并加入普通`provider -> adapter`对象。不得增加`BaseAdapter`、动态注册表、capability DSL或尚无第二个真实用例的`openai-compatible`抽象；未来daemon只迁移承载位置，以下provider翻译、会话、错误和安全语义不变。
+
+每个adapter文件开头必须用短注释声明并由测试覆盖：
+
+- 接受的Account `kind/provider`，错配必须在发请求前fail-fast；
+- transport与已实测provider/runtime版本；
+- 会话连续性形态（外部session id、resume id或可序列化API history）；
+- stream事件到`onDelta/onActivity`的映射；
+- tool/Approval能力，或明确“无tool loop”；
+- structured-output能力与需要下沉/禁用的JSON Schema关键字；
+- provider/model的已验证上下文容量、容量配置方式与确定性history裁剪策略；
+- 取消、超时、临时资源和`shutdown()`清理方式；
+- provider错误到Vera错误码的映射，及是否存在经过契约批准的provider专属fallback。
+
+**当前进程内factory行为**（Phase 5.5前有效）：
+
+```js
+createProviderAdapter({ config }) -> {
+  run(ctx),              // 生产Account provider必需
+  digestMemory?(input),  // 该Home Account承担M2时必需
+  shutdown?()
+}
+```
+
+- `run(ctx)`沿附录A入参与返回形状。adapter必须按provider顺序把每段文本恰好一次交给`onDelta`；若产生delta，其拼接文本必须与最终`content`语义一致，无delta时才允许仅以`content`兜底。`sessionState`必须是可JSON序列化的provider私有值：CLI通常保存外部session id，API通常保存稳定history；新会话建立后立即`persistSessionState`，结束时在返回值再次给出。失效会话必须明确报告`session-reset`后重建，不得静默丢上下文。sessionState不得含secret、临时目录或无需持久化的宿主绝对路径。
+- adapter不得依赖provider静默截断当前`prompt.text`或digest payload。chat超限时只能按冻结规则确定性裁剪最旧history，不得丢当前prompt；即使清空history仍放不下时，必须在请求前明确失败，或使用已经真实smoke验证的provider容量配置（例如Ollama `num_ctx`）。digest payload是不可变输入，adapter不得自行丢chunks/facts/schema来适配容量；放不下就在provider请求前失败。
+- 任何可作为Home Account聊天provider的adapter都必须实现`run(ctx)`；不能为了Memory整理新建digest-only provider。`digestMemory`可以是可选能力，但若该Agent的Home Account要承担M2则必须实现，否则明确`executor_unavailable`。
+- adapter不得读写gateway store、Memory vault或Space状态，也不得自行选择另一个Account/model重试。它只翻译当前Account和gateway给出的ctx/payload；provider专属fallback必须先写入本文，并且不能影响聊天模型或下一job。
+
+**structured-output下沉**：gateway给出的完整`proposalSchema`和`validateDigestProposals`始终是唯一写入权威。adapter可以根据已实测provider能力生成兼容的transport schema，例如去掉Ollama 0.23.2会崩溃的组合关键字，保留根对象、字段类型、允许action和基础结构约束；但不得用测试专用`const`把真实action或字段值锁死，不得修改冻结payload，也不得把简化schema当成最终校验。完整schema不在用户prompt中重复。provider的200、合法JSON或transport schema通过都只能产生待gateway复核的proposal；坏JSON/坏envelope归adapter执行失败，合法envelope但proposal违反完整契约时由gateway以`invalid_proposal`拒绝且vault零变化。
+
+**错误、取消和secret**：
+
+- chat run只向gateway抛`cancelled/timed_out/unavailable/provider_error/internal`语义。digest adapter内部可区分`timed_out`，但digest service对公共job只保留`executor_unavailable`与`cancelled`，其他provider执行错误包括超时统一折叠为`executor_failed`。provider原始body、含凭证URL、header、key和宿主路径不得进入公共错误、日志、sessionState或API响应。
+- 必测pre-abort与mid-flight abort。HTTP adapter中断fetch/stream reader，CLI adapter终止完整进程树；两者都必须在`finally`移除listener/timer并清理临时session/目录。`shutdown()`若存在必须幂等且等待在飞清理或明确取消。
+- secret只在可信控制层按`connection.secretRef`解析并放入provider请求；不得进入prompt、回调、activity或测试快照。chat只上报provider真实tool事件并遵守Approval；digest一律无Tools/Workspace。API provider没有本地tool loop时不得宣称`fs.*`或`process.execute`能力。
+
+**每个新adapter的三层合入闸门**：
+
+1. **stub协议单测（必跑、无真实服务）**：固定覆盖kind/provider错配、首轮与续轮、失效会话、碎片化stream顺序、content兜底、provider错误归一、pre/mid abort、timeout、secret不外泄、临时资源与幂等shutdown，以及容量边界下确定history裁剪且当前prompt不得静默丢失。实现`digestMemory`时再覆盖独立session/history、无Tools/Workspace、不可变payload容量边界、transport schema兼容快照、合法envelope、坏JSON/坏结构、取消和超时；gateway权威validator的create/update/supersede/archive/skip与非法proposal零写入仍由Memory pipeline测试负责，adapter测试不得复制第二套validator。
+2. **临时gateway黑盒（必跑）**：使用临时data/vault和固定fixture，经真实Account路由验证聊天delta/sessionState与digest job安全摘要、失败零写入；不得连接真实用户数据或借另一个adapter完成请求。
+3. **真实provider smoke（显式执行、普通`npm test`默认skip）**：每个provider/runtime版本至少运行一次chat和一次digest，记录model、transport、版本、容量配置、耗时与安全摘要；断言实际直连该provider且当前prompt/digest payload未被静默截断。另跑版本相关能力探针，至少覆盖模型可用、stream、abort和本adapter实际会发送的JSON Schema安全子集。已知可能令provider崩溃的关键字只能在可丢弃的隔离实例做能力探针，不得向共享/常驻实例盲测。真实smoke不能被stub替代，但不得成为发现基础接口错误的第一层手段。
+
+只有三层均通过，才能在`plan.md`把该adapter标为可用。provider升级若改变stream、错误或Schema能力，先重跑真实能力探针；失败时收紧该adapter的provider profile，不改gateway权威契约，也不把临时兼容分支扩散到其他adapter。
 
 ## 二、Daemon 接入协议
 
@@ -228,7 +290,7 @@ daemon 向 gateway 报 run 失败时 PATCH `error: { code, message }`：
 - **spawn**：daemon 在本机 spawn CLI 一律走 `src/core/spawn.js` 同款的 PATH 修正 + kill 树逻辑（搬运参考，salvage-notes 第一节第 3 条）。daemon 是独立进程，可以从 Vera 仓库 import 这套工具。
 - **无交互模式**：CLI 必须以无交互参数运行（opencode `--dangerously-skip-permissions`、CC print 模式等），**禁止让 CLI 弹出选项式提问**。需要用户点头的危险操作走 `requestApproval`；其他问题让 agent 正常发消息问。
 - **常驻资源**：CLI daemon（opencode serve）等长命资源是 daemon 内部实现细节，daemon 自己管空闲回收、SIGTERM 关停，gateway 不帮忙清理。
-- **secrets**：API 型 daemon 只能为当前 Execution 的 `accountId` 通过 `account.connection.secretRef` 向 gateway（或 VPS 本地 `~/.vera/secrets.json`）换取明文 key，只存在于该 Account runtime 内存，不落日志、不进 sessionState。
+- **secrets**：API型Account的`secretRef`非null时，daemon只能为当前Execution的`accountId`向gateway（或VPS本地`~/.vera/secrets.json`）换取明文key，只存在于该Account runtime内存，不落日志、不进sessionState；`secretRef=null`表示provider无鉴权（如本机Ollama），adapter不得虚构或复用其他Account凭据。
 - **网络路径**：daemon 的 HTTP、SSE、心跳和重连全部固定走 Tailscale 私网 base URL。Mac 使用小火箭承载 Tailscale 时，daemon 不感知客户端品牌，只要求 MagicDNS、tailnet 路由与长连接真实可用；不得在私网失败时静默 fallback 到公网域名。
 - **缓存纪律**（ground truth 6 技术约束）：
   - CLI 型：**必须复用会话**（sessionState 机制的本意）。禁止退化成"每条消息新开会话、把历史拼进 prompt 重放"——那样供应商侧 prompt cache 全部落空，多轮成本近似平方增长。
@@ -243,7 +305,7 @@ daemon 启动后在 daemon 那一侧维护一个 `opencode serve` 进程，sessi
 
 | 接口点 | 映射 |
 |---|---|
-| daemon 启动 | 读 `account.connection.command`（联邦前的字段，daemon 自己用作"用哪个 opencode binary"提示）→ 惰性起 `opencode serve` daemon → 健康 check 通过 → `POST /api/agent/login` |
+| daemon 启动 | 从daemon宿主本机runtime配置解析OpenCode binary，Account只提供provider/model等逻辑信息 → 惰性起 `opencode serve` daemon → 健康 check 通过 → `POST /api/agent/login` |
 | 收到 `run.requested` | sessionState.externalSessionId 存在 → `GET /api/session/:id` 验证 → 失效则新建并 `POST /api/agent/sync-state` 备份 → spawn `opencode run --attach <daemonUrl> -c -s <sessionId> --dangerously-skip-permissions <promptText>` 短命子进程 |
 | SSE poller | daemon 维护一条对 opencode daemon 的 SSE 长连接，按 `data.sessionID` 路由到对应在飞 run |
 | 流式输出 | opencode SSE `message.part.delta` (field=text) → `POST /api/agent/runs/:id/delta` |
@@ -266,16 +328,17 @@ daemon 启动后在 daemon 那一侧维护一个 `opencode serve` 进程，sessi
 | 会话失效 | resume 报错（id 过期/被清理） → 去掉 `--resume` 重跑 + 上报 `session-reset` |
 | 关停 | 心跳缺失 → 杀在飞 claude 进程 → PATCH failed → exit(0) |
 
-### 示例 C：API 型（无 CLI 进程）
+### 示例 C：原生Ollama API型（Gemma，无CLI进程）
 
 | 接口点 | 映射 |
 |---|---|
-| daemon 启动 | `POST /api/agent/login`；本地仅持有 secrets + HTTP 客户端 |
-| 收到 `run.requested` | 从 sessionState 取历史气泡 + system 提示 → 拼 messages 数组 → 调供应商 `/v1/messages` 流式接口 → 解析 stream 事件 |
-| 流式输出 | provider 的 text delta → `POST .../delta` |
-| Activity | provider 的 tool_use → `POST .../activities`（如有） |
-| 完成 | stream 关闭 → PATCH completed → sync-state 备份历史气泡数组 |
-| 关停 | 心跳缺失 → 中断 HTTP 请求 → PATCH failed → exit(0)。无常驻进程可杀 |
+| daemon 启动 | 校验Account为`kind=api, provider=ollama`，读取`connection.baseUrl`；`secretRef`允许为null；`POST /api/agent/login` |
+| 收到 `run.requested` | 从该Account的sessionState取稳定history，追加本轮`promptText`，直接`POST <baseUrl>/api/chat`，model只取`account.model`，不调用OpenCode |
+| 流式输出 | Ollama逐行JSON中的`message.content`非空片段按顺序各上报一次`POST .../delta`；`done:true`只结束，不重复正文 |
+| Activity | 当前Ollama adapter无本地tool loop，不上报虚构tool Activity或`fs/process`能力 |
+| 完成 | stream正常结束 → 把本轮user/assistant追加到可序列化history → PATCH completed → sync-state备份；provider usage若存在只进安全usage记录 |
+| 会话失效 | sessionState不是预期history形状时明确上报`session-reset`并从空history开始，不借用其他Account历史 |
+| 关停 | 心跳缺失或Run取消 → abort HTTP请求/reader → PATCH对应状态 → exit(0)；无常驻CLI进程可杀 |
 
 ### 示例 D：mock adapter（Phase 2 已实现，verify.mjs 使用）
 
@@ -287,17 +350,18 @@ daemon 启动后在 daemon 那一侧维护一个 `opencode serve` 进程，sessi
 
 ---
 
-## 附录 A：历史形态（Phase 2-4.1 已落地，Phase 5.5 后作废）
+## 附录 A：当前进程内承载形态（Phase 2–5有效，Phase 5.5迁移后退役）
 
-> 此附录仅供阅读旧代码（`src/adapters/opencode-adapter.js`、`src/adapters/mock-adapter.js`、`src/spaces/run-controller.js` 的 `executeRun`）时对照，**Phase 5.5 落地后这段代码会被替换**。
+> 当前`src/adapters/*-adapter.js`与`src/spaces/run-controller.js`仍通过本接口执行Phase 2–5真实运行和测试；Phase 5.5只把同一provider driver迁入agent daemon，迁移验收完成后本承载形态才退役。1.2的行为、错误、安全与conformance规范在迁移前后都有效。
 
-旧形态：gateway 进程内部加载 adapter 模块（`createOpencodeAdapter({ config })`），`run-controller.js` 的 `executeRun` 同步调用 `adapter.run(ctx)`，adapter 在 gateway 同机 spawn CLI 子进程。
+当前过渡形态：gateway进程内部显式加载adapter模块，`run-controller.js`的`executeRun`调用`adapter.run(ctx)`；CLI adapter可在gateway同机spawn进程，API adapter直接发HTTP请求。
 
 ```js
-// 旧形态示例（已作废）
+// Phase 5当前factory形状；Phase 5.5迁移承载位置后退役
 export function createOpencodeAdapter({ config }) {
   return {
     async run(ctx) { /* spawn opencode run --attach ... */ },
+    async digestMemory(input) { /* optional isolated structured execution */ },
     async shutdown() { /* kill daemon */ }
   };
 }
@@ -305,9 +369,9 @@ export function createOpencodeAdapter({ config }) {
 
 `run(ctx)` 入参 `{ agent, account, prompt: { text }, sessionState, workspacePath, onDelta, onActivity, requestApproval, persistSessionState, signal }`。adapter 通过 `onDelta` / `onActivity` 回调上报，通过返回值 `{ content, sessionState }` 兜底。
 
-**联邦形态如何翻译**：
+**Phase 5.5联邦形态如何逐项翻译**：
 
-| 旧形态 | 新形态对应 |
+| Phase 2–5当前进程内形态 | Phase 5.5 daemon对应 |
 |---|---|
 | `createOpencodeAdapter({ config })` | `scripts/agent-daemon.js`（独立进程，opencode daemon 在它内部管） |
 | `adapter.run(ctx)` | daemon 收 `run.requested` → spawn CLI → 走 run 生命周期 |
@@ -320,6 +384,8 @@ export function createOpencodeAdapter({ config }) {
 | `adapter.shutdown()` | daemon `exit(0)` 时自管的资源回收（杀 CLI daemon 等） |
 | `ctx.agent / ctx.account / ctx.prompt.text` | `run.requested` 事件 data 字段 |
 
-旧形态的"两映射示例"（OpenCode daemon / Claude Code resume）的行为约束仍成立——只是协议载体从"进程内函数调用"换成"HTTP/SSE 跨进程消息"。附录中的两个表格作为 daemon 实现的对照参考保留。
+`digestMemory`暂无可用的daemon wire对应。Phase 5.5必须先在本文冻结专用digest request/result内部通道、取消/超时、安全摘要与OpenCode fallback配置传递，并完成迁移验收后，才能退役进程内digest adapter。该通道不得复用聊天`run.requested`、Message/Activity或聊天`sessionState`；wire冻结前，digest仍由Phase 2–5进程内adapter承载。
+
+Phase 2–5形态的三类provider映射示例（OpenCode daemon / Claude Code resume / 原生Ollama API）行为约束仍成立——Phase 5.5只把协议载体从"进程内函数调用"换成"HTTP/SSE 跨进程消息"。上述表格作为daemon实现的对照参考保留。
 
 `docs/salvage-notes.md` 第五节记录的 cloudflared 边缘漂移假活是 2026-07-04 联邦决策的导火索；2026-07-11 纯私网修订直接移除了 cloudflared 与公网入口。历史只用于排查旧部署，不再建设 tunnel watchdog。

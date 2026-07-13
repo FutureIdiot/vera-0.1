@@ -3,7 +3,7 @@
 import { asHandler, readJsonBody, sendJson, sendNoContent } from "../api/http.js";
 import { ApiError } from "../core/errors.js";
 
-export function registerMemoryRoutes(router, { memory, store }) {
+export function registerMemoryRoutes(router, { memory, store, digestService = null }) {
   function requireAgent(agentId) {
     const agent = store.find("agents", agentId);
     if (!agent) throw new ApiError("not_found", `agent ${agentId} does not exist`);
@@ -22,6 +22,60 @@ export function registerMemoryRoutes(router, { memory, store }) {
       sendJson(res, 200, { memories, errors: result.errors, index: result.index });
     }),
   );
+
+  router.post(
+    "/api/agents/:agentId/memory/_digest",
+    asHandler(async ({ req, res, params }) => {
+      requireAgent(params.agentId);
+      if (!digestService) throw new ApiError("adapter_unavailable", "Memory digest service is unavailable");
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        throw new ApiError("invalid_request", "digest body must be an object");
+      }
+      const allowed = new Set(["spaceId", "mode", "fromMessageId", "toMessageId"]);
+      for (const key of Object.keys(body)) {
+        if (!allowed.has(key)) throw new ApiError("invalid_request", `unknown digest field: ${key}`);
+      }
+      const job = await digestService.enqueue({
+        agentId: params.agentId,
+        trigger: "manual",
+        spaceId: body?.spaceId,
+        mode: body?.mode,
+        fromMessageId: body?.fromMessageId,
+        toMessageId: body?.toMessageId,
+      });
+      sendJson(res, 202, { job });
+    }),
+  );
+
+  router.get(
+    "/api/agents/:agentId/memory/_digest-jobs",
+    asHandler(async ({ res, params }) => {
+      requireAgent(params.agentId);
+      sendJson(res, 200, { jobs: digestService ? digestService.listJobs(params.agentId) : [] });
+    }),
+  );
+
+  router.get(
+    "/api/agents/:agentId/memory/_digest-jobs/:jobId",
+    asHandler(async ({ res, params }) => {
+      requireAgent(params.agentId);
+      if (!digestService) throw new ApiError("not_found", `digest job ${params.jobId} does not exist`);
+      sendJson(res, 200, { job: digestService.getJob(params.agentId, params.jobId) });
+    }),
+  );
+
+  for (const action of ["retry", "cancel"]) {
+    router.post(
+      `/api/agents/:agentId/memory/_digest-jobs/:jobId/${action}`,
+      asHandler(async ({ res, params }) => {
+        requireAgent(params.agentId);
+        if (!digestService) throw new ApiError("not_found", `digest job ${params.jobId} does not exist`);
+        const job = await digestService[action](params.agentId, params.jobId);
+        sendJson(res, 200, { job });
+      }),
+    );
+  }
 
   router.post(
     "/api/agents/:agentId/memory",

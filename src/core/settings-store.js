@@ -18,6 +18,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ApiError } from "./errors.js";
+import { parseFiveFieldCron } from "./cron.js";
 
 // 每个白名单 key 的类型约束。
 // type: "enum" 带 values 数组；"number" 可带 min（含）/ exclusiveMin（不含）；
@@ -32,6 +33,7 @@ const ALLOWED_KEYS = {
   // 记忆整理（ground truth 4.1「记忆整理」：触发时机 + 注入预算）
   "memory.digestTrigger": { type: "enum", values: ["scheduled", "realtime", "manual"] },
   "memory.digestSchedule": { type: "string" },
+  "memory.digestRealtimeThresholdChars": { type: "number", exclusiveMin: 0, integer: true },
   "memory.injectionBudgetResidentLines": { type: "number", min: 0 },
   // 消息呈现（ground truth 4.1「消息呈现」：气泡切分规则）
   "presentation.bubbleBoundaryPattern": { type: "string" },
@@ -76,6 +78,7 @@ function deriveDefaults(config) {
     "isolation.agentState": "globalVisible",
     "memory.digestTrigger": "scheduled",
     "memory.digestSchedule": "0 3 * * *",
+    "memory.digestRealtimeThresholdChars": config.memory.digestRealtimeThresholdChars,
     "memory.injectionBudgetResidentLines": config.memory.residentIndexMaxLines,
     "presentation.bubbleBoundaryPattern": config.bubbles.boundaryPattern,
     "presentation.bubbleMinLength": config.bubbles.minLength,
@@ -140,13 +143,18 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
       // override，让合并视图只从固定默认值得到 isolated。
       if (key === "isolation.memory") continue;
       if (Object.prototype.hasOwnProperty.call(parsed, key)) {
-        overrides[key] = parsed[key];
+        try {
+          validatePatch({ [key]: parsed[key] });
+          overrides[key] = parsed[key];
+        } catch {
+          dirty = true;
+        }
       }
     }
     if (Object.prototype.hasOwnProperty.call(parsed, "isolation.memory")) {
       dirty = true;
-      await flush();
     }
+    if (dirty) await flush();
     return getAll();
   }
 
@@ -189,9 +197,18 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
         if (spec.exclusiveMin !== undefined && value <= spec.exclusiveMin) {
           throw new ApiError("invalid_request", `${key} must be > ${spec.exclusiveMin}`);
         }
+        if (spec.integer && !Number.isInteger(value)) {
+          throw new ApiError("invalid_request", `${key} must be an integer`);
+        }
       } else if (spec.type === "string") {
         if (typeof value !== "string") {
           throw new ApiError("invalid_request", `${key} must be a string`);
+        }
+        if (key === "memory.digestSchedule") {
+          try { parseFiveFieldCron(value); }
+          catch {
+            throw new ApiError("invalid_request", "memory.digestSchedule must be a valid five-field cron expression");
+          }
         }
       }
     }

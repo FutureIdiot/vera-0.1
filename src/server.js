@@ -17,6 +17,8 @@ import { listSpaces } from "./spaces/spaces.js";
 import { registerSpaceRoutes } from "./spaces/routes.js";
 import { createMemoryVault } from "./memory/memory.js";
 import { registerMemoryRoutes } from "./memory/routes.js";
+import { createMemoryDigestService } from "./memory/memory-digest-service.js";
+import { createMemoryDigestScheduler } from "./memory/memory-digest-scheduler.js";
 import { createSettingsStore } from "./core/settings-store.js";
 import { registerSettingsRoutes } from "./api/settings-routes.js";
 import { createStatusTracker } from "./core/status.js";
@@ -24,7 +26,7 @@ import { registerStatusRoutes } from "./api/status-routes.js";
 import { registerPathsRoutes } from "./api/paths-routes.js";
 import { registerThemesRoutes } from "./api/themes-routes.js";
 import { applyRuntimeSettings } from "./core/runtime-settings.js";
-import { listAccounts } from "./agents/accounts.js";
+import { getOwningAccount, listAccounts } from "./agents/accounts.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 
@@ -56,10 +58,44 @@ const adapters = {
   mock: createMockAdapter({ chunkDelayMs: config.mock.delayMs }),
   opencode: createOpencodeAdapter({ config: config.opencode }),
 };
+const memoryDigestAdapters = {
+  opencode: adapters.opencode,
+};
 
 function resolveAdapter(account) {
   return adapters[account.provider] ?? null;
 }
+
+async function executeMemoryDigest({ job, chunks, facts, proposalSchema, signal }) {
+  const agent = store.find("agents", job.agentId);
+  const account = getOwningAccount(store, job.agentId);
+  const adapter = account ? memoryDigestAdapters[account.provider] ?? null : null;
+  if (!agent || !adapter?.digestMemory) {
+    throw Object.assign(new Error("Memory digest executor is unavailable"), { code: "executor_unavailable" });
+  }
+  const adapterAccount = Object.fromEntries(
+    ["id", "kind", "provider", "connection", "model"].map((key) => [key, account[key]]),
+  );
+  return adapter.digestMemory({
+    account: adapterAccount,
+    payload: { agent: { id: agent.id, name: agent.name }, chunks, facts, proposalSchema },
+    signal,
+  });
+}
+
+const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
+applyRuntimeSettings({ settings: settingsStore.getAll(), config, memory });
+const memoryDigestService = createMemoryDigestService({
+  store,
+  memory,
+  proposalExecutor: executeMemoryDigest,
+  onJobUpdated: (job) => hub.publish("memory.digest-job.updated", { job }),
+});
+const memoryDigestScheduler = createMemoryDigestScheduler({
+  store, digestService: memoryDigestService, settingsStore,
+});
+memoryDigestService.start();
+memoryDigestScheduler.start();
 
 const router = createRouter();
 
@@ -80,15 +116,18 @@ router.get("/api/events", ({ req, res }) => {
 });
 
 registerAgentRoutes(router, { store, agentStates });
-registerSpaceRoutes(router, { store, hub, config, resolveAdapter, agentStates, memory });
-registerMemoryRoutes(router, { memory, store });
+registerSpaceRoutes(router, {
+  store, hub, config, resolveAdapter, agentStates, memory, memoryDigestScheduler,
+});
+registerMemoryRoutes(router, { memory, store, digestService: memoryDigestService });
 // 系统设置（Phase 4.5）：独立 settings.json 模块，不进 store.js（避免与 4.3+4.4 并行分支冲突）。
 // boot 顺序：store → hub/agentStates/memory → settingsStore → 路由注册。
-const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
-applyRuntimeSettings({ settings: settingsStore.getAll(), config, memory });
 registerSettingsRoutes(router, {
   settingsStore,
-  onSettingsChanged: (settings) => applyRuntimeSettings({ settings, config, memory }),
+  onSettingsChanged: (settings) => {
+    applyRuntimeSettings({ settings, config, memory });
+    memoryDigestScheduler.refreshSettings(settings);
+  },
 });
 
 const statusTracker = createStatusTracker({ config });
@@ -116,6 +155,8 @@ server.listen(config.port, () => {
 });
 
 async function shutdown() {
+  memoryDigestScheduler.close();
+  await memoryDigestService.close();
   for (const adapter of Object.values(adapters)) {
     try {
       await adapter.shutdown?.();

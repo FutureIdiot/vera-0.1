@@ -31,7 +31,7 @@ test("Memory MCP schemas never let tool arguments select identity or sources", a
   await withMcp(async ({ mcp }) => {
     const tools = mcp.listTools();
     assert.deepEqual(tools.map((item) => item.name), [
-      "memory_list", "memory_fetch_detail", "memory_create", "memory_update", "memory_archive",
+      "memory_list", "memory_fetch_detail", "memory_create", "memory_update", "memory_archive", "memory_digest",
     ]);
     for (const spec of tools) {
       const properties = spec.inputSchema.properties;
@@ -133,7 +133,7 @@ test("JSON-RPC dispatcher exposes standard MCP tool results without network iden
     assert.equal(initialized.result.serverInfo.name, "vera-memory");
 
     const tools = await mcp.handleRpc({ context, request: { jsonrpc: "2.0", id: 2, method: "tools/list" } });
-    assert.equal(tools.result.tools.length, 5);
+    assert.equal(tools.result.tools.length, 6);
 
     const failed = await mcp.handleRpc({
       context: null,

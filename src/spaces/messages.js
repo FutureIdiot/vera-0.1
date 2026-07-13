@@ -49,7 +49,7 @@ function shouldRespond(seat, message) {
   return false;
 }
 
-export function postMessage({ store, hub, config, resolveAdapter, agentStates, memory, spaceId, body }) {
+export function postMessage({ store, hub, config, resolveAdapter, agentStates, memory, memoryDigestScheduler, spaceId, body }) {
   const space = getSpaceOrThrow(store, spaceId);
   if (!body?.author || !body?.content) {
     throw new ApiError("invalid_request", "author and content are required");
@@ -68,6 +68,7 @@ export function postMessage({ store, hub, config, resolveAdapter, agentStates, m
   };
   const storedMessage = store.insert("messages", message);
   hub.publish("message.created", { message: stripInternal(storedMessage) });
+  memoryDigestScheduler?.onMessageCommitted(storedMessage);
 
   const runs = [];
   for (const seat of space.seats) {
@@ -83,7 +84,10 @@ export function postMessage({ store, hub, config, resolveAdapter, agentStates, m
 
     const adapter = resolveAdapter(account);
     if (!adapter) continue;
-    const run = executeRun({ store, hub, config, agent, account, space, triggerMessage: storedMessage, adapter, agentStates, memory });
+    const run = executeRun({
+      store, hub, config, agent, account, space, triggerMessage: storedMessage,
+      adapter, agentStates, memory, memoryDigestScheduler,
+    });
     runs.push(run);
   }
 

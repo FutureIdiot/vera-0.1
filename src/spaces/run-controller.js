@@ -35,7 +35,10 @@ export function cancelRun(runId) {
   return true;
 }
 
-export function executeRun({ store, hub, config, agent, account, space, triggerMessage, adapter, agentStates, memory }) {
+export function executeRun({
+  store, hub, config, agent, account, space, triggerMessage, adapter, agentStates, memory,
+  memoryDigestScheduler,
+}) {
   const spaceId = space.id;
   const run = {
     id: newRunId(),
@@ -153,6 +156,10 @@ export function executeRun({ store, hub, config, agent, account, space, triggerM
       if (error) patch.error = error;
       const updatedRun = store.update("runs", storedRun.id, patch);
       hub.publish("run.ended", { run: stripInternal(updatedRun) });
+      for (const messageId of bubbles.replyMessageIds) {
+        const message = store.find("messages", messageId);
+        if (message?.status === "completed") memoryDigestScheduler?.onMessageCommitted(message);
+      }
     }
   }
 
