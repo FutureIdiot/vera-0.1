@@ -36,6 +36,17 @@ Vera gateway (VPS, 7×24)
   - 离线 @ 直接发 error activity 跳过
 ```
 
+### 1.1 Execution / Account 绑定模型
+
+- **Execution 是一次实际执行单元，与 Run 1:1 对应**：gateway 每创建一条 Run，就为它选定且固定一个 `accountId`；Execution 开始后不得中途切换 Account。
+- **主执行使用 Home Account**：Agent 在 Space 中回应用户的主 Run 默认绑定该 Agent 的 Home Account。Home Account 是主执行的默认驾驶位，不是 Agent 唯一能用的 Account。
+- **subagent 可并行借用其他 Account**：主 Execution 派生的 subagent Execution 可绑定另一个 Account，但 token 对应的 `agentId` 必须在该 Account 的 `authorizedAgentIds` 中。授权只表示“可以申请使用”，不绕过 tool policy、Approval 与 workspace 边界。
+- **Account 是活跃 Execution 的独占租约单元**：同一`accountId`同一时刻最多有一个`running` Execution；`pending`只表示排队，尚未持有租约。gateway在Run进入`running`前原子获取租约，在`completed`/`failed`/`cancelled`时释放；Account忙时必须排队或明确拒绝，不得通过“让整个Agent切换账户并重登”绕过。
+- **Account 1:1 Workspace**：`workspacePath`、供应商会话、`sessionState`、RuntimeCapabilities 及 CLI/API 运行时数据都随 Account 走，不挂在 Agent 上。`sessionState` 的持久化键仍为 `(accountId, spaceId)`；同一 Account 不得声明多个 Workspace。
+- **Memory 随 Agent，不随 Account**：主 Execution 与它派生的 subagent Execution 只要仍以同一 `agentId` 行动，就读取同一份 per-Agent Memory；更换 Execution 的 `accountId` 不复制、迁移或切换 Memory。
+
+因此，daemon 是一个 Agent 的长连接执行宿主，可同时管理多个已授权 Account 的独立 runtime；登录用于拉齐“这个 Agent 可驾驶哪些 Account”，不是把整个 Agent 切换到某个 Account。
+
 **Gateway 与 daemon 的职责切分**：
 
 | 职责 | Gateway | Daemon |
@@ -44,11 +55,11 @@ Vera gateway (VPS, 7×24)
 | 编译层（群聊视角 promptText） | ✅ | ❌（不回头读 store 拼群状态） |
 | 触发判定（responseMode / 离线跳过 / blockAgentIds） | ✅ | ❌ |
 | Account.presence（在线/离线） | ✅ 维护 | ✅ 心跳维持 |
-| CLI/API 进程的 spawn 与生命周期 | ❌ | ✅ |
-| 本机Tools（文件/进程）、MCP、Hook、Agent Plugin执行 | ❌ | ✅（在绑定workspace与权限策略内） |
-| RuntimeCapabilities公开快照 | ✅ 暂存/提供给前端 | ✅ 登录时如实报告 |
+| CLI/API 进程的 spawn 与生命周期 | ❌ | ✅（per Account runtime） |
+| 本机Tools（文件/进程）、MCP、Hook、Agent Plugin执行 | ❌ | ✅（在 Execution 绑定 Account 的 workspace 与权限策略内） |
+| RuntimeCapabilities公开快照 | ✅ 按 Account 暂存/提供给前端 | ✅ 登录时按 Account 如实报告 |
 | 会话连续性具体实现（resume / daemon keepalive） | ❌ | ✅（agent 自己 spawn 的进程自己管） |
-| sessionState 真值 | 备份兜底 | 在线时持有最新副本 |
+| sessionState 真值 | 按 `(accountId, spaceId)` 备份兜底 | 每个 Account runtime 在线时持有最新副本 |
 
 ## 二、Daemon 接入协议
 
@@ -65,40 +76,67 @@ base URL 必须是 VPS 的 Tailscale MagicDNS / `*.ts.net` HTTPS 私网地址。
 
 ```json
 {
-  "accountId": "acc_…",
-  "runtimeCapabilities": {
-    "tools": [
-      { "name": "web.search", "source": "native", "scope": "network" },
-      { "name": "fs.read", "source": "daemon", "scope": "workspace" },
-      { "name": "fs.write", "source": "daemon", "scope": "workspace", "approval": "onRequest" },
-      { "name": "process.execute", "source": "native", "scope": "workspace", "approval": "onRequest" }
-    ],
-    "extensions": ["skill", "mcp", "hook", "agentPlugin"]
-  }
+  "homeAccountId": "acc_home…",
+  "accountRuntimes": [
+    {
+      "accountId": "acc_home…",
+      "workspace": {
+        "hostId": "host_local_mac",
+        "path": "/srv/vera/workspaces/home",
+        "status": "ready",
+        "policy": {},
+        "lastValidatedAt": "…"
+      },
+      "runtimeCapabilities": {
+        "tools": [
+          { "name": "web.search", "source": "native", "scope": "network" },
+          { "name": "fs.read", "source": "daemon", "scope": "workspace" },
+          { "name": "fs.write", "source": "daemon", "scope": "workspace", "approval": "onRequest" },
+          { "name": "process.execute", "source": "native", "scope": "workspace", "approval": "onRequest" }
+        ],
+        "extensions": ["skill", "mcp", "hook", "agentPlugin"]
+      }
+    }
+  ]
 }
 ```
 
-`accountId` 可省略（缺省=token持有者的自有owning account）。`runtimeCapabilities` 是本次daemon进程的临时事实：`source` 为 `native` / `provider` / `daemon`，tool `name` 是可扩展命名空间字符串；基础标准名见ground truth 4.2.1。availability不等于authorization，最终执行仍受Vera保存的tool policy、workspace边界与Approval约束。daemon不得为了让UI好看而上报实际不可调用的能力。
+`homeAccountId`可省略（缺省为token对应Agent的Home Account）。`accountRuntimes`只声明该daemon当前真实承载的Account runtime；每个`accountId`必须属于该Agent或已在`authorizedAgentIds`中授权，同一`accountId`不得重复声明或带不同Workspace。`workspace.hostId/path/status/policy/lastValidatedAt`与api-contract Workspace形状一致；gateway对未授权或绑定冲突的Account整个拒绝，不做部分登录。
+
+`runtimeCapabilities` 是该 Account runtime 在本次 daemon 会话中的临时事实：`source` 为 `native` / `provider` / `daemon`，tool `name` 是可扩展命名空间字符串；基础标准名见 ground truth 4.2.1。availability 不等于 authorization，最终执行仍受 Vera 保存的 tool policy、workspace 边界与 Approval 约束。daemon 不得为了让 UI 好看而上报实际不可调用的能力。
 
 ```json
 // 200 响应
 {
   "agent": { …Agent… },
-  "account": { …Account… },
+  "homeAccountId": "acc_home…",
+  "accounts": [{ …Account… }],
   "seats": [
     { "spaceId": "spc_…", "agentId": "agt_…", "responseMode": "default", "respondTo": ["user"], "blockAgentIds": [] }
   ],
   "sessionStates": {
-    "acc_…:spc_…": <opaque>
+    "acc_home…:spc_…": <opaque>
   },
-  "runtimeCapabilities": { "tools": [ … ], "extensions": [ … ] },
+  "accountRuntimes": [
+    {
+      "accountId": "acc_home…",
+      "workspace": {
+        "hostId": "host_local_mac",
+        "path": "/srv/vera/workspaces/home",
+        "status": "ready",
+        "policy": {},
+        "lastValidatedAt": "…"
+      },
+      "runtimeCapabilities": { "tools": [ … ], "extensions": [ … ] }
+    }
+  ],
   "heartbeatIntervalMs": 15000
 }
 ```
 
-gateway只在该登录session期间暂存并公开`runtimeCapabilities`；daemon登出/离线后前端将这些能力显示为不可用，不写回Account持久记录。CLI已有的原生Tools由daemon报告而不是在Vera重复安装；API型daemon若要访问本机代码，必须自己实现provider tool-call循环并在本机执行受限Tools。纯远程API、无本地daemon时不得报告`fs.*`或`process.execute`。
+gateway 只在该登录 session 期间按 Account 暂存并公开 `runtimeCapabilities`；daemon 登出/离线后前端将对应 Account 的能力显示为不可用，不写回 Account 持久记录。CLI 已有的原生 Tools 由 daemon 报告而不是在 Vera 重复安装；API 型 daemon 若要访问本机代码，必须自己实现 provider tool-call 循环并在该 Account 唯一 Workspace 内执行受限 Tools。纯远程 API、无本地 daemon 时不得报告 `fs.*` 或 `process.execute`。
 
-gateway 把该 Account.presence 置 `online` + `lastSeenAt=now`，并广播 `account.presence.updated` SSE。
+gateway 把本次成功登记的各 Account.presence 置 `online` + `lastSeenAt=now`，并逐条广播 `account.presence.updated` SSE。
 
 ### 2.2 SSE 订阅
 
@@ -113,7 +151,7 @@ Accept: text/event-stream
 | 事件 | data | daemon 处理 |
 |---|---|---|
 | `agent.heartbeat` | `{ ts }` | 收到即更新本地"上次心跳时间"；连续 3 次未收到（默认 45s） → 触发自杀 |
-| `run.requested` | `{ run, triggerMessage, agent, account, promptText }` | 解析 promptText → spawn CLI / 调 API → 走 run 生命周期 |
+| `run.requested` | `{ run, triggerMessage, agent, account, promptText }` | 校验 `run.accountId === account.id` 且该 Account 租约已授予此 Run → 用该 Account runtime 解析 promptText → spawn CLI / 调 API → 走 run 生命周期 |
 | `account.upserted` / `space.updated` / `agent.updated` | 同 `/api/events` 一致 | 更新本地缓存的 seat / 配置；不影响在飞 run |
 | `account.presence.updated` | `{ accountId, presence, lastSeenAt }` | 知悉其他 agent 上下线（daemon 之间不直接通讯，仅供本地展示/调试） |
 | `stream.reset` | `{}` | 重新 `POST /api/agent/login` 拉齐 |
@@ -127,11 +165,13 @@ Accept: text/event-stream
 
 ### 2.3 Run 生命周期
 
-daemon 收到 `run.requested` → 立即 `POST /api/agent/runs` 创建 Run 记录（gateway 此时返回 `status: "running"`，开始走 SSE 给前端）→ 跑 CLI → 流式上报：
+gateway先创建`pending` Run；取得目标Account租约后原子改为`running`、广播`run.started`并向对应daemon发送`run.requested`。daemon收到的是已存在且已获租约的Run，不得再次POST创建/认领；它直接跑CLI/API并流式上报：
+
+每条Run就是一个Execution，`accountId`创建后不可修改。主Run绑定Home Account；在飞父Run若需subagent，调用`POST /api/agent/runs/:id/subagents`提交目标`accountId`、任务包与必要上下文。gateway创建带`parentRunId`的pending子Run；目标Account空闲后再取得租约并下发。daemon不得自行换Account重试。
 
 | 阶段 | daemon 调用 | gateway 行为 |
 |---|---|---|
-| 创建 Run | `POST /api/agent/runs` body `{ triggerMessageId, spaceId, agentId, accountId }` | 落地 Run 记录、广播 `run.started` |
+| 派生subagent | 父Run调用`POST /api/agent/runs/:id/subagents` body `{ accountId, task, context? }` | 验证父Run租约与目标Account授权，创建pending子Run；取得目标租约后广播`run.started`并发`run.requested` |
 | 流式增量 | `POST /api/agent/runs/:id/delta` body `{ delta }` | 转 `message.delta` SSE（gateway 按段落边界切气泡，daemon 不切） |
 | 创建气泡 | `POST /api/agent/runs/:id/messages` body Message 形状去 `id/runId/createdAt/status` | 落地 Message（`status: "streaming"`）、广播 `message.created` |
 | 气泡定稿 | daemon 在切分点发出 `POST .../messages` 后用 `PATCH .../messages/:id` 设 `status: "completed"`（或 gateway 检测到 delta 间隙自动定稿，见下） | 广播 `message.completed` |
@@ -150,6 +190,8 @@ Authorization: Bearer <vera-agent-token>
 ```
 
 gateway 把 presence 置 `offline` + `lastSeenAt=now`、广播 `account.presence.updated`。sessionState 不动。daemon 之后再上线时通过 `POST /api/agent/login` 响应里的 `sessionStates` 字段取回。
+
+登出是整个 daemon 会话的结束，不是切换 Execution Account 的手段。Execution 选择 Account 只能通过创建 Run 时的不可变 `accountId`完成；不存在“登出 Home Account → 整个 Agent 用另一 Account 重登”协议。
 
 ### 2.5 失联与自杀（防 token 烧穿）
 
@@ -179,10 +221,11 @@ daemon 向 gateway 报 run 失败时 PATCH `error: { code, message }`：
 - **取消**：gateway 通过 SSE 推 `run.cancelled`（前端用户点了 cancel 按钮）→ daemon 监听该事件 → 中断当前 CLI 进程（SIGTERM 子进程树）→ PATCH `status: "cancelled"`。
 - **超时**：daemon 自带看门狗（默认 30 分钟，per-provider 可配），gateway 不设外层超时。
 - **隔离**：daemon 不得读其他 agent 的数据；gateway 在 `run.requested` 里给的 `promptText` 是它唯一该看的上下文。daemon 之间不直接通讯。
+- **Execution 隔离**：daemon 必须用 `run.accountId` 对应的唯一 Workspace、sessionState、secret 与 runtime 执行；不得因为同属一个 Agent 就混用两个 Account 的运行时数据。subagent 换 Account 不换 Agent Memory。
 - **spawn**：daemon 在本机 spawn CLI 一律走 `src/core/spawn.js` 同款的 PATH 修正 + kill 树逻辑（搬运参考，salvage-notes 第一节第 3 条）。daemon 是独立进程，可以从 Vera 仓库 import 这套工具。
 - **无交互模式**：CLI 必须以无交互参数运行（opencode `--dangerously-skip-permissions`、CC print 模式等），**禁止让 CLI 弹出选项式提问**。需要用户点头的危险操作走 `requestApproval`；其他问题让 agent 正常发消息问。
 - **常驻资源**：CLI daemon（opencode serve）等长命资源是 daemon 内部实现细节，daemon 自己管空闲回收、SIGTERM 关停，gateway 不帮忙清理。
-- **secrets**：API 型 daemon 通过 `account.connection.secretRef` 向 gateway（或 VPS 本地 `~/.vera/secrets.json`）换取明文 key，只存在于内存，不落日志、不进 sessionState。
+- **secrets**：API 型 daemon 只能为当前 Execution 的 `accountId` 通过 `account.connection.secretRef` 向 gateway（或 VPS 本地 `~/.vera/secrets.json`）换取明文 key，只存在于该 Account runtime 内存，不落日志、不进 sessionState。
 - **网络路径**：daemon 的 HTTP、SSE、心跳和重连全部固定走 Tailscale 私网 base URL。Mac 使用小火箭承载 Tailscale 时，daemon 不感知客户端品牌，只要求 MagicDNS、tailnet 路由与长连接真实可用；不得在私网失败时静默 fallback 到公网域名。
 - **缓存纪律**（ground truth 6 技术约束）：
   - CLI 型：**必须复用会话**（sessionState 机制的本意）。禁止退化成"每条消息新开会话、把历史拼进 prompt 重放"——那样供应商侧 prompt cache 全部落空，多轮成本近似平方增长。

@@ -77,26 +77,26 @@
 **目标**：ground truth 第五节的功能模块成形。UI 从此阶段起认真做，**mobile-first**。
 
 > **推进次序（2026-07-04，接 codex 审查意见）**：Phase 4 条目间有硬依赖，按依赖序推进，不并行铺。
-> 1. Agent/Account 拆分是其余一切的地基——prompt 编译器要按 seat 当前驾驶哪个 account 取 model/connection/sessionState；聊天联系人则按Agent/Agent成员集合建模，Account只补背后连接与presence。先拆，不让合并模型或“Account=联系人”渗进更多代码（ground-truth.md:28、`src/agents/agents.js:19`）。
+> 1. Agent/Account 拆分是其余一切的地基——聊天联系人按Agent/Agent成员集合建模，Account只提供背后连接与运行上下文，不让“Account=联系人”渗进代码。**历史说明（2026-07-13）**：本阶段当时按 `Agent 1:N Account` / seat或登录选择Account推进；当前ground truth已改为 `Agent 1:1 Home Account` + per-Execution Account绑定，旧形态保留为完成记录并待Phase 5.5一次迁移，不再作为新实现依据。
 > 2. 多 agent 前，prompt/message 编译层须独立成形。现 `postMessage` 只 fan-out，`run-controller` 只把触发消息交给 adapter，最多首轮前置 resident memory；ground truth 2.3 的"署名注入、不占 assistant 角色、补发错过发言"塞不进 `messages.js` / `run-controller.js`，应抽出清晰的 Space→Agent 视角编译层（ground-truth.md:69、`src/spaces/messages.js:50`、`src/spaces/run-controller.js:64`）。编译层是 4.1 之后、前端之前的纯后端步骤，可 curl/`verify.mjs` 验收，不依赖 UI。
 > 3. 前端当前是合格的 Phase 3 控制台（默认拿第一个 Space、只发 broadcast、状态围绕单条时间线组织），不是 Phase 4 壳子。新版不保留底部标签：主页是全屏聊天，左上进当前Space设置、右上进全局Settings、右滑进“联系人头像 → Space列表”导航。前端先一次替换全局Shell，随后按领域纵向落地；不把所有页面堆进一次大改，也不在旧页上边用边长。
 >
 > 即：`4.1 拆分 → 4.2 编译层 → 4.3 响应规则/AgentState → 4.4 Space 管理 → 4.5 系统配置 → 4.6 前端契约/Shell/领域页面/验收`。4.2–4.5 期间所有新增字段用 curl/`verify.mjs` 验收；4.6 每个子阶段保持可运行，禁止先造巨石再回头拆。
 
-- [x] **4.1 Agent/Account 拆分**（最先，无 UI 依赖）：契约先行（见 api-contract.md 二「Agent」「Account」「Space」）；`docs` 改 Agent 形状收敛为 `{id, name, createdAt, updatedAt}`，新增 Account 形状（owningAgentId + kind/provider/connection/model），Seat 增 `accountId`（驾驶关系，缺省 = agent 自有 account），`sessionState` 键由 `(agentId, spaceId)` 改 `(accountId, spaceId)`——外部会话随 account 走、记忆随 agent 走。store 启动一次性迁移把旧 agents 记录的连接字段拆出派生 owning account、session-states 键重映射；旧文件留 `.legacy`，一次改干净不留双名（ground truth 2.2 末段）。`resolveAdapter(agent)` 改 `resolveAdapter(account)`，adapter ctx 分开 `agent`/`account`。
+- [x] **4.1 Agent/Account 拆分**（历史完成形态，2026-07-13起待迁移）：契约先行（见 api-contract.md 二「Agent」「Account」「Space」）；当时新增 Account 形状（`owningAgentId` + kind/provider/connection/model），并把 `sessionState` 键由 `(agentId, spaceId)` 改为 `(accountId, spaceId)`，完成Agent与Account对象分域。此条如实记录Phase 4已完成代码，**其中 `Agent 1:N Account`、seat/登录选择Account及 `owningAgentId` 旧语义不再是当前设计**；Phase 5.5须迁移为每Agent一个Home Account、每Execution显式绑定一个Account，且不得伪称此处已经完成新模型。
 - [x] **4.2 Speaker view 编译层**：新模块 `src/spaces/view-compiler.js`，输入 `(store, space, agentId, account, triggerMessage)` 输出 prompt 文本；`run-controller.runAsync` 调它替换手拼 promptText，`messages.js` 触发 fan-out 不变。按 ground truth 2.3（2026-07-04 补三条）实现：
   - **只 inject message，不 inject activity**——思考链/工具链不进任何 agent 的下次 prompt（包括本人，本人工具历史由 adapter sessionState 携带）。这是"发言 ≠ 过程"的边界。Phase 5 的 `fetch_detail`/`fetch_more` 主动调阅是这边的逃生口（按需、带预算），Phase 4 不实现但接口留位。
   - **群聊视角以声告段注入，不伪装一对一 user 历史轮次**：派生该 agent 上次本人发言（按其最后一次 assistant 气泡的 createdAt）到当前触发之间的他人气泡，聚合成"=== 群内最近发言 ===\n- <name>: <气泡>…"声告段，塞进 `ctx.prompt.text` 头部；CLI 型直送新轮、API 型落在新 user 消息尾部（不进稳定历史）。模型历史里 assistant 永远是自己、user 永远是用户的直接提问，旧群状态每轮过期作废。
   - **编译层无状态**：每次 run 临时查 `messages.json` 派生 delta，不维护"已投递水位"；幂等。注入段配置上限（最近 N 条/总字数上限，超了提示"更早的见 fetch_detail"）放 `src/core/config.js`，不硬编码。常驻索引块仅随新 (account, Space) 首次注入，逻辑从 run-controller 搬来——它与群聊 delta 同属 prompt 头部但是两段（索引是稳定前缀、群状态是 volatile tail 不混淆）。
 - [x] **4.3 响应规则收口**：`silent` 的 `respondTo` 字段从 `[P4]` 落地——seat 形 `{agentId, responseMode, respondTo?, blockAgentIds?}`，`respondTo` 成员为 `"user"` 或 `agt_...`；新增 `blockAgentIds: ["agt_..."]` 屏蔽名单（ground truth 2.3 2026-07-04 补"响应规则统一语义"）。判定逻辑两层：`messages.js` 的 `shouldRespond` 看 responseMode/respondTo/target 决定要不要建 run；编译层 `compilePrompt` 内按 `blockAgentIds` 过滤声告段（被 block 的 agent 气泡不进段，但定向 @ 仍穿透 blockAgentIds 创建 run——不穿透 silent/focused）。AgentState 层确认 bootstrap/GA 已完整返回（Phase 2–3 已建 tracker，对勾即可）。
-- [x] **4.4 Space 管理**：`normalizeSeat` **去掉** `accountId`（账户归属改为登录级或默认 owning account，见 ground truth 2.2 修订 / api-contract Seat 段）；store 启动一次性清理 4.1 backfill 到 spaces 下 seats 上的 `accountId` 字段（`migrateAgentAccountsIfNeeded` 里的 seat.accountId backfill 逻辑撤掉），session-states 键不动。
+- [x] **4.4 Space 管理**（历史完成形态）：`normalizeSeat`去掉`accountId`；当时按登录级或默认owning account解释，store已清理4.1 backfill到seat上的`accountId`，session-states键不动。当前账户选择已改为per-Execution绑定；旧“登录级选择Account”只记录当时实现，不再指导新代码。
 - [x] **4.5 系统配置**：新增 `GET/PATCH /api/settings`，字段以 ground truth 4.1 为唯一清单（数据隔离规则、记忆整理触发/注入预算、消息呈现等），严格遵守不扩；运维参数仍走 env 不进前端（ground truth 4.1 末段边界注记）。持久化进 `data/settings.json`（store 新集合），config 作启动默认、settings 作运行时覆盖。
 - [x] **4.6 前端正式布局**：按 ground truth 5.1–5.4 分阶段推进，手机竖屏第一公民；使用简单hash路由，不为路由引入UI框架。
   - [x] **4.6.0 文档契约（2026-07-10）**：ground truth 已定全屏聊天主页、当前Space设置、右滑双栏Space导航、全局Settings、Account组合管理、配置闭环、提前拆分与页面完成标准；API契约已补 Appearance（含Theme/Profile边界与安全导入导出）、Space提醒、Space归档/恢复及Account组合读取边界。本步不改前端代码。
   - [x] **4.6.1 可调雏形 + Shell（2026-07-11）**：可调雏形与默认tokens由F0完成，F2落全局app runtime、route lifecycle与旧时间线挂载；F3已完成无底部标签、左上当前Space设置、右上全局Settings及手机/桌面Shell交互并通过真实浏览器验收。
   - [x] **4.6.2 基础层提前拆分（2026-07-11）**：已移除 `api/gateway-client.js`，按领域拆成 `http` / `spaces` / `agents` / `accounts` / `settings` / `memory` / `extensions` / `status` / `events` clients；state 已拆 router、全局app runtime、platform、Space导航/时间线、Account、Settings、Extension边界；样式已拆 `tokens.css`（变量唯一来源）/ `base.css` / `shell.css` / `chat.css`，旧巨型 `theme.css` 已移除。聊天route显式mount/unmount，全局runtime唯一持有SSE并处理reset水位，timeline state与DOM同步限制200项。
   - [x] **4.6.3 全屏聊天 + Space导航/设置闭环（2026-07-11，2026-07-13简化导航状态）**：F3已拆分聊天、导航与Space设置职责；手机右滑或点顶栏左上开关打开导航，打开期间切换Space保持展开，不再提供图钉或持久化固定状态；已完成Space切换、新增、重命名、二次确认归档与恢复，以及参与Agent、Seat响应规则和notifications。Space Module区继续等Phase 6契约/后端就绪后再显示，不建假开关；composer只属于聊天主页，设置路由替换聊天主区而不与时间线纵向叠放。
-  - [x] **4.6.4 Account组合管理 + Agent Memory闭环（2026-07-12）**：只有 `#/settings/accounts` 一个管理入口；`account-list-view.js`、`account-detail-view.js`、`agent-memory-view.js` 分开。详情组合显示Agent身份/状态/Memory与其一个或多个Account连接，但API/state仍按Agent和Account分域；删除连接与删除Agent是两个明确动作。Memory只在进入对应Agent子路由时加载正文。
+  - [x] **4.6.4 Account组合管理 + Agent Memory闭环（2026-07-12，旧形态待迁移）**：只有 `#/settings/accounts` 一个管理入口；`account-list-view.js`、`account-detail-view.js`、`agent-memory-view.js` 分开。详情当时按一个Agent展示一个或多个Account连接，API/state仍按Agent和Account分域；该 `1:N` 展示是已完成历史形态，须在Phase 5.5随契约改为Home Account + 其他Account授权策略。Memory只在进入对应Agent子路由时加载正文，且继续归Agent。
   - [x] **4.6.5 Setting子页闭环（2026-07-12，2026-07-13移除无依据分组）**：`settings-index-view.js`、`system-settings-view.js`、`appearance-view.js`、`path-settings-view.js`、`control-center-view.js` 分开；设置首页只平铺入口，不预取子页数据。Appearance预览只改内存CSS变量，保存走gateway，按组恢复默认传 `null`。中控台进入时才取状态/轮询，离开即停止；当前file store显示存储状态，不虚构数据库连接。Extension Package管理等Phase 6契约落地后加入。
   - [x] **4.6.6 真实运行与性能验收（2026-07-13）**：路由/state单测和 `scripts/verify.mjs` 端到端已补齐；临时gateway实测API与逐条SSE通过。Chrome/Safari桌面与Android Chrome/iOS Safari Web人工矩阵已由用户确认结束，覆盖deep-link刷新、前进后退、虚拟键盘、安全区、loading/empty/error/offline/长内容与最新消息可见；Android WebView/iOS WKWebView留Phase 6原生壳回归。bundle/Performance trace达到ground truth 6.1预算，时间线DOM保持≤200 items，路由离页资源清理已纳入测试。
 
@@ -163,7 +163,7 @@
 ### F4 — Web管理体验：Settings、Account、Memory、Appearance
 
 - [x] Settings根页只做轻量分组列表；子页动态import、进页取数、离页清理。
-- [x] Account组合页：Agent身份/状态/Memory摘要 + 1:N Account连接；删除Agent与删除连接分开；Memory正文只在Agent Memory路由加载。`runtimeCapabilities`真实快照归Phase 5.5，F4只按现有契约实现`null`时的“未连接，能力未知”空态，不虚构能力数据。
+- [x] Account组合页（历史完成形态，待Phase 5.5迁移）：Agent身份/状态/Memory摘要 + 当时的1:N Account连接；删除Agent与删除连接分开；Memory正文只在Agent Memory路由加载。当前设计已取消1:N所有权，页面后续改为一个Home Account + 其他Account的授权策略；`runtimeCapabilities`真实快照仍归Phase 5.5。
 - [x] System/Appearance/Paths/Control Center分别独立；配置逐项闭环，Appearance实时预览/保存/null恢复默认，Theme Palette与Appearance Profile分别导入导出；中控台离页停止轮询。
 - [x] 路径高风险迁移使用校验/迁移/验证/回滚流程，不提供直接生效文本框。
 
@@ -187,21 +187,80 @@
 
 ## Phase 5 — Memory 与数据层
 
-**目标**：ground truth 第三节的三层数据落地。设计依据：`memory-hook.md`——以《修订：文件库架构》（R1–R6）为准，按第 16 节 MVP 顺序推进。
+**目标**：完成 Memory / Files 数据层闭环，并为 Phase 5.5 的 per-Space AgentState 与远程 daemon 接入提供稳定契约。设计依据：`ground-truth.md` 第三、四节 + `memory-hook.md`《修订：文件库架构》（R1–R6）；旧文中的 SQL、`room_id` / `session_id`、`/memory/*` 只作设计素材，不可直接照抄实现。
 
-> 提前量（2026-07-03，与 Theta 确认）：**最小闭环提前落地**——vault 骨架 + 文件格式 + 常驻索引会话首消息注入 + agent 文件工具直读直写 + 手动保存入口（API），形状已收编进 api-contract.md「Memory（最小闭环）」。目的：Phase 3–4「边用边修」阶段长期记忆已可用。检索注入、派生权重、dream 不提前，仍按本阶段推进。
+> 提前量（2026-07-03，与 Theta 确认）：**最小闭环提前落地**——vault 骨架 + 文件格式 + 常驻索引会话首消息注入 + agent 文件工具直读直写 + 手动保存入口（API），形状已收编进 api-contract.md「Memory（最小闭环）」。目的：Phase 3–4「边用边修」阶段长期记忆已可用。**2026-07-13边界修订**：其中“agent文件工具直读直写”仅是旧实现现状，M1起所有程序写入统一提交gateway单写者，不再允许CLI/adapter直写vault；检索注入、派生权重、dream仍按本阶段推进。
 >
 > **Vault 位置策略**（2026-07-04，与 Theta 确认 + 联邦形态对齐）：vault 热数据**只在 VPS**（`/home/theta/.vera/memory/`，联邦后 gateway 跑在 VPS），所有 agent daemon 通过 Vera memory API 远程读写，本地不再有"原版"——避免双写冲突/双读漂移，保持 single source of truth。**备份走 git 镜像**：把 VPS vault init 成 git repo，每次整理后 `git push` 到一个私有 GitHub repo；Mac 上 `git pull` 即得只读备份，还能看版本历史（Obsidian vault 全 markdown，git 友好）。rsync 冷备份作次要手段（崩了需要快速回滚时用），不替代 git 镜像的版本维度。Phase 3-4 期间 vault 还在本机 Mac `~/.vera/memory/`，Phase 5.5 联邦落地时随数据 rsync 一起搬 VPS，搬完即切 git 镜像备份流。
 
-- [~] 动工前：memory-hook.md 术语/API 对齐契约（按文档头部整合注记），形状收编进 api-contract.md（最小闭环部分已收编；其余 `/api/agents/:agentId/memory/*` 届时再补）
-- [~] 文件库（Obsidian 兼容 vault）+ Raw Event 留 store + 手动"保存到记忆"入口（R1–R2，MVP Step 1–3）（vault + 手动保存提前做；Raw Event 溯源链留本阶段）
-- [ ] memory_write_hook（context 容量触发；slug/钩子行质量为第一验收项）+ stain frontmatter 与前端色块（Step 4–5）
-- [ ] 三渠道注入：常驻索引（批量换版）、token 计价检索注入（哑墨、同会话去重、尾部放置）、fetch_more / fetch_detail 钻取（R3、R5，Step 6）
-- [ ] 派生索引与权重（双链入度、使用统计、置顶；无手工标注）+ dream 维护 subagent（R4，Step 7–8）；整理任务用便宜模型跑批
-- [ ] Files 层：Space 内隔离的附件存储
-- [ ] 数据层分类实现为可扩展结构，不硬编码枚举
+**执行规则**：依赖顺序固定为 D0 → M1 → M2 → M3 →（M4 与 F1 可由不重叠文件的 subagent 并行）→ X1；每个切片的细化契约是该切片第一项，先改契约、再实现、再以临时数据目录验收并独立提交。D0只冻结跨切片不应再变化的身份/作用域/写入边界；M1未建立单写者与溯源链前不得接自动写入；M3未证明预算与哑墨边界前不得接dream；X1必须等待M4/F1都完成后统一收口。
 
-**完成标准**：agent 在 A Space 获得的长期记忆，整理后在 B Space 可用。
+### P5-D0 — 文档与契约冻结
+
+- [x] `memory-hook.md` 已于2026-07-13冻结现行边界：现行路由为per-Agent slug API；旧`room_id/session_id/memory_id`、SQL与`/memory/*`仅保留为显式历史算法素材，SQL只表示可重建派生索引，不是权威Schema。
+- [x] 三项产品语义已由用户于2026-07-13确认，契约必须一次改干净：① slug在对应Agent分区内创建后永久不可改名，删除PATCH `newSlug` 与rename别名；② 长期Memory为per-Agent私有、跨Space并跟随该Agent的所有Execution，不存在所有Agent隐式共享池（显式共享须未来另补scope/授权/来源契约）；③ 主Agent、subagent、CLI adapter、hook与dream等所有程序写入统一提交gateway单写者，禁止直写vault，Obsidian用户编辑仅作为外部变更重扫。
+- [x] 冻结Agent/Account/Execution/Workspace关系：每个Agent恰有一个Home Account与独立Memory；取消旧 `Agent 1:N Account` 所有权；每个Execution固定绑定一个Account，主Execution保留Home Account，subagent可在 `authorizedAgentIds` 授权后使用其他Account；每个Account同一时刻只允许一个活跃Execution租约。Workspace、`sessionState`和运行数据按 `accountId` 隔离，Account 1:1 Workspace；实际文件在daemon宿主，gateway只保存绑定、策略、状态与校验信息。此项本轮只冻结文档，现有Phase 4代码/UI仍是待迁移旧形态。
+- [x] Phase边界已对齐：M1–M4只实现Memory；Files在F1；Home Account/Execution租约/per-Account Workspace、per-Space AgentState、presence、daemon token、VPS/Tailscale均留Phase 5.5。数据层可扩展不等于预建插件注册表。
+
+**D0验收（2026-07-13完成）**：`ground-truth.md`、`api-contract.md`、`adapter-interface.md`、`memory-hook.md`已统一Home Account / Execution / Workspace、Account唯一活跃租约、per-Agent Memory、slug不可改名与gateway单写者；旧1:N代码/UI明确标为待Phase 5.5迁移，没有伪造成已实现。下一窗口直接从M1开始。
+
+### P5-M1 — Memory 权威层、单写者与溯源
+
+- [ ] **M1契约先行**：在`api-contract.md`钉死权威frontmatter/SourceRef、手动来源、gateway operation、外部Obsidian变更、per-Agent写队列、原子替换、409当前版本、坏文件隔离与派生索引重建形状；只补M1实际consumer，不提前定义M2/M3 worker/API。
+- [ ] 在现有 `src/memory/` 内完成 vault 权威层，不新建领域目录：所有 gateway 写入进入串行队列并使用同目录临时文件 + 原子替换；读取仍直接读 markdown；外部 Obsidian 修改通过可重建扫描/索引刷新进入系统，坏文件隔离报错但不吞掉其他记忆。
+- [ ] 按冻结契约扩展 frontmatter 与校验，建立 `sources` → store 中原始 Message/Raw Event 的可追溯链；Raw Event 继续按 Space 隔离，Activity/工具过程默认不作为对话记忆输入，除非 D0 明确列入某种 source 类型。
+- [ ] vault按 `agentId` 分区；将当前手动 CRUD 收紧到slug永久不可改名、归档、删除、并发控制语义；409必须按契约返回当前权威版本供前端重载。Phase 5起主Agent、subagent、CLI adapter、hook与dream只提交proposal/operation，由memory模块验证并落盘，不再允许绕过队列直接写。
+- [ ] 迁移`isolation.memory`旧`globalReadable/perSpace` override为固定`isolated`并移除对应UI选项：Raw Message仍随Space权限隔离，长期Memory固定per-Agent跨Space；不得保留可重新打开隐式共享的兼容分支。
+- [ ] 建立派生索引的版本、重建和失效机制；删除索引后可仅凭 vault + store source 重新生成，索引损坏不得损坏 markdown 权威数据。
+
+**M1 验收**：并发写同一 slug 不丢数据；进程在写入中断后旧文件或新文件至少一份完整可读；外部编辑能被重扫发现；坏 frontmatter 有可见错误；任一记忆可沿 sources 回到正确 Space 的原始记录；清空派生索引后重建结果等价。
+
+### P5-M2 — memory_write_hook 与触发器
+
+- [ ] **M2契约先行**：钉死`realtime`是否等价context容量阈值、scheduled/realtime互斥关系、manual是否始终可用、session-end dream兜底开关，以及context水位按token/字符/adapter容量的唯一口径。
+- [ ] 程序负责确定性分块、去重、阈值和 job 状态；模型只做标签/提炼/操作提议，不能直接写 store/vault。proposal 必须经过 schema、scope、source、slug/钩子行、双链和幂等校验后由 M1 单写者应用。
+- [ ] 接通 `memory.digestTrigger` 的 `scheduled` / `realtime` / `manual` consumer 与 `digestSchedule`；context 容量触发的计算口径、session 结束兜底和手动整理入口先写契约。各环节执行者按 ground truth 做成配置字段，但只接真实执行者，不预建插件系统。
+- [ ] slug 与一行钩子质量作为首要验收：无复用价值、无来源推断、agent 自创偏好不得写入；相同事实优先 update/merge，不制造平行重复记忆；stain 只以裸 hex 元数据写入。
+- [ ] hook 失败不阻塞聊天，不产生半条记忆；失败/重试/取消有可观察 job 状态与去重键，重试不得重复应用同一 proposal。
+
+**M2 验收**：使用固定 raw events 夹具覆盖 create/update/archive/skip/重复重试；定时、容量、手动三种触发走同一 pipeline；非法 proposal 全部拒绝且 vault 不变；聊天 run 不等待整理完成；测试日志/API 不泄露 provider secret 或 stain 解释。
+
+### P5-M3 — 三渠道检索、注入预算与主动钻取
+
+- [ ] **M3契约先行**：补齐retrieve/fetch_more/fetch_detail、游标、token预算、同session program-owned去重状态、使用统计、置顶、错误与必要SSE形状；不得污染adapter透明`sessionState`。
+- [ ] 常驻索引按 R3 批量换版，只在新外部 session 建立稳定前缀；用户置顶 + 派生 top 权重合计受 `memory.injectionBudgetResidentLines` 限制，普通编辑不逐条打穿 prompt cache。
+- [ ] 本地关键词 + 向量/等价可替换检索产生候选，按 token 而非条数执行逐消息预算；结果去 archived、按冻结 scope 过滤、同一 session 去重，并在当前消息信封尾部追加。索引/检索/日志都不携带 stain 或其自然语言含义。
+- [ ] 落地冻结后的 `fetch_more` / `fetch_detail`：广度分页游标稳定、方向可复现、双链只展开一跳；深度按 slug 取权威文件并记录使用统计。API/CLI adapter 走同一 memory facade，不让 adapter 直接碰 store。
+- [ ] 明确物理顺序并做快照测试：adapter 的稳定 system/history 在 `promptText` 之外；本轮 `promptText` 为常驻索引稳定前缀 → 群聊 Message 声告 → 当前触发正文 → 本轮检索块（消息信封尾部）。Activity 永不因 Memory 接入而回流 prompt。
+
+**M3 验收**：跨 Space 命中符合 D0 scope 决定；同 session 不重复注入；超预算确定性截断；stain 在 push、排序、日志和最终回复中均不可见，fetch_detail 深读即使返回裸 hex 也不得解释/引用/参与判断；fetch_more 游标不重不漏、fetch_detail 返回权威正文；逐帧 SSE 仍正常且 prompt cache 稳定前缀不因单条记忆编辑变化。
+
+### P5-M4 — 派生权重与 dream 维护
+
+- [ ] 派生权重只来自双链入度、钻取/最近使用、用户编辑与置顶、按 type 的时间衰减；agent 无手工 importance 字段，stain 永不参与排序；保留有界随机探索且测试可注入 seed。
+- [ ] dream 是聊天外异步维护 job，复用 M1 单写者与 M2 proposal 校验，只执行 keep/update/merge/archive 等冻结操作；默认不物理删除，保留 sources 和双链，失败不影响聊天与现有索引。
+- [ ] dream 后统一重建派生索引并批量发布新的常驻索引版本；整理模型、批量大小、频率、超时和重试均引用配置，使用便宜模型但不把供应商写死。
+
+**M4 验收**：重复 dream 幂等；merge 后 source/双链不丢；错误推断归档可恢复；权重可由输入完全复算；索引批量换版不会改变正在进行的 session；dream 失败有明确状态且不阻塞主流程。
+
+### P5-F1 — Files：Space 附件层
+
+- [ ] **F1契约先行**：定义File对象、Space归属/指定共享、上传/列表/详情/下载/删除、大小/MIME/重名/路径/权限、SSE与页面空错态，并钉死`fileId`如何进入Message、时间线如何呈现、Message归档后的附件生命周期；契约未完成前不建模块或页面。
+- [ ] 按 D0 契约在职责最接近的现有目录中新增 Files 领域模块；二进制文件与 store 元数据分离，gateway 是唯一事实来源，前端只缓存列表/上传进度。不得把 Files 写成 Memory 的附件字段，也不得把任意本机路径暴露给客户端。
+- [ ] 实现 Space 作用域上传、列表、详情/下载、删除与隔离策略 consumer；默认 isolated，specifiedShared 只接受显式 Space id 集合，globalReadable 仍只改变读取范围，不改变 owner Space 与删除权限。
+- [ ] 文件落盘使用安全生成的存储名，保留展示名；拒绝路径穿越、符号链接逃逸、超限 body、非法 MIME/扩展组合和不完整临时文件。迁移附件根目录复用 Path 管理的校验→搬移→验证→回滚模式，但不得与 gateway dataPath 混成同一迁移语义。
+- [ ] 前端只在契约开放后加入 `#/spaces/:spaceId/files` 与 composer 附件入口；移动端选择文件继续经 platform adapter，Web 使用受限 file input，不新增假按钮或提前进入 Phase 6 原生权限。
+
+**F1 验收**：两个 Space 的默认隔离、指定共享、全局可读三种读取矩阵通过；上传中断不留可见脏记录；同名/重复、删除、404/409、大小限制、路径穿越、迁移回滚均有黑盒测试；下载支持真实二进制校验且不泄露服务器绝对路径。
+
+### P5-X1 — 可扩展分类、端到端闭环与阶段冻结
+
+- [ ] isolation 设置的 Memory / Files consumer 全部真实生效；AgentState 只验证现有设置不被破坏，per-Space 结构仍留 Phase 5.5。分类扩展使用数据驱动的 capability/policy 描述，不在业务代码散落固定三分支，也不提前造 Extension/存储插件框架。
+- [ ] 端到端场景：A Space 产生有来源事实 → write hook 整理 → 新 session 的 B Space 按 scope 召回 → agent 可 fetch_detail → 使用统计进入下次权重；另跑 Files 的隔离/共享/删除/迁移完整场景。
+- [ ] 手测服务以 `VERA_DATA_PATH=/tmp/... PORT=3210` 和独立临时 vault/files 根目录启动；3210 被占先查占用。`scripts/verify.mjs` 继续按规约使用 `getFreePort()` 随机空闲端口，避免与手测实例冲突。所有后端改动 `node --check`，全量 `npm test`，黑盒 verify，涉及新 SSE 事件则用 curl 实测逐帧；再跑 `npm run build:web` / `npm run analyze:web` 确认 F5 冻结基线未回退。
+- [ ] 更新 `plan.md` 状态与验收证据并形成 Phase 5 可回退 commit；完成后开新任务窗口进入 Phase 5.5，不顺手生成 Capacitor、Android/iOS 工程或迁移 VPS。
+
+**Phase 5 完成标准**：Memory 的文件权威、来源、自动整理、三渠道召回、派生维护和 isolation 均闭环；Files 的 Space 隔离、共享、生命周期和路径迁移闭环；agent 在 A Space 获得的长期事实按冻结 scope 在 B Space 新 session 可用，预算内不重复且可追溯；清空所有派生索引仍能从 vault + store 重建。Phase 5.5 的 AgentState/presence/daemon/VPS/Tailscale 项保持未提前实现。
 
 ## Phase 5.5 — Agent 联邦（VPS gateway + Tailscale纯私网）
 
@@ -220,19 +279,20 @@
 
 **代码实施清单**（按依赖序）：
 
+- [ ] **5.5.0 Home Account / Execution / Workspace迁移**（其余联邦运行项的前置）：先按更新后的契约把现有 `Agent 1:N Account` 数据和Account组合UI一次迁移为每Agent一个Home Account；建立每Execution固定 `agentId + accountId`、主Execution只用Home Account、subagent按 `authorizedAgentIds` 使用其他Account的授权关系。Account增加唯一活跃Execution租约，竞争时排队或返回 `account_busy`，结束/取消/超时/失联必须释放。每Account建立唯一Workspace绑定，gateway只保存daemon宿主、绑定、策略、状态与校验时间；`sessionState`、Workspace和运行数据继续按 `accountId` 隔离，实际项目文件不迁入VPS store。迁移前后的旧字段与UI不得并存为兼容双名。
 - [ ] **5.5.1 AgentState per-Space 改造**（最浅，先做）：`src/agents/agent-state.js` 跟踪键 `agentId` → `agentId:spaceId`；形状加 `spaceId` + `detail` 字段；`status` 枚举扩到 `idle/thinking/typing/reading/coding/reviewing/on_task/away`；`/api/agent-states` 支持 `?spaceId` / `?agentId` 过滤；契约 + 4.1 已建跟踪器同步改。verify.mjs 加 per-Space 测试。
 - [ ] **5.5.2 Account.presence + 离线 @ 行为**：Account 形状加 `presence` / `lastSeenAt` 字段；`src/agents/accounts.js` 暴露 `setPresence`；`src/spaces/messages.js` 的 `shouldRespond` 加在线判定：offline 则不创建 run，改在 Space 时间线 insert 一条 `phase:"error", label:"agent-offline"` 的 Activity；SSE 加 `account.presence.updated` 事件。verify.mjs 加离线 @ 测试。
 - [ ] **5.5.3 Agent token 体系**：`src/core/agent-tokens.js` 新建——加载 `~/.vera/agent-tokens.json`，校验 Bearer token → 返回 agentId；token 文件格式 `{ "agt_xxx": "<long-random>", … }`，新建 agent 时自动生成一条；gateway 启动加载、不进 repo。tailnet ACL只做网络门禁，不替代此token。
 - [ ] **5.5.4 Tailscale owner identity + 入口权限**：gateway只信任本机Tailscale Serve注入并去伪造的identity headers；普通API/SSE要求login命中`config.security.ownerTailscaleLogins`；生产列表为空时拒绝业务API。原生CORS使用配置化精确Origin白名单，不自建配对码/device session。
-- [ ] **5.5.5 `/api/agent/*` 路由层**：`src/api/agent-routes.js` 新建——所有 `/api/agent/*` 走 Bearer token 中间件识别身份；`POST /api/agent/login` 接收并暂存 `runtimeCapabilities`、返回 agent/account/seats/sessionStates/runtimeCapabilities/heartbeatIntervalMs，离线清空能力快照；其余为daemon登录、SSE、run回传和sessionState同步接口。
-- [ ] **5.5.6 Run 触发链路改造**：`src/spaces/messages.js` 不再 sync 调 `executeRun`；在线seat创建Run并通过daemon SSE推`run.requested`，离线走5.5.2 Activity路径；编译层抽出`src/spaces/view-compiler.js`。mock adapter保留给gateway内部一致性测试。
-- [ ] **5.5.7 `scripts/agent-daemon.js`**：新进程，启动读Tailscale私网gateway URL / agent token / CLI binary path / workspace（不再有Cloudflare Service Token），报告runtimeCapabilities并跑完整HTTP/SSE协议；心跳缺失3次后exit(0)，不得私网失败后fallback到公网域名。
+- [ ] **5.5.5 `/api/agent/*` 路由层**：`src/api/agent-routes.js`新建——Bearer token识别Agent；login只登记daemon、per-Account Workspace/runtimeCapabilities与候选授权Account，不选择Account或取得租约。gateway创建主Run或父Run调用`POST /api/agent/runs/:id/subagents`时生成pending Execution；调度器取得目标Account唯一租约后转running、广播`run.started`并发`run.requested`。daemon不得重复创建/认领Run；终态/登出/超时释放租约，sync-state只接受租约持有者。
+- [ ] **5.5.6 Run触发与调度链路改造**：`src/spaces/messages.js`不再sync调用`executeRun`；主Execution固定Home Account，subagent才可绑定其他授权Account。触发先创建pending Run；Account空闲且Workspace宿主在线时由调度器原子取租约并下发，忙则内部排队，明确要求立即执行的请求返回`account_busy`，离线走error Activity。编译层复用`src/spaces/view-compiler.js`，mock adapter保留给gateway内部一致性测试。
+- [ ] **5.5.7 `scripts/agent-daemon.js`**：新进程，启动读Tailscale私网gateway URL / agent token，并按Account报告唯一Workspace、CLI binary/runtimeCapabilities；收到已获租约的`run.requested`后只执行与回传，不创建Run或自行切Account。心跳缺失3次后exit(0)，不得私网失败后fallback到公网域名。
 - [ ] **5.5.8 mock daemon + verify.mjs 拆分**：起mock daemon走login → run.requested → delta → activity → message → completed → sync-state → logout；gateway内部一致性测试保留旧mock adapter路径。
 - [ ] **5.5.9 VPS纯私网部署落地**：完成数据迁移、gateway systemd、VPS加入tailnet、Tailscale Serve、ACL、owner login配置、SSE逐帧和公网不可达验收；不安装公网反向代理，不启用Funnel。
 - [ ] **5.5.10 本机清理**：停旧Mac gateway与cloudflared自启；旧数据和cloudflared配置只留冷备份；验证Mac daemon与手机客户端均经Tailscale访问VPS，其他手机App仍直连公网。
 
 **完成标准**：
-1. `scripts/verify.mjs` 全过（含 mock daemon 端到端协议测试 + 离线 @ error activity + per-Space AgentState + 心跳缺失 daemon 自杀）
+1. `scripts/verify.mjs` 全过（含Home Account迁移、subagent跨Account授权、Account唯一活跃Execution租约/释放、Workspace隔离、mock daemon端到端协议、离线@ error activity、per-Space AgentState与心跳缺失daemon自杀）
 2. VPS上gateway + Tailscale Serve active；未加入tailnet的设备无法访问任何Vera页面/API，公网3210/443均无Vera入口
 3. 手机蜂窝网络下 @ 在线 agent（daemon 在 Mac）→ 流式回复正常到达；@ 离线 agent → 时间线一行 error 提示 + 不创建 Run
 4. 重启VPS gateway → Mac daemon经Tailscale自动重连并取回sessionState；手机Tailscale身份仍有效且SSE按since恢复

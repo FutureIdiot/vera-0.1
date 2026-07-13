@@ -1,8 +1,8 @@
 # Vera Memory Hook 搭建方案
 
 > **整合注记（2026-07-02，Phase 5 动工前生效）**：本文档成文早于接口契约，落地时按下列映射对齐——
-> 1. 术语：`room_id` → `spaceId`（Space，见 api-contract.md 命名纪律）；`session_id` 语义由 run / sessionState 承载，Phase 5 统一。
-> 2. API 路径：`/memory/*` 落地为 `/api/memory/*`，形状收编进 api-contract.md 后以契约为准。
+> 1. 术语：`room_id` → `spaceId`（Space，见 api-contract.md 命名纪律）；`session_id` 语义由 run / sessionState 承载。下文仍出现的 snake_case 只是历史算法素材，不是新契约命名。
+> 2. API 路径：所有 Memory API 都以 `/api/agents/:agentId/memory` 为领域前缀，不保留 `/memory/*` 或 `/api/memory/*` 兼容别名；具体形状以 api-contract.md 为准。
 > 3. 存储：已定稿，见下方《修订：文件库架构》。第 8 节 SQL schema 降级为派生索引的逻辑模型。
 > 4. 缓存纪律（ground truth 技术约束）：记忆注入段必须放 prompt **尾部**（靠近当前消息），不得插入稳定前缀——检索结果逐条消息变化，放前面会打穿 prompt cache。
 
@@ -12,11 +12,11 @@
 
 ### R1. 文件即真相，索引即缓存
 
-- 记忆库是一个 markdown 文件夹（默认 `~/.vera/memory/`，路径可配置），**每条记忆一个 `.md` 文件**：frontmatter 放元数据（type / scope / status / stains / sources / 时间戳），正文放记忆内容与 `[[slug]]` 双链。
+- 记忆库是一个 markdown 文件夹（默认 `~/.vera/memory/`，路径可配置），按 `<vaultPath>/<agentId>/` 分成 **per-Agent 作用域**；**每条记忆一个 `.md` 文件**：frontmatter 放元数据（type / scope / status / stains / sources / 时间戳），正文放记忆内容与 `[[slug]]` 双链。同一 Agent 的长期 Memory 默认跨 Space 使用；不存在隐式的全 Agent 共享库。
 - 该文件夹本身就是合法的 Obsidian vault，无需导出步骤；graph view 免费提供知识网可视化（可按属性分组上色）；文件库纳入 git，记忆与墨迹的变迁史自动留存。
 - 第 8 节的 SQL 表（embedding、keywords、relations、usage 统计）全部降级为**从文件派生的缓存**，可随时删除重建，永远不是权威数据。检索走索引，读取走文件。用户在 Obsidian 中直接编辑文件，Vera 侦测变更重建该条索引。
 - Raw Event（1.1 节）不进文件库：留在 gateway store，按 Space 隔离；frontmatter 的 sources 字段负责回链溯源。
-- **单写者**：所有写入必须经 gateway memory 模块排队；agent 与 dream 只能提议写入，不得直接改文件。读取不限。
+- **单写者**：所有程序写入必须经 gateway memory 模块排队；agent、dream、CLI 文件工具都只能提议操作，不得直接改 vault 文件。用户可在 Obsidian 中直接编辑；gateway 必须侦测变更、校验文件，再只重建受影响的派生索引。校验失败不得把错误内容纳入检索。读取不限。
 
 ### R2. slug 即指针、即文件名、即公共接口
 
@@ -53,6 +53,16 @@
 ### R6. 目标函数（本系统的唯一根本需求）
 
 在 agent 记得又多又全的前提下，不干扰、不费 token。三者分住三处：**"记得全"住磁盘**（零上下文成本，舍得存才敢在 prompt 端省）；**"不干扰"靠指针性质**（钩子是可选的门牌，不是闯进来的信息）；**"省 token"靠按需拉取**（贵的动作只在真实需求时发生）。一切后续设计决策以不破坏这个分工为准。
+
+### 现行身份与写入边界
+
+1. Memory 跟 `agentId` 走，不跟 Account 走。同一 Agent 在 Space A 获得并整理的长期 Memory 可在 Space B 检索；该 Agent 的主 Execution 或 subagent Execution 即使绑定不同 Account，也不切换 Memory。
+2. 跨 Agent 共享必须是未来明示的、有契约和授权的功能；本阶段不因 Space 成员关系、Account 授权或 subagent 派生而隐式共享 Memory。
+3. slug 一经建立不可由普通 PATCH 改名。正式改名只能作为一个 gateway 维护事务执行“新建新 slug → 全库替换双链 → 验证 → 归档旧 slug”；任一步失败都不得留下半改名状态。
+4. agent、dream 和 CLI 都只提交 create/update/archive/maintenance proposal，gateway memory queue 是唯一程序写者。CLI 可直接 Read 自己的 per-Agent vault，不得直接 Write。
+5. 用户在 Obsidian 中的编辑是外部权威变更，不伪装成第二个程序写者；gateway 侦测后先校验，合法才重建该条索引，不合法则保留文件供用户修复并发出明确错误。
+
+> **历史材料边界**：以下第 0–18 节保留最初的 hook 算法、prompt 与 UI 设计素材。其中的随机 `memory_id`、`room_id/session_id`、SQL 真值表、`/memory/*` API、CLI 直写、普通 rename 或隐式全 Agent 共享均不是现行契约。实施时以 R1–R6、上述现行边界与 `api-contract.md` 为准。
 
 ## 0. 核心原则
 
@@ -548,7 +558,7 @@ The agent previously stained this memory blue.
 
 dream 是独立的 memory maintenance subagent，不参与普通聊天，不接入 Vera 的 channel 系统。
 
-它是批处理任务：异步启动，只读写记忆数据库，不发消息，不占用主流程 context。
+它是批处理任务：异步启动，只读取 Memory 并向 gateway memory queue 提交维护 proposal，不直接写 vault，不发消息，不占用主流程 context。
 
 dream 可以做：
 
@@ -747,7 +757,9 @@ stain: #7A8FA6
 
 ---
 
-## 8. 推荐数据库 Schema
+## 8. 历史派生索引逻辑模型（非真值 Schema）
+
+> 本节 SQL 只用来说明 sources / stains / embeddings / relations 的派生关系。它们都必须能从 per-Agent markdown vault 重建，不是权威数据，也不是实施时要照搬的建表清单。
 
 ### 8.1 memories table
 
@@ -853,7 +865,9 @@ CREATE TABLE memory_relations (
 
 ---
 
-## 9. API 设计
+## 9. 历史 API 草案（不实施）
+
+> 本节 `/memory/*` 路径、随机 `memory_id` 与请求形状只是早期算法示例。现行路由只使用 `/api/agents/:agentId/memory` 领域前缀，slug 是公共指针，实际形状以 `api-contract.md` 为准。
 
 ### 9.1 写入记忆
 
@@ -1061,8 +1075,9 @@ context 容量达到阈值
 → 拉取相关旧 memories
 → memory_write_hook
 → schema 校验
-→ 写入 memories / memory_sources / memory_stains / memory_relations
-→ 更新 embedding
+→ 向 gateway memory queue 提交经校验的操作
+→ 原子写入 per-Agent markdown 文件
+→ 重建该条 sources / stains / relations / embedding 派生索引
 → 前端记忆库刷新
 
 session 结束
@@ -1070,7 +1085,7 @@ session 结束
 → 集中写入 + 维护
 ```
 
-校验失败时，不写入数据库，记录系统 log。
+校验失败时，不写入 vault，记录系统 log。
 
 ---
 
@@ -1149,13 +1164,11 @@ stain 不需要解释。
 
 ## 16. MVP 实施顺序
 
-**Step 1**: 建表
-- memories
-- memory_sources
-- memory_stains
-- memory_events
-- memory_embeddings
-- memory_relations
+**Step 1**: 固定 per-Agent vault 文件格式与 gateway 单写队列
+- markdown 文件是唯一真值
+- sources / stains 进 frontmatter
+- events 留 gateway store
+- embeddings / relations / usage 是可删除重建的派生索引
 
 **Step 2**: 保存 raw events
 所有对话先能落盘。
@@ -1177,7 +1190,7 @@ stain 不需要解释。
 实现双链关联结构，支持方向展开和一跳截断。
 
 **Step 8**: dream subagent
-独立进程，session 结束后异步启动，做集中写入和维护。
+session 结束后异步启动，做集中整理并向 gateway queue 提交维护 proposal，不直写 vault。
 
 ---
 
