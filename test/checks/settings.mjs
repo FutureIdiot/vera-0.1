@@ -1,6 +1,6 @@
 // n. 系统配置（Phase 4.5）：GET/PATCH /api/settings + 字段白名单校验 + 重启持久化。
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -54,17 +54,22 @@ export async function run(ctx) {
     assertEqual(s["presentation.bubbleMaxLength"], 800);
   });
 
-  await check("n.2 PATCH 部分覆盖 enum 字段 -> 200 且后续 GET 反映新值", async () => {
-    const patch = await httpRequest("PATCH", "/api/settings", {
-      settings: { "isolation.memory": "globalReadable" },
-    });
+  await check("n.2 isolation.memory 固定 isolated，旧值不可再写入", async () => {
+    for (const legacyValue of ["globalReadable", "perSpace"]) {
+      const rejected = await httpRequest("PATCH", "/api/settings", {
+        settings: { "isolation.memory": legacyValue },
+      });
+      assertEqual(rejected.status, 400);
+      assertEqual(rejected.json.error.code, "invalid_request");
+    }
+
+    const patch = await httpRequest("PATCH", "/api/settings", { settings: { "isolation.memory": "isolated" } });
     assertEqual(patch.status, 200);
-    assertEqual(patch.json.settings["isolation.memory"], "globalReadable");
-    assertEqual(patch.json.settings["isolation.files"], "isolated");
+    assertEqual(patch.json.settings["isolation.memory"], "isolated");
 
     const get = await httpRequest("GET", "/api/settings");
     assertEqual(get.status, 200);
-    assertEqual(get.json.settings["isolation.memory"], "globalReadable");
+    assertEqual(get.json.settings["isolation.memory"], "isolated");
   });
 
   await check("n.3 PATCH 未知 key -> 400 invalid_request；enum 无效值 -> 400；无副作用", async () => {
@@ -93,11 +98,16 @@ export async function run(ctx) {
     assertEqual(badShape.json.error.code, "invalid_request");
 
     const get = await httpRequest("GET", "/api/settings");
-    assertEqual(get.json.settings["isolation.memory"], "globalReadable");
+    assertEqual(get.json.settings["isolation.memory"], "isolated");
   });
 
-  await check("n.4 重启 gateway 后 setting 仍存在（settings.json 防抖落盘）", async () => {
+  await check("n.4 旧 isolation.memory override 迁移为固定 isolated，重启幂等", async () => {
     const migDir = await mkdtemp(join(tmpdir(), "vera-settings-persist-"));
+    const settingsPath = join(migDir, "settings.json");
+    await writeFile(settingsPath, JSON.stringify({
+      "isolation.memory": "globalReadable",
+      "memory.digestTrigger": "realtime",
+    }, null, 2), "utf8");
     const migPort1 = await getFreePort();
     const child1 = spawn(process.execPath, [join(repoRoot, "src/server.js")], {
       cwd: repoRoot,
@@ -117,6 +127,11 @@ export async function run(ctx) {
       await waitForHealth(migPort1);
       assert(true, `settings persist gateway#1 healthy: ${log1}`);
 
+      const migrated = await httpRequest("GET", "/api/settings", undefined, migPort1);
+      assertEqual(migrated.status, 200);
+      assertEqual(migrated.json.settings["isolation.memory"], "isolated");
+      assertEqual(migrated.json.settings["memory.digestTrigger"], "realtime");
+
       const patchResp = await httpRequest(
         "PATCH",
         "/api/settings",
@@ -128,6 +143,9 @@ export async function run(ctx) {
       assertEqual(patchResp.json.settings["presentation.bubbleMaxLength"], 1200);
 
       await killChild(child1);
+      const afterFirstStart = JSON.parse(await readFile(settingsPath, "utf8"));
+      assert(!Object.prototype.hasOwnProperty.call(afterFirstStart, "isolation.memory"), "legacy memory isolation override should be removed");
+      assertEqual(afterFirstStart["memory.digestTrigger"], "manual");
 
       const migPort2 = await getFreePort();
       const child2 = spawn(process.execPath, [join(repoRoot, "src/server.js")], {
@@ -156,6 +174,9 @@ export async function run(ctx) {
       } finally {
         await killChild(child2);
       }
+      const afterSecondStart = JSON.parse(await readFile(settingsPath, "utf8"));
+      assert(!Object.prototype.hasOwnProperty.call(afterSecondStart, "isolation.memory"), "restart must not recreate memory isolation override");
+      assertEqual(afterSecondStart["memory.digestTrigger"], "manual");
     } finally {
       await rm(migDir, { recursive: true, force: true });
     }

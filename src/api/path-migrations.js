@@ -59,7 +59,7 @@ async function restoreAnchorOverride(snapshot) {
   await rename(temporary, snapshot.path);
 }
 
-export async function migrateVaultPath({ config, settingsStore, memory, bootPaths, target }) {
+async function migrateVaultPathExclusive({ config, settingsStore, memory, bootPaths, target }) {
   const from = memory.getVaultPath();
   if (from === target) return { ok: true, key: "memory.vaultPath", from, to: target, restartRequired: false };
   const summary = await memory.inspect();
@@ -106,6 +106,10 @@ export async function migrateVaultPath({ config, settingsStore, memory, bootPath
     if (err instanceof ApiError) throw err;
     throw new ApiError("internal", `memory vault migration failed and was rolled back: ${err.message}`);
   }
+}
+
+export async function migrateVaultPath(dependencies) {
+  return dependencies.memory.withExclusive(() => migrateVaultPathExclusive(dependencies));
 }
 
 async function backupExistingTarget(target) {

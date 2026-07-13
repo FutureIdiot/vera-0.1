@@ -2,6 +2,7 @@
 
 export const STATUS_BY_CODE = {
   invalid_request: 400,
+  invalid_memory_file: 422,
   not_found: 404,
   conflict: 409,
   adapter_unavailable: 502,
@@ -11,10 +12,11 @@ export const STATUS_BY_CODE = {
 // HTTP/业务层错误：agents/、spaces/、api/ 里的服务函数抛这个，
 // api/http.js 的 asHandler 捕获后按 code 映射状态码。
 export class ApiError extends Error {
-  constructor(code, message) {
+  constructor(code, message, details) {
     super(message);
     this.name = "ApiError";
     this.code = code;
+    if (details !== undefined) this.details = details;
   }
 }
 

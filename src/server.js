@@ -47,6 +47,7 @@ const agentStates = createAgentStateTracker({ hub });
 const memory = createMemoryVault({
   vaultPath: config.memory.vaultPath,
   residentIndexMaxLines: config.memory.residentIndexMaxLines,
+  resolveSource: ({ messageId }) => store.find("messages", messageId),
 });
 
 // provider -> adapter：普通的两成员 map，不做注册表抽象

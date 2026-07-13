@@ -6,7 +6,7 @@ const GROUPS = [
   {
     title: "数据隔离",
     fields: [
-      ["isolation.memory", "Memory 原始记录", "select", [["isolated", "隔离"], ["globalReadable", "全局可读"], ["perSpace", "按 Space 配置"]]],
+      ["isolation.memory", "Memory（固定按 Agent 隔离）", "select", [["isolated", "隔离"]]],
       ["isolation.files", "Files", "select", [["isolated", "隔离"], ["specifiedShared", "指定 Space 共享"], ["globalReadable", "全局可读"]]],
       ["isolation.agentState", "Agent State", "select", [["isolated", "隔离"], ["globalVisible", "全局可见"]]],
     ],

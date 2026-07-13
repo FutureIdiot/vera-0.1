@@ -206,14 +206,16 @@
 
 ### P5-M1 — Memory 权威层、单写者与溯源
 
-- [ ] **M1契约先行**：在`api-contract.md`钉死权威frontmatter/SourceRef、手动来源、gateway operation、外部Obsidian变更、per-Agent写队列、原子替换、409当前版本、坏文件隔离与派生索引重建形状；只补M1实际consumer，不提前定义M2/M3 worker/API。
-- [ ] 在现有 `src/memory/` 内完成 vault 权威层，不新建领域目录：所有 gateway 写入进入串行队列并使用同目录临时文件 + 原子替换；读取仍直接读 markdown；外部 Obsidian 修改通过可重建扫描/索引刷新进入系统，坏文件隔离报错但不吞掉其他记忆。
-- [ ] 按冻结契约扩展 frontmatter 与校验，建立 `sources` → store 中原始 Message/Raw Event 的可追溯链；Raw Event 继续按 Space 隔离，Activity/工具过程默认不作为对话记忆输入，除非 D0 明确列入某种 source 类型。
-- [ ] vault按 `agentId` 分区；将当前手动 CRUD 收紧到slug永久不可改名、归档、删除、并发控制语义；409必须按契约返回当前权威版本供前端重载。Phase 5起主Agent、subagent、CLI adapter、hook与dream只提交proposal/operation，由memory模块验证并落盘，不再允许绕过队列直接写。
-- [ ] 迁移`isolation.memory`旧`globalReadable/perSpace` override为固定`isolated`并移除对应UI选项：Raw Message仍随Space权限隔离，长期Memory固定per-Agent跨Space；不得保留可重新打开隐式共享的兼容分支。
-- [ ] 建立派生索引的版本、重建和失效机制；删除索引后可仅凭 vault + store source 重新生成，索引损坏不得损坏 markdown 权威数据。
+- [x] **M1契约先行**：`api-contract.md`已钉死权威frontmatter/SourceRef、手动来源、gateway operation、外部Obsidian变更、per-Agent写队列、原子替换、409当前版本、坏文件隔离与派生索引重建形状；只补M1实际consumer，未提前定义M2/M3 worker/API。
+- [x] 在现有 `src/memory/` 内完成 vault 权威层，未新建领域目录：所有 gateway 写入进入串行队列并使用同目录临时文件 + fsync + 原子提交；读取仍以 markdown 为真相；外部 Obsidian 修改通过可重建扫描/索引刷新进入系统，坏文件隔离报错但不吞掉其他记忆。
+- [x] 按冻结契约扩展 frontmatter 与校验，建立 `sources` → store 中原始 Message 的可追溯链；Raw Message继续按Space隔离，M1仅接受`message/manual`两种SourceRef，Activity/工具过程不作为来源。
+- [x] vault按 `agentId` 分区；手动 CRUD 已收紧到slug永久不可改名、归档、删除与opaque version并发控制；409返回当前权威版本供前端重载。程序写入统一进入精确`MemoryOperation`与memory单写者，未保留rename/直写兼容别名。
+- [x] 已迁移`isolation.memory`旧`globalReadable/perSpace` override为固定`isolated`并移除对应UI选项：Raw Message仍随Space权限隔离，长期Memory固定per-Agent跨Space；旧值写入返回400。
+- [x] 已建立派生索引的版本、内容指纹、失效与原子重建机制；缺失、语法/语义损坏的索引可仅凭 vault + store source 重建，索引降级不损坏或遮蔽 markdown 权威数据。
 
 **M1 验收**：并发写同一 slug 不丢数据；进程在写入中断后旧文件或新文件至少一份完整可读；外部编辑能被重扫发现；坏 frontmatter 有可见错误；任一记忆可沿 sources 回到正确 Space 的原始记录；清空派生索引后重建结果等价。
+
+**M1验收（2026-07-13完成）**：`npm test` 113/113、真实临时gateway黑盒68/68、Memory/迁移/中断定向测试17/17、`build:web`、全部改动文件`node --check`与`git diff --check`通过。并发create与同version并发update均一胜一409且败者拿到当前权威版本；exclusive迁移期间新写只落新vault；模拟temp写完、rename前中断后旧文件仍完整；外部create/update/remove、坏文件隔离与前端可见诊断、Message SourceRef→正确Space、索引缺失/语法及语义损坏重建等价均有自动化证据。独立终审未发现剩余阻断或高风险，且确认未进入M2/M3。
 
 ### P5-M2 — memory_write_hook 与触发器
 

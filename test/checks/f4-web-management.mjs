@@ -47,8 +47,8 @@ export async function run(ctx) {
     const created = await httpRequest("POST", "/api/agents", { name: "F4 memory budget", provider: "mock" });
     assertEqual(created.status, 201);
     const agentId = created.json.agent.id;
-    await httpRequest("POST", `/api/agents/${agentId}/memory`, { slug: "first-memory", description: "first hook", content: "first" });
-    await httpRequest("POST", `/api/agents/${agentId}/memory`, { slug: "second-memory", description: "second hook", content: "second" });
+    await httpRequest("POST", `/api/agents/${agentId}/memory`, { slug: "first-memory", type: "decision", description: "first hook", content: "first" });
+    await httpRequest("POST", `/api/agents/${agentId}/memory`, { slug: "second-memory", type: "decision", description: "second hook", content: "second" });
     const setting = await httpRequest("PATCH", "/api/settings", { settings: { "memory.injectionBudgetResidentLines": 1 } });
     assertEqual(setting.status, 200);
     const space = await httpRequest("POST", "/api/spaces", { name: "F4 memory budget", seats: [{ agentId }] });

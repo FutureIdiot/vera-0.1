@@ -7,6 +7,7 @@ export async function mountAgentMemoryView({ root, platform, runtime, agentId, s
   const agent = runtime.getBootstrap().agents.find((item) => item.id === agentId);
   const client = createMemoryClient(createHttpClient(platform));
   let memories = [];
+  let memoryErrors = [];
   let selected = null;
   let disposed = false;
   let dirty = false;
@@ -54,6 +55,7 @@ export async function mountAgentMemoryView({ root, platform, runtime, agentId, s
   function setEditor(memory) {
     selected = memory;
     slug.value = memory?.slug ?? "";
+    slug.readOnly = Boolean(memory);
     type.value = memory?.type ?? "";
     description.value = memory?.description ?? "";
     status.value = memory?.status ?? "active";
@@ -85,6 +87,36 @@ export async function mountAgentMemoryView({ root, platform, runtime, agentId, s
       list.appendChild(button);
     }
   }
+  function applyListResponse(response) {
+    memories = response.memories ?? [];
+    memoryErrors = response.errors ?? [];
+  }
+  function diagnosticsSuffix() {
+    if (!memoryErrors.length) return "";
+    const paths = memoryErrors.slice(0, 3).map((error) => error.relativePath).filter(Boolean).join("、");
+    return `；另有 ${memoryErrors.length} 个文件格式异常${paths ? `（${paths}）` : ""}`;
+  }
+  function recoverConflict(error) {
+    const reason = error?.details?.details?.reason;
+    const current = error?.details?.details?.current?.memory;
+    if (error?.status !== 409 || reason !== "version_mismatch" || typeof current?.content !== "string") return false;
+    memories = memories.map((item) => item.slug === current.slug ? {
+      slug: current.slug,
+      type: current.type,
+      description: current.description,
+      status: current.status,
+      stains: current.stains,
+      sourceCount: current.sources?.length ?? 0,
+      createdAt: current.createdAt,
+      updatedAt: current.updatedAt,
+      version: current.version,
+    } : item);
+    setEditor(current);
+    renderList();
+    notice.textContent = "这条刚被 agent 改过，已加载当前版本，请确认后再保存。";
+    notice.dataset.tone = "danger";
+    return true;
+  }
   for (const control of [slug, type, description, status, content]) control.addEventListener("input", () => { dirty = true; notice.textContent = "有未保存更改"; });
   create.addEventListener("click", () => {
     if (dirty && !window.confirm("当前 Memory 尚未保存，确定新建？")) return;
@@ -97,33 +129,59 @@ export async function mountAgentMemoryView({ root, platform, runtime, agentId, s
     const body = { slug: slug.value.trim(), type: type.value, description: description.value, status: status.value, content: content.value };
     try {
       const response = selected
-        ? await client.update(agentId, selected.slug, { ...body, newSlug: body.slug, ifMatch: selected.updatedAt })
-        : await client.create(agentId, body);
+        ? await client.update(agentId, selected.slug, {
+            type: body.type,
+            description: body.description,
+            status: body.status,
+            content: body.content,
+            ifMatch: selected.version,
+          })
+        : await client.create(agentId, {
+            slug: body.slug,
+            type: body.type,
+            description: body.description,
+            content: body.content,
+          });
       const full = await client.get(agentId, response.memory.slug);
       setEditor(full.memory);
-      memories = (await client.list(agentId)).memories;
+      applyListResponse(await client.list(agentId));
       renderList();
-      notice.textContent = "已保存";
-      notice.dataset.tone = "success";
+      notice.textContent = `已保存${diagnosticsSuffix()}`;
+      notice.dataset.tone = memoryErrors.length ? "danger" : "success";
     } catch (err) {
-      notice.textContent = err.status === 409 && selected ? "这条刚被 agent 改过，请重新加载后再编辑。" : err.message;
-      notice.dataset.tone = "danger";
+      if (!recoverConflict(err)) {
+        notice.textContent = err.message;
+        notice.dataset.tone = "danger";
+      }
     } finally { setBusy(save, false); }
   });
   remove.addEventListener("click", async () => {
     if (!selected || !window.confirm(`删除 [[${selected.slug}]]？`)) return;
     setBusy(remove, true, "删除中…");
     try {
-      await client.remove(agentId, selected.slug);
+      await client.remove(agentId, selected.slug, selected.version);
       memories = memories.filter((item) => item.slug !== selected.slug);
       setEditor(null);
       renderList();
-    } catch (err) { notice.textContent = err.message; notice.dataset.tone = "danger"; }
+      if (memoryErrors.length) {
+        notice.textContent = `已删除${diagnosticsSuffix()}`;
+        notice.dataset.tone = "danger";
+      }
+    } catch (err) {
+      if (!recoverConflict(err)) { notice.textContent = err.message; notice.dataset.tone = "danger"; }
+    }
     finally { setBusy(remove, false); }
   });
   try {
-    memories = (await client.list(agentId)).memories;
-    if (!disposed) { renderList(); setEditor(null); }
+    applyListResponse(await client.list(agentId));
+    if (!disposed) {
+      renderList();
+      setEditor(null);
+      if (memoryErrors.length) {
+        notice.textContent = `已加载可用 Memory${diagnosticsSuffix()}`;
+        notice.dataset.tone = "danger";
+      }
+    }
   } catch (err) { notice.textContent = err.message; notice.dataset.tone = "danger"; }
   return () => {
     if (dirty && !window.confirm("Memory 尚未保存，确定离开？")) return false;

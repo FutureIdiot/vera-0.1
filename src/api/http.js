@@ -14,8 +14,10 @@ export function sendNoContent(res, status = 204) {
   res.end();
 }
 
-export function sendError(res, status, code, message) {
-  sendJson(res, status, { error: { code, message } });
+export function sendError(res, status, code, message, details) {
+  const error = { code, message };
+  if (details !== undefined) error.details = details;
+  sendJson(res, status, { error });
 }
 
 export async function readJsonBody(req) {
@@ -40,7 +42,7 @@ export function asHandler(fn) {
     } catch (err) {
       const code = err?.code || "internal";
       const status = STATUS_BY_CODE[code] || 500;
-      sendError(ctx.res, status, code, err?.message || "internal error");
+      sendError(ctx.res, status, code, err?.message || "internal error", err?.details);
       recordError("api", code, err?.message || "internal error");
     }
   };

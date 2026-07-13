@@ -26,7 +26,7 @@ import { ApiError } from "./errors.js";
 // 新增 key 必须先过 ground truth 4.1/4.3 + api-contract.md 字段清单，不得自行扩。
 const ALLOWED_KEYS = {
   // 数据隔离规则（ground truth 4.1「数据隔离规则」）
-  "isolation.memory": { type: "enum", values: ["isolated", "globalReadable", "perSpace"] },
+  "isolation.memory": { type: "enum", values: ["isolated"] },
   "isolation.files": { type: "enum", values: ["isolated", "specifiedShared", "globalReadable"] },
   "isolation.agentState": { type: "enum", values: ["isolated", "globalVisible"] },
   // 记忆整理（ground truth 4.1「记忆整理」：触发时机 + 注入预算）
@@ -135,9 +135,17 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
     // 只认白名单 key，磁盘被人塞脏数据不进内存
     overrides = {};
     for (const key of Object.keys(ALLOWED_KEYS)) {
+      // Phase 5 起长期 Memory 固定 per-Agent isolated。旧版可能持久化了
+      // globalReadable/perSpace，甚至多余的 isolated override；统一删除该
+      // override，让合并视图只从固定默认值得到 isolated。
+      if (key === "isolation.memory") continue;
       if (Object.prototype.hasOwnProperty.call(parsed, key)) {
         overrides[key] = parsed[key];
       }
+    }
+    if (Object.prototype.hasOwnProperty.call(parsed, "isolation.memory")) {
+      dirty = true;
+      await flush();
     }
     return getAll();
   }
@@ -218,6 +226,16 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
     validatePatch(patch);
     let changed = false;
     for (const [key, value] of Object.entries(patch)) {
+      // isolation.memory 是固定策略，对外仍保留设置字段形状，但不再
+      // 产生 override；合法写入只能是 isolated 或 null，两者都收口为
+      // 删除历史 override。
+      if (key === "isolation.memory") {
+        if (Object.prototype.hasOwnProperty.call(overrides, key)) {
+          delete overrides[key];
+          changed = true;
+        }
+        continue;
+      }
       if (value === null) {
         // null = 删除 override 恢复默认（api-contract.md 336）
         if (Object.prototype.hasOwnProperty.call(overrides, key)) {

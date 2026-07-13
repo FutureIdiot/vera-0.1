@@ -236,7 +236,7 @@ export async function run(ctx) {
 
   // ---- Memory 编辑 ----
 
-  await check("o.18 Agent Memory GET/PATCH/DELETE 与作用域隔离", async () => {
+  await check("o.18 Agent Memory 版本并发、slug不可改与诊断形状", async () => {
     const prefix = `/api/agents/${ctx.agent.id}/memory`;
     const create = await httpRequest("POST", prefix, {
       slug: "f1-test-mem",
@@ -245,25 +245,63 @@ export async function run(ctx) {
       content: "original body",
     });
     assertEqual(create.status, 201);
+    assert(/^sha256:[0-9a-f]{64}$/.test(create.json.memory.version), "create should return a byte version");
+    const originalVersion = create.json.memory.version;
 
     const get = await httpRequest("GET", `${prefix}/f1-test-mem`);
     assertEqual(get.status, 200);
     assertEqual(get.json.memory.content, "original body");
+    assertEqual(get.json.memory.scope.agentId, ctx.agent.id);
+    assertEqual(get.json.memory.sources[0].kind, "manual");
+
+    const missingIfMatch = await httpRequest("PATCH", `${prefix}/f1-test-mem`, { description: "must fail" });
+    assertEqual(missingIfMatch.status, 400);
+    assertEqual(missingIfMatch.json.error.code, "invalid_request");
+
+    const rename = await httpRequest("PATCH", `${prefix}/f1-test-mem`, {
+      ifMatch: originalVersion,
+      newSlug: "renamed-memory",
+    });
+    assertEqual(rename.status, 400);
+    assertEqual(rename.json.error.code, "invalid_request");
 
     const patch = await httpRequest("PATCH", `${prefix}/f1-test-mem`, {
+      ifMatch: originalVersion,
       description: "updated hook",
       status: "archived",
     });
     assertEqual(patch.status, 200);
     assertEqual(patch.json.memory.status, "archived");
     assertEqual(patch.json.memory.description, "updated hook");
+    assert(patch.json.memory.version !== originalVersion, "successful patch should advance the version");
+
+    const stalePatch = await httpRequest("PATCH", `${prefix}/f1-test-mem`, {
+      ifMatch: originalVersion,
+      content: "stale overwrite",
+    });
+    assertEqual(stalePatch.status, 409);
+    assertEqual(stalePatch.json.error.code, "conflict");
+    assertEqual(stalePatch.json.error.details.reason, "version_mismatch");
+    assertEqual(stalePatch.json.error.details.current.memory.content, "original body");
+    assertEqual(stalePatch.json.error.details.current.memory.version, patch.json.memory.version);
+
+    const list = await httpRequest("GET", prefix);
+    assertEqual(list.status, 200);
+    assert(Array.isArray(list.json.memories), "memory list should expose memories");
+    assert(Array.isArray(list.json.errors), "memory list should expose visible file errors");
+    assert(typeof list.json.index.generation === "number", "memory list should expose derived index generation");
 
     const missingAgent = await httpRequest("GET", "/api/agents/agt_missing/memory");
     assertEqual(missingAgent.status, 404);
     const oldRoute = await httpRequest("GET", "/api/memory/f1-test-mem");
     assertEqual(oldRoute.status, 404);
 
-    const del = await httpRequest("DELETE", `${prefix}/f1-test-mem`);
+    const staleDelete = await httpRequest("DELETE", `${prefix}/f1-test-mem?ifMatch=${encodeURIComponent(originalVersion)}`);
+    assertEqual(staleDelete.status, 409);
+    assertEqual(staleDelete.json.error.details.reason, "version_mismatch");
+    assertEqual(staleDelete.json.error.details.current.memory.version, patch.json.memory.version);
+
+    const del = await httpRequest("DELETE", `${prefix}/f1-test-mem?ifMatch=${encodeURIComponent(patch.json.memory.version)}`);
     assertEqual(del.status, 204);
 
     const getAfterDelete = await httpRequest("GET", `${prefix}/f1-test-mem`);

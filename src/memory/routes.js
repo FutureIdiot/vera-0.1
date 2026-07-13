@@ -14,7 +14,12 @@ export function registerMemoryRoutes(router, { memory, store }) {
     "/api/agents/:agentId/memory",
     asHandler(async ({ res, params }) => {
       requireAgent(params.agentId);
-      sendJson(res, 200, { memories: await memory.listMemories(params.agentId) });
+      const result = await memory.listWithDiagnostics(params.agentId);
+      const memories = result.memories.map(({ sourceRefs, links, schemaVersion, scope, ...summary }) => ({
+        ...summary,
+        sourceCount: sourceRefs?.length ?? summary.sourceCount ?? 0,
+      }));
+      sendJson(res, 200, { memories, errors: result.errors, index: result.index });
     }),
   );
 
@@ -49,9 +54,9 @@ export function registerMemoryRoutes(router, { memory, store }) {
 
   router.delete(
     "/api/agents/:agentId/memory/:slug",
-    asHandler(async ({ res, params }) => {
+    asHandler(async ({ res, params, query }) => {
       requireAgent(params.agentId);
-      await memory.deleteMemory(params.agentId, params.slug);
+      await memory.deleteMemory(params.agentId, params.slug, query.get("ifMatch") ?? undefined);
       sendNoContent(res);
     }),
   );
