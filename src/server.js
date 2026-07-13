@@ -28,6 +28,7 @@ import { registerThemesRoutes } from "./api/themes-routes.js";
 import { applyRuntimeSettings } from "./core/runtime-settings.js";
 import { getOwningAccount, listAccounts } from "./agents/accounts.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
+import { createOllamaAdapter } from "./adapters/ollama-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
@@ -52,13 +53,15 @@ const memory = createMemoryVault({
   resolveSource: ({ messageId }) => store.find("messages", messageId),
 });
 
-// provider -> adapter：普通的两成员 map，不做注册表抽象
+// provider -> adapter：显式的普通map，不做注册表抽象
 // （AGENTS.md「可配置 ≠ 抽象层」）。
 const adapters = {
   mock: createMockAdapter({ chunkDelayMs: config.mock.delayMs }),
+  ollama: createOllamaAdapter({ config: config.ollama }),
   opencode: createOpencodeAdapter({ config: config.opencode }),
 };
 const memoryDigestAdapters = {
+  ollama: adapters.ollama,
   opencode: adapters.opencode,
 };
 

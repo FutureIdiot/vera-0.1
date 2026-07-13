@@ -52,6 +52,8 @@ OpenCode实现只服务`kind=cli, provider=opencode`的Account：每次digest at
 
 本机Gemma是另一条独立Account：`kind=api, provider=ollama, model=gemma4:e4b`，由完整的原生Ollama adapter直接调用Account `connection.baseUrl`下的HTTP API，不经过OpenCode CLI/daemon，不共享Account、sessionState、连接或额度后备。该adapter必须同时实现聊天`run(ctx)`和隔离的`digestMemory(...)`，不得做成只能整理Memory的残缺provider。
 
+Ollama容量与超时走gateway运行配置，不进Account API/Settings UI：`numCtx=16384`、`maxInputBytes=12000`、`watchdogMs=1800000`、`digestTimeoutMs=300000`，env分别为`VERA_OLLAMA_NUM_CTX`、`VERA_OLLAMA_MAX_INPUT_BYTES`、`VERA_OLLAMA_WATCHDOG_MS`、`VERA_OLLAMA_MEMORY_DIGEST_TIMEOUT_MS`。`maxInputBytes`是请求前的保守UTF-8 byte容量门槛，不伪装成provider tokenizer精确计数；它必须与真实smoke验证的`num_ctx`组合使用，不得单独调大绕过截断闸门。
+
 Ollama 0.23.2实测会在把Vera完整proposal schema转换为grammar时被`oneOf`/`patternProperties`/部分`pattern`组合触发进程崩溃。Ollama adapter必须把gateway权威`proposalSchema`下沉为该版本可接受的基础结构schema，禁止把已知不兼容关键字原样发送；该下沉只约束provider输出，不改变Vera契约。模型返回后仍必须由gateway完整proposal validator复核，provider返回200或合法JSON不等于写入合法。未来Ollama版本只有通过1.2的schema能力探针和真实smoke后才能放宽下沉规则，不能按版本号猜测。
 
 OpenCode Memory digest的额度后备由gateway运行配置映射，不进入Account API或Settings UI。只有402/403/429结构化错误的`code/type`精确为`insufficient_quota`、`quota_exhausted`或`quota_exceeded`时，adapter才规范化为`quota_exhausted`，允许丢弃primary残片并用相同不可变payload在新session中重试一次；HTTP状态或自由文本本身不是额度证据。取消、超时、网络、认证、模型不存在、普通rate limit、provider 5xx、坏JSON或非法proposal均不得fallback。后备失败仍由digest service安全折叠。聊天`run(ctx)`永远只使用`account.model`且不读取该映射。
@@ -104,6 +106,8 @@ createProviderAdapter({ config }) -> {
   shutdown?()
 }
 ```
+
+`ctx.prompt`固定为`{text,turnText,historyUserText,residentBlock}`：`text`是CLI可直接投递的完整本轮输入；`turnText`不含常驻索引，只含本轮群聊声告+触发正文；`historyUserText`只在触发者为用户时等于未注入的原始触发正文，否则为`null`；`residentBlock`是当前可用的常驻索引稳定前缀，供API session首轮或非法state重置时保存。OpenCode等CLI adapter仍只消费`text`；API adapter使用`residentBlock + 稳定history + turnText`组帧，成功后只允许把`historyUserText + assistant`加入稳定history，不得持久化群聊声告或完整`text`。
 
 - `run(ctx)`沿附录A入参与返回形状。adapter必须按provider顺序把每段文本恰好一次交给`onDelta`；若产生delta，其拼接文本必须与最终`content`语义一致，无delta时才允许仅以`content`兜底。`sessionState`必须是可JSON序列化的provider私有值：CLI通常保存外部session id，API通常保存稳定history；新会话建立后立即`persistSessionState`，结束时在返回值再次给出。失效会话必须明确报告`session-reset`后重建，不得静默丢上下文。sessionState不得含secret、临时目录或无需持久化的宿主绝对路径。
 - adapter不得依赖provider静默截断当前`prompt.text`或digest payload。chat超限时只能按冻结规则确定性裁剪最旧history，不得丢当前prompt；即使清空history仍放不下时，必须在请求前明确失败，或使用已经真实smoke验证的provider容量配置（例如Ollama `num_ctx`）。digest payload是不可变输入，adapter不得自行丢chunks/facts/schema来适配容量；放不下就在provider请求前失败。
@@ -367,7 +371,7 @@ export function createOpencodeAdapter({ config }) {
 }
 ```
 
-`run(ctx)` 入参 `{ agent, account, prompt: { text }, sessionState, workspacePath, onDelta, onActivity, requestApproval, persistSessionState, signal }`。adapter 通过 `onDelta` / `onActivity` 回调上报，通过返回值 `{ content, sessionState }` 兜底。
+`run(ctx)` 入参 `{ agent, account, prompt: { text, turnText, historyUserText, residentBlock }, sessionState, workspacePath, onDelta, onActivity, requestApproval, persistSessionState, signal }`。adapter 通过 `onDelta` / `onActivity` 回调上报，通过返回值 `{ content, sessionState }` 兜底。
 
 **Phase 5.5联邦形态如何逐项翻译**：
 

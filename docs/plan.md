@@ -235,18 +235,18 @@
 - [x] 程序侧已完成确定性分块、per-Agent事实目录、proposal全量预校验、持久proposal/receipt与M1单写者应用；模型只能返回严格proposal，不能接触store/vault。现有OpenCode adapter已完成独立临时目录、全Tools deny、structured session与仅Navy结构化额度机器码触发一次免费V4 Flash的stub闭环，绝不改变聊天或Account模型。
 - [x] 已接通 `memory.digestTrigger` 的 `scheduled` / `realtime` / `manual` consumer 与五段cron；实时阈值只用Unicode字符水位，M2不实现session-end dream。无关Settings更新不越过cron触发catch-up，成功watermark使用持久toSeq不因后续可见性变化倒退。
 - [x] 新provider adapter规范已冻结：一个adapter对应一套协议/生命周期，同provider多Account/模型复用；生产provider必须有`run(ctx)`，承担M2时再实现隔离`digestMemory`；固定kind/provider fail-fast、会话/stream、schema下沉、错误、取消、secret、资源清理和三层conformance闸门，不预建基类/注册表。
-- [ ] 新增完整原生Ollama adapter：只接受`kind=api, provider=ollama`，以Account `connection.baseUrl`直连`/api/chat`，实现聊天stream/history连续性与隔离digest；对0.23.2使用无`oneOf/patternProperties/pattern`的兼容transport schema，返回后仍走gateway完整validator。不得经过OpenCode，也不得做digest-only adapter。
-- [ ] 在`test/adapters/`固化行为型conformance夹具并同时回归Ollama/OpenCode：共享的只是kind/provider、stream/session、错误/取消/timeout、secret、cleanup和digest隔离断言，不抽取运行时BaseAdapter；再以临时gateway黑盒和各自显式真实provider smoke完成后两层闸门。
-- [ ] slug/钩子行、source、双链、stain裸hex、同事实targetFactId、手动Memory adopt与纠错supersede校验已落地；fact catalog还须把现有`type`提供给executor并验证update/supersede不会因不可见旧分类而无意改类；无复用价值/无来源推断/agent自创偏好的最终语义判断仍等待真实`digestMemory`执行者接入后用固定raw夹具完成生产路径验收。
+- [x] 新增完整原生Ollama adapter：只接受`kind=api, provider=ollama`，以Account `connection.baseUrl`直连`/api/chat`，实现聊天stream/稳定history连续性与隔离digest；对0.23.2使用无`oneOf/patternProperties/pattern/const`的兼容transport schema，返回后仍走gateway完整validator。实现不经过OpenCode，也不是digest-only adapter。
+- [x] 在`test/adapters/`按同一行为矩阵回归Ollama/OpenCode：固定kind/provider、stream/session、稳定/临时prompt分层、容量裁剪、错误/取消/timeout、secret、cleanup和digest隔离断言，不抽取运行时BaseAdapter；`verify.mjs`的临时gateway+stub Ollama黑盒与真实Ollama 0.23.2/Gemma chat+digest smoke已完成后两层闸门。
+- [ ] slug/钩子行、source、双链、stain裸hex、同事实targetFactId、手动Memory adopt与纠错supersede校验已落地；fact catalog已把现有`type`交给executor并回归mapped/unmapped旧分类可见；无复用价值/无来源推断/agent自创偏好的最终语义判断仍需固定raw夹具完成生产路径验收。
 - [x] hook入队不阻塞聊天；单Memory写入原子，失败/重试/取消有持久可观察job状态、幂等键与安全SSE，重试复用已flush proposal并续跑未应用receipt，不重复创建Memory。
 
 **M2 验收**：使用固定raw events夹具覆盖create/update/archive/skip/重复重试；同一事实换措辞、换建议slug、跨job再次出现仍只落一条Memory，纠错取代旧事实时双方sources可追溯；定时、容量、手动三种触发走同一pipeline；非法proposal全部拒绝且vault不变；聊天run不等待整理完成；测试日志/API不泄露provider secret或stain解释。
 
 真实executor补充验收分两条独立路径：Ollama/Gemma API Account必须由原生Ollama adapter直连并成功完成chat+digest，OpenCode/Navy CLI Account必须由OpenCode adapter成功完成chat+digest；两条digest请求均无Memory Tools/Workspace且返回再过gateway完整validator，chat则按各provider真实能力与Approval契约执行。Navy primary成功时不调用Flash，结构化额度机器码时恰好用新session重试一次Flash且Account.model不变；单独HTTP 402/403/429、自由文本、timeout、network、auth、model-not-found、invalid structured proposal均不调用Flash；fallback也失败时job安全`executor_failed`且vault不变。两条真实provider smoke显式执行，普通`npm test`不依赖本机模型服务或供应商额度。
 
-- [ ] **真实模型闸门**：原生Ollama adapter以`kind=api, provider=ollama, model=gemma4:e4b`显式跑chat+digest；OpenCode adapter以`kind=cli, provider=opencode, model=navy/deepseek-v4-pro`显式跑chat+digest，且只有结构化机器码明确额度耗尽才允许同job回退`opencode/deepseek-v4-flash-free`。必须断言两条实际transport互不借道，digest返回都再通过gateway权威proposal validator。本项未通过前M2不标完成。
+- [ ] **真实模型闸门**：原生Ollama adapter以`kind=api, provider=ollama, model=gemma4:e4b`显式跑chat+digest **已通过**；OpenCode adapter以`kind=cli, provider=opencode, model=navy/deepseek-v4-pro`显式跑chat+digest仍待执行，且只有结构化机器码明确额度耗尽才允许同job回退`opencode/deepseek-v4-flash-free`。必须断言两条实际transport互不借道，digest返回都再通过gateway权威proposal validator。Navy路径未通过前M2不标完成。
 
-**M2当前验收（2026-07-14，gateway pipeline与OpenCode stub闭环，原生Ollama adapter/Navy真实闸门待完成）**：此前`npm test` 152/152通过、2个旧真实模型smoke默认skip；`build:web`、相关`node --check`与`git diff --check`通过。OpenCode stub已证明独立session/临时目录、session wildcard deny、全部tool id=false、structured response、tool事件即失败、primary成功不fallback、结构化quota机器码恰好fallback一次、单独402/普通429/401/坏结构不fallback，以及取消/超时清理。2026-07-14临时脚本直连Ollama 0.23.2 `/api/chat`与`gemma4:e4b`，简化transport schema后返回1条create proposal并通过Vera完整validator；同时确认完整schema/部分pattern会令Ollama grammar转换崩溃。该smoke只证明兼容路径可行，不等于正式adapter已解决；旧“Gemma通过OpenCode”真实测试语义作废，代码实现时须迁入`ollama-adapter.test.js`。Navy真实请求尚未执行，因此M2未标完成。
+**M2当前验收（2026-07-14，原生Ollama三层闸门已通过，Navy真实闸门待完成）**：`npm test` 161项通过、2个真实smoke默认skip；`verify.mjs` 72/72通过，其中固定临时gateway+stub Ollama黑盒已验证Account路由、chat stream/sessionState与digest job。原生Ollama adapter直连Ollama 0.23.2 `/api/chat`，以`gemma4:e4b`显式跑chat+digest 7/7通过，`num_ctx=16384`实际装载，digest返回再过Vera完整validator；聊天稳定history只保存用户原始触发和本人assistant回复，不持久化群聊声场。OpenCode stub已证明独立session/临时目录、Tools deny、structured response与严格Navy quota fallback；旧“Gemma通过OpenCode”测试已删除。Navy真实请求尚未执行，因此M2未标完成。
 
 ### P5-M3 — 三渠道检索、注入预算、横向扩展与正文展开
 

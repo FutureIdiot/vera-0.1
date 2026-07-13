@@ -179,6 +179,7 @@ test("targetFactId matches the same fact across different wording and semantic s
       suggestedSlug: "response-language", type: "preference", description: "Default responses use Chinese", content: "Use Chinese by default.",
     }] };
     assert.equal(facts[0].factId, targetFactId);
+    assert.equal(facts[0].type, "preference");
     return { proposals: [{
       action: "update", evidenceMessageIds: ["msg_two"], targetFactId,
       fact: { subject: "回复语言", relation: "默认为", qualifiers: ["日常对话"], value: "chinese" },
@@ -201,6 +202,7 @@ test("an unmapped manual Memory can be adopted without creating a duplicate slug
     const manual = facts.find((fact) => fact.slug === "manual-rule");
     assert.equal(manual.unmapped, true);
     assert.equal(manual.factId, null);
+    assert.equal(manual.type, "decision");
     return { proposals: [{
       action: "update", evidenceMessageIds: ["msg_one"], targetMemorySlug: "manual-rule",
       fact: { subject: "manual rule", relation: "state", qualifiers: [], value: "kept" },

@@ -123,7 +123,8 @@ export async function run(ctx) {
       while (Date.now() < deadline) {
         const tl = await httpRequest("GET", `/api/spaces/${SPACE_ID}/timeline?limit=50`, undefined, migPort);
         const found = tl.json.items.find(
-          (i) => i.itemType === "message" && i.runId === post.json.runs[0].id && i.author?.type === "agent",
+          (i) => i.itemType === "message" && i.runId === post.json.runs[0].id
+            && i.author?.type === "agent" && /\u56de\u58f0\u7b2c/.test(i.content),
         );
         if (found && found.status === "completed") {
           legacyMsg = found;
@@ -238,7 +239,8 @@ export async function run(ctx) {
       while (Date.now() < deadline) {
         const tl = await httpRequest("GET", `/api/spaces/${SPACE_ID}/timeline?limit=50`, undefined, migPort);
         const found = tl.json.items.find(
-          (i) => i.itemType === "message" && i.runId === post.json.runs[0].id && i.author?.type === "agent",
+          (i) => i.itemType === "message" && i.runId === post.json.runs[0].id
+            && i.author?.type === "agent" && /\u56de\u58f0\u7b2c/.test(i.content),
         );
         if (found && found.status === "completed") {
           legacyMsg = found;

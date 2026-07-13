@@ -90,6 +90,12 @@ export function createOpencodeAdapter({ config }) {
   let inFlight = 0;
   let idleTimer = null;
 
+  function assertAccount(account, code = "unavailable") {
+    if (account?.kind !== "cli" || account?.provider !== "opencode") {
+      throw new AdapterError(code, "OpenCode adapter Account kind/provider mismatch");
+    }
+  }
+
   function resolveBinary(account) {
     const command = account?.connection?.command;
     if (command && (command.split("/").pop() || "") === "opencode") return command;
@@ -446,6 +452,7 @@ export function createOpencodeAdapter({ config }) {
   }
 
   async function digestMemory({ account, payload, signal }) {
+    assertAccount(account, "executor_unavailable");
     const primary = splitModelId(account?.model).model;
     const binary = resolveBinary(account);
     try {
@@ -480,6 +487,7 @@ export function createOpencodeAdapter({ config }) {
 
   async function run(ctx) {
     const { agent, account, prompt, sessionState, workspacePath, onDelta, onActivity, persistSessionState, signal } = ctx;
+    assertAccount(account);
     if (signal?.aborted) throw new AdapterError("cancelled", "aborted before start");
 
     clearIdleTimer();

@@ -125,9 +125,10 @@ export async function compilePrompt({ store, space, seat, agent, account, trigge
 
   const priorSessionState = store.getSessionState(account.id, space.id);
 
-  // 常驻索引块：仅 (account, Space) 尚无 sessionState（即将开启全新外部会话）时注入。
-  // memory 空或 vault 空时 residentIndex 返回 null，直接照用。
-  const residentBlock = priorSessionState === null ? await memory?.residentIndex(agent.id) : null;
+  // 常驻索引块：text仅在无sessionState时注入；同时始终返回当前候选，
+  // 供API adapter在provider私有state非法、必须重置时恢复稳定前缀。
+  const residentBlock = await memory?.residentIndex(agent.id) ?? null;
+  const injectedResidentBlock = priorSessionState === null ? residentBlock : null;
 
   // 群聊声告段：从 store 临时派生，幂等。
   const spaceMessages = store.list("messages").filter((m) => m.spaceId === space.id);
@@ -142,11 +143,21 @@ export async function compilePrompt({ store, space, seat, agent, account, trigge
 
   // 拼装：[常驻索引块]?\n\n[群聊声告段]?\n\n[触发消息正文]
   // 缺哪段哪段连同其后的空行一起省略，不留前导/尾部空行。
+  const triggerText = triggerMessage.content ?? "";
+  const turnParts = [];
+  if (groupDelta) turnParts.push(groupDelta);
+  turnParts.push(triggerText);
+  const turnText = turnParts.join("\n\n");
   const parts = [];
-  if (residentBlock) parts.push(residentBlock);
-  if (groupDelta) parts.push(groupDelta);
-  parts.push(triggerMessage.content ?? "");
+  if (injectedResidentBlock) parts.push(injectedResidentBlock);
+  parts.push(turnText);
   const text = parts.join("\n\n");
 
-  return { text, sessionState: priorSessionState };
+  return {
+    text,
+    turnText,
+    historyUserText: triggerMessage.author?.type === "user" ? triggerText : null,
+    residentBlock,
+    sessionState: priorSessionState,
+  };
 }

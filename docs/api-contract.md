@@ -151,6 +151,8 @@ Workspace = Account 对应的执行环境与项目工作边界；`Account 1:1 Wo
 
 **prompt.text 物理拼装顺序**：`[常驻索引块]?\n\n[群聊声告段]?\n\n[触发消息正文]`，三段以 `\n\n` 分隔，缺哪段哪段连同其后的空行一起省略，不留前导/尾部空行；最终 text 永远至少含触发消息正文（非空字符串）。常驻索引块与群聊声告段是**两段严格分开的头部**：常驻索引是稳定前缀（仅在该 (account, Space) 尚无 sessionState 即首次新会话时注入一次，换代时不逐条刷新），群聊声告是每轮刷新的 volatile 段（仅在该 agent 上次本人发言之后到当前触发之间存在他人气泡时出现；无候选则整段连同 header 省略）。群聊声告段内格式固定 `=== 群内最近发言 ===\n- <署名>: <气泡正文>\n…`，署名取 `config.viewCompiler.groupDeltaUserLabel`（用户）或 agent.name（agent）；段内条数/总字符数达上限时从最早开始截断，发生截断时在 header 行后插一行 `config.viewCompiler.groupDeltaOmittedHint`。配置项默认值见 `src/core/config.js` 的 `viewCompiler` 节点：`groupDeltaMaxMessages: 20`、`groupDeltaMaxChars: 4000`、`groupDeltaHeader: "=== 群内最近发言 ==="`、`groupDeltaUserLabel: "用户"`、`groupDeltaOmittedHint: "（更早的发言数量已达上限，可用 fetch_detail 主动调阅）"`，env 对应 `VERA_VIEW_COMPILER_GROUP_DELTA_*`。
 
+编译层在保持`prompt.text`完整字节语义不变的同时返回`turnText/historyUserText/residentBlock`：`turnText`是去掉常驻块的本轮群聊声告+触发正文；`historyUserText`只在触发者为用户时返回未注入的原始正文，否则为`null`；`residentBlock`是当前常驻索引候选。API adapter每轮用`residentBlock + 稳定history + turnText`重建provider messages，成功后只持久化`historyUserText`和本人assistant回复；群聊声告、常驻块的本轮投影与完整`text`均不得当成user history。CLI adapter继续只消费`text`。
+
 ### Message
 
 ```json

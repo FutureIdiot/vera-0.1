@@ -35,6 +35,12 @@ const DEFAULTS = {
     memoryDigestPrimaryModel: "navy/deepseek-v4-pro",
     memoryDigestQuotaFallbackModel: "opencode/deepseek-v4-flash-free",
   },
+  ollama: {
+    watchdogMs: 30 * 60 * 1000,
+    digestTimeoutMs: 5 * 60 * 1000,
+    numCtx: 16384,
+    maxInputBytes: 12000,
+  },
   memory: {
     vaultPath: "~/.vera/memory", // Obsidian 兼容 vault，仓库外（api-contract.md Memory 一节）
     residentIndexMaxLines: 25, // 常驻索引截断行数
@@ -131,6 +137,15 @@ export function loadConfig(env = process.env) {
       memoryDigestQuotaFallbacks: opencodeDigestFallbackModel
         ? { [opencodeDigestPrimaryModel]: opencodeDigestFallbackModel }
         : {},
+    },
+    ollama: {
+      watchdogMs: positiveInt(env.VERA_OLLAMA_WATCHDOG_MS, DEFAULTS.ollama.watchdogMs),
+      digestTimeoutMs: positiveInt(
+        env.VERA_OLLAMA_MEMORY_DIGEST_TIMEOUT_MS,
+        DEFAULTS.ollama.digestTimeoutMs,
+      ),
+      numCtx: positiveInt(env.VERA_OLLAMA_NUM_CTX, DEFAULTS.ollama.numCtx),
+      maxInputBytes: positiveInt(env.VERA_OLLAMA_MAX_INPUT_BYTES, DEFAULTS.ollama.maxInputBytes),
     },
     memory: {
       vaultPath: expandHome(env.VERA_MEMORY_VAULT_PATH || DEFAULTS.memory.vaultPath),

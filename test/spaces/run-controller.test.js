@@ -206,3 +206,39 @@ test("memory being absent (undefined) does not crash prompt assembly", async () 
     assert.equal(captured[0], "no memory wired");
   });
 });
+
+test("structured prompt keeps group delta volatile and exposes only raw user text for API history", async () => {
+  await withFixture(async ({ store, memory, hub }) => {
+    const agent = { id: "agt_api", name: "Gemma" };
+    const account = { id: "acc_api" };
+    const space = { id: "spc_api", seats: [] };
+    await memory.saveMemory(agent.id, {
+      slug: "stable-rule", type: "rule", description: "Stable rule", content: "Stable body.",
+    });
+    store.insert("messages", {
+      id: "msg_other", spaceId: space.id, author: { type: "agent", agentId: "agt_other" },
+      target: { type: "broadcast" }, content: "temporary group context", status: "completed",
+      createdAt: "2026-07-14T00:00:00.000Z",
+    });
+    const triggerMessage = store.insert("messages", {
+      id: "msg_user", spaceId: space.id, author: { type: "user" }, target: { type: "broadcast" },
+      content: "raw user question", status: "completed", createdAt: "2026-07-14T00:00:01.000Z",
+    });
+    let captured;
+    const adapter = {
+      async run(ctx) {
+        captured = ctx.prompt;
+        return { content: "answer", sessionState: { ok: true } };
+      },
+    };
+    const run = executeRun({ store, hub, config: CONFIG, agent, account, space, triggerMessage, adapter, memory });
+    await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === run.id);
+
+    assert.match(captured.text, /Vera 记忆库常驻索引/);
+    assert.match(captured.text, /temporary group context/);
+    assert.equal(captured.turnText.includes("Vera 记忆库常驻索引"), false);
+    assert.match(captured.turnText, /temporary group context/);
+    assert.equal(captured.historyUserText, "raw user question");
+    assert.match(captured.residentBlock, /\[\[stable-rule\]\]/);
+  });
+});

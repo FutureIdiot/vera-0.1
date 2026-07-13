@@ -349,6 +349,7 @@ export function createMemoryDigestService({
         facts.push({
           factId: fact.factId,
           slug: fact.slug,
+          type: current.type,
           description: current.description,
           status: current.status,
           addressSlots: fact.addressSlots ?? null,
@@ -362,6 +363,7 @@ export function createMemoryDigestService({
         facts.push({
           factId: null,
           slug: current.slug,
+          type: current.type,
           description: current.description,
           status: current.status,
           addressSlots: null,

@@ -228,6 +228,9 @@ function makeCtx({ text = "hi", sessionState = null } = {}) {
       agent: {
         id: "agt_test",
         name: "T",
+      },
+      account: {
+        id: "acc_test",
         kind: "cli",
         provider: "opencode",
         connection: { command: null, args: [] },
@@ -266,7 +269,13 @@ function waitFor(predicate, timeoutMs = 3000) {
 
 function makeDigestCtx({ model = "navy/deepseek-v4-pro", signal } = {}) {
   return {
-    account: { model, connection: { command: fakeBinary, args: [] } },
+    account: {
+      id: "acc_test",
+      kind: "cli",
+      provider: "opencode",
+      model,
+      connection: { command: fakeBinary, args: [] },
+    },
     payload: {
       agent: { id: "agt_test", name: "T" },
       chunks: [{ id: "dch_1", messages: [{ messageId: "msg_1", content: "remember this" }] }],
@@ -411,6 +420,16 @@ test("missing binary fails fast with unavailable", async () => {
   );
 });
 
+test("kind/provider mismatch fails before starting OpenCode", async () => {
+  const { ctx } = makeCtx();
+  ctx.account = { ...ctx.account, kind: "api", provider: "ollama" };
+  await assert.rejects(() => adapter.run(ctx), (error) => error.code === "unavailable");
+  await assert.rejects(
+    () => adapter.digestMemory({ ...makeDigestCtx(), account: ctx.account }),
+    (error) => error.code === "executor_unavailable",
+  );
+});
+
 test("runner args carry -s <sessionId>, --dangerously-skip-permissions and the prompt", async () => {
   let seenArgs = null;
   stub.setRunHandler(async ({ sessionId, args, prompt }) => {
@@ -527,19 +546,19 @@ test("ordinary 429, 401, and invalid structured output never trigger quota fallb
   }
 });
 
-test("a local Ollama model never uses the Navy quota fallback mapping", async () => {
+test("a non-Navy OpenCode model never uses the Navy quota fallback mapping", async () => {
   stub.resetDigest();
-  const localModel = "ollama/gemma4:e4b";
-  const noLocalFallbackAdapter = createOpencodeAdapter({ config: adapterConfig({
-    memoryDigestQuotaFallbacks: { [localModel]: "opencode/deepseek-v4-flash-free" },
+  const otherModel = "opencode/deepseek-v4-flash-free";
+  const noOtherFallbackAdapter = createOpencodeAdapter({ config: adapterConfig({
+    memoryDigestQuotaFallbacks: { [otherModel]: "opencode/another-model" },
   }) });
-  extraAdapters.push(noLocalFallbackAdapter);
+  extraAdapters.push(noOtherFallbackAdapter);
   stub.setDigestHandler(async () => ({
     status: 402,
     body: { error: { name: "APIError", data: { statusCode: 402, type: "quota_exhausted" } } },
   }));
   await assert.rejects(
-    () => noLocalFallbackAdapter.digestMemory(makeDigestCtx({ model: localModel })),
+    () => noOtherFallbackAdapter.digestMemory(makeDigestCtx({ model: otherModel })),
     (error) => error.code === "executor_failed",
   );
   assert.equal(stub.digestRequests.filter((request) => request.kind === "create").length, 1);
@@ -582,56 +601,6 @@ test("digestMemory enforces its own timeout without changing chat watchdog behav
   assert.equal(stub.deletedDigestSessions.length, 1);
 });
 
-test("opt-in real local Ollama Gemma digestMemory smoke through OpenCode", {
-  skip: process.env.VERA_TEST_OLLAMA !== "1" ? "set VERA_TEST_OLLAMA=1 after starting Ollama" : false,
-  timeout: 190_000,
-}, async () => {
-  const binary = process.env.VERA_OPENCODE_BIN || "/Users/theta/.opencode/bin/opencode";
-  const model = process.env.VERA_TEST_OLLAMA_MODEL || "ollama/gemma4:e4b";
-  const realAdapter = createOpencodeAdapter({ config: {
-    binary,
-    daemonPort: 0,
-    idleShutdownMs: 60_000,
-    watchdogMs: 180_000,
-    digestTimeoutMs: 180_000,
-    healthCheckTimeoutMs: 20_000,
-    shutdownGraceMs: 5_000,
-    memoryDigestQuotaFallbacks: {},
-  } });
-  try {
-    const result = await realAdapter.digestMemory({
-      account: { model, connection: { command: binary, args: [] } },
-      payload: {
-        agent: { id: "agt_gemma_smoke", name: "Gemma Smoke" },
-        chunks: [{
-          id: "dch_gemma_smoke",
-          messages: [{
-            messageId: "msg_gemma_smoke",
-            author: { type: "user" },
-            target: { type: "broadcast" },
-            content: "请记住：Vera 的手工测试端口是 3210。",
-            createdAt: "2026-07-13T00:00:00.000Z",
-          }],
-        }],
-        facts: [],
-        proposalSchema: MEMORY_DIGEST_OUTPUT_JSON_SCHEMA,
-      },
-      signal: AbortSignal.timeout(180_000),
-    });
-    assert.equal(result.execution.effectiveModel, model);
-    assert.equal(result.execution.fallbackUsed, false);
-    validateDigestProposals({
-      proposals: result.proposals,
-      messages: [{ id: "msg_gemma_smoke", spaceId: "spc_smoke", status: "completed", content: "请记住：Vera 的手工测试端口是 3210。" }],
-      agentId: "agt_gemma_smoke",
-      spaceId: "spc_smoke",
-      jobId: "mdj_gemma_smoke",
-    });
-  } finally {
-    await realAdapter.shutdown();
-  }
-});
-
 test("opt-in real OpenCode digestMemory smoke", {
   skip: process.env.VERA_TEST_OPENCODE !== "1" ? "set VERA_TEST_OPENCODE=1 to spend a real model request" : false,
   timeout: 190_000,
@@ -653,7 +622,10 @@ test("opt-in real OpenCode digestMemory smoke", {
   });
   try {
     const result = await realAdapter.digestMemory({
-      account: { model: primaryModel, connection: { command: binary, args: [] } },
+      account: {
+        id: "acc_smoke", kind: "cli", provider: "opencode",
+        model: primaryModel, connection: { command: binary, args: [] },
+      },
       payload: {
         agent: { id: "agt_smoke", name: "Smoke" },
         chunks: [{

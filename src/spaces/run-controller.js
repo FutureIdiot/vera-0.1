@@ -71,7 +71,7 @@ export function executeRun({
     // 换代，不逐条消息刷新。已有 sessionState 的后续消息不重复注入。
     // 群聊声告段（ground truth 2.3）也在编译层一起拼好——编译层无状态，每轮
     // 临时查 messages 派生 delta。
-    const { text: promptText, sessionState: priorSessionState } = await compilePrompt({
+    const { text: promptText, turnText, historyUserText, residentBlock, sessionState: priorSessionState } = await compilePrompt({
       store, space, agent, account, triggerMessage, memory, config,
     });
 
@@ -117,7 +117,7 @@ export function executeRun({
     const ctx = {
       agent,
       account,
-      prompt: { text: promptText },
+      prompt: { text: promptText, turnText, historyUserText, residentBlock },
       sessionState: priorSessionState,
       workspacePath: process.cwd(),
       onDelta: (text) => bubbles.delta(text),
