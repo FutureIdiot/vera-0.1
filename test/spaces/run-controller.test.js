@@ -84,7 +84,8 @@ test("prepends resident index to prompt when no sessionState exists yet", async 
     assert.equal(captured.length, 1);
     assert.match(captured[0], /Vera 记忆库常驻索引/);
     assert.match(captured[0], /\[\[project-rule-one\]\] — 常驻钩子示例/);
-    assert.match(captured[0], /相关时用你的文件工具展开 \[\[slug\]\]/);
+    assert.match(captured[0], /调用 Vera Memory MCP 的 memory_fetch_detail 展开 \[\[slug\]\]/);
+    assert.doesNotMatch(captured[0], /文件库：|\.vera\/memory/, "prompt must not expose the vault path");
     assert.ok(captured[0].endsWith("hello agent"), "original message content should trail the injected block");
   });
 });

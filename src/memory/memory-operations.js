@@ -36,7 +36,9 @@ export function createMemoryOperations(deps) {
     assertAgentId(agentId);
     assertSlug(slug);
     if (typeof operation.operationId !== "string" || !operation.operationId) throw invalid("operationId is required");
-    if (!["user-api", "external-scan"].includes(operation.origin)) throw invalid("origin must be user-api or external-scan");
+    if (!["user-api", "agent-mcp", "external-scan"].includes(operation.origin)) {
+      throw invalid("origin must be user-api, agent-mcp, or external-scan");
+    }
     if (!["create", "update", "archive", "delete"].includes(kind)) throw invalid(`unsupported memory operation: ${kind}`);
     if (typeof operation.requestedAt !== "string" || Number.isNaN(Date.parse(operation.requestedAt))) throw invalid("requestedAt must be ISO8601");
     if (kind === "create") {

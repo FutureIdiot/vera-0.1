@@ -244,7 +244,7 @@ export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25, resol
     const active = (await listMemories(agentId)).filter((memory) => memory.status === "active");
     if (active.length === 0) return null;
     const lines = active.slice(0, activeResidentIndexMaxLines).map((memory) => `- [[${memory.slug}]] — ${memory.description}`);
-    return [`Vera 记忆库常驻索引（文件库：${agentPathFor(activeRoot, agentId)}）：`, "相关时用你的文件工具展开 [[slug]] 查看详情。", "", ...lines].join("\n");
+    return ["Vera 记忆库常驻索引：", "相关时调用 Vera Memory MCP 的 memory_fetch_detail 展开 [[slug]] 查看详情。", "", ...lines].join("\n");
   }
 
   async function inspect() {

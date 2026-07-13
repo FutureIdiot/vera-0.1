@@ -2,7 +2,7 @@
 
 > **整合注记（2026-07-02，Phase 5 动工前生效）**：本文档成文早于接口契约，落地时按下列映射对齐——
 > 1. 术语：`room_id` → `spaceId`（Space，见 api-contract.md 命名纪律）；`session_id` 语义由 run / sessionState 承载。下文仍出现的 snake_case 只是历史算法素材，不是新契约命名。
-> 2. API 路径：所有 Memory API 都以 `/api/agents/:agentId/memory` 为领域前缀，不保留 `/memory/*` 或 `/api/memory/*` 兼容别名；具体形状以 api-contract.md 为准。
+> 2. 接口边界：`/api/agents/:agentId/memory` 是owner前端管理API；Agent runtime统一使用gateway第一方Vera Memory MCP，tool参数不接受`agentId`。两者共用同一Memory facade/queue，不保留旧`/memory/*`兼容别名；具体形状以api-contract.md为准。
 > 3. 存储：已定稿，见下方《修订：文件库架构》。第 8 节 SQL schema 降级为派生索引的逻辑模型。
 > 4. 缓存纪律（ground truth 技术约束）：记忆注入段必须放 prompt **尾部**（靠近当前消息），不得插入稳定前缀——检索结果逐条消息变化，放前面会打穿 prompt cache。
 
@@ -16,30 +16,37 @@
 - 该文件夹本身就是合法的 Obsidian vault，无需导出步骤；graph view 免费提供知识网可视化（可按属性分组上色）；文件库纳入 git，记忆与墨迹的变迁史自动留存。
 - 第 8 节的 SQL 表（embedding、keywords、relations、usage 统计）全部降级为**从文件派生的缓存**，可随时删除重建，永远不是权威数据。检索走索引，读取走文件。用户在 Obsidian 中直接编辑文件，Vera 侦测变更重建该条索引。
 - Raw Event（1.1 节）不进文件库：留在 gateway store，按 Space 隔离；frontmatter 的 sources 字段负责回链溯源。
-- **单写者**：所有程序写入必须经 gateway memory 模块排队；agent、dream、CLI 文件工具都只能提议操作，不得直接改 vault 文件。用户可在 Obsidian 中直接编辑；gateway 必须侦测变更、校验文件，再只重建受影响的派生索引。校验失败不得把错误内容纳入检索。读取不限。
+- **单写者与MCP边界**：所有Agent runtime程序读写都经gateway第一方Vera Memory MCP；写工具只提交提议/operation并进入memory queue，不得直接改vault，读工具也不借`fs.read`绕过作用域和使用统计。用户可在Obsidian中直接编辑；gateway必须侦测变更、校验文件，再只重建受影响的派生索引。校验失败不得把错误内容纳入检索。
 
 ### R2. slug 即指针、即文件名、即公共接口
 
 - slug 是**语义化** kebab-case 短句（`bubble-split-rule`），不是随机 id。无语义主键只存在于索引层内部，agent 永不可见。
 - slug 一经建立**不可改名**；改名只能走 dream 正式流程（新建 + 全库改链 + 归档旧条目）。
 - **起 slug 和写钩子行是 write hook 最重要的工序**：slug 含糊 = 记忆葬进乱葬岗。
-- 判断链条三级：slug 给主题 → 钩子行给摘要 → 正文给细节，每级贵一个量级，agent 每级都可下车。
+- slug只负责公共指针与主题可读性，不兼任语义事实键。跨job、跨不同slug的同事实识别必须由程序持有的确定性事实身份或等价匹配规则完成；同事实走update/merge，纠错取代走保留来源的supersede/archive。精确字段、派生和冲突规则在M2契约先行时冻结，不直接照搬外部系统的`fact_key`命名。
+- 内容判断链条三级：召回节点给核心语义 → 记忆正文给完整边界 → 来源原文给原始依据；每级更贵，agent每级都可下车。slug只是在召回节点内部提供稳定主题与身份，不单独算一个无语义内容层。
+
+**统一召回术语**：粗召回交给agent的“slug + 钩子行 + 必要类型/排序提示”整体叫**召回节点**，它必须是可独立理解的最小语义卡片；节点与完整正文是同一条Memory的简略投影和权威全文，不是两个实体。`memory_fetch_detail`叫**展开记忆正文**；继续沿`SourceRef`读取原始Message才叫**溯源到来源原文**。关键词、embedding、双链图和排序字段统一叫**索引**，不得把“索引”用作纵向内容层的别名。横向节点关联、纵向正文展开、纵向原文溯源三者不得混称。
 
 ### R3. 记忆进入 prompt 的三条渠道
 
 | 渠道 | 内容 | 更新节奏 | 缓存位置 |
 |---|---|---|---|
-| 常驻索引（推） | 用户置顶 + top 权重，共 15–25 行"slug + 钩子" | dream 整理后批量换版 | 稳定前缀 |
+| 常驻索引（推） | 用户置顶 + 按派生权重选出的top条目，共 15–25 行“slug + 钩子” | dream 整理后批量换版 | 稳定前缀 |
 | 检索注入（推） | **按 token 计价，预算约 300–400**：以钩子行为主、至多一两条短全文；随机位恒为一行钩子、单独 +1；**同会话去重** | 每条消息 | 消息信封尾部（append-only） |
-| 主动钻取（拉） | fetch_detail / fetch_more / 双链一跳；CLI 型 agent 直接 Read 文件 | agent 自主 | 按需 |
+| 主动扩展/展开（拉） | Vera Memory MCP `memory_fetch_more`横向扩展 / `memory_fetch_detail`展开正文 / 双链一跳 | agent 自主 | 按需 |
 
 - 推送宁漏勿滥：注入的内容永久留在对话历史里，每次注入都在给之后所有轮次付租。
-- 注入格式在稳定前缀里教一句"相关时展开 [[slug]]"，配合使用统计自我修正（反复被钻取的钩子权重上浮、可升常驻索引；从不被点开的沉底）。
+- 注入格式在稳定前缀里教一句"相关时展开 [[slug]]"，配合使用统计自我修正（正文反复被展开的节点权重上浮、可升常驻索引；从不被展开的沉底）。
 
-### R4. 权重全部派生，无手工入口
+### R4. ranking 三项依据；长期权重全部派生
 
-- 成分：双链入度（图中心性）、使用统计（钻取次数 / 上次使用）、用户信号（编辑、置顶——最强）、按 type 区分的时间衰减（`decision` 不衰减，`open_question` 衰减）。
-- 查询时排序 = 本轮相关性（embedding + 关键词）× 静态权重（dream 离线算好）。
+- 成分：双链入度（图中心性）、使用统计（正文展开次数 / 上次使用）、用户信号（编辑、置顶——最强）、按 type 区分的时间衰减（`decision` 不衰减，`open_question` 衰减）。
+- **派生权重**是上述长期信号计算出的跨轮稳定值；旧文所称“静态权重”均指查询时读取的这一个派生权重，不另设第二种权重。
+- 查询时ranking固定包含三项：**本轮相关性 × 派生权重 × 单轮交汇因子**。本轮相关性来自embedding、关键词等query匹配；单轮交汇因子是“单轮交汇置信度”的程序表示，基础值为1，只在候选合并后影响本轮排序。
+- 阶段顺序保持M3→M4：M3先冻结三项接口并把尚未实现的派生权重输入统一设为中性值1，以完成相关性、交汇、去重和预算闭环；M4再接入可重建的真实派生权重。不得在M3用`updatedAt`等临时规则冒充长期权重。
+- 候选按当前Agent分区内的稳定slug去重：同一节点只返回、展开和计算token一次，但合并保留所有命中路径。交汇只按相互独立的**一级召回方向**计数；同一一级方向内无论绕出多少条路径都只算一次。因子随独立方向数单调增加，但边际递减且有上限；具体函数、参数默认值和可配置字段在M3契约先行时冻结。
+- 单轮交汇置信度只表示“多个独立召回方向在本轮共同指向该节点”，不表示正文真假，也不是可持久化的`confidence`字段；不得写入Memory、派生索引长期权重或使用统计，本轮检索状态结束即丢弃。`memory_fetch_detail`展开正文和沿`SourceRef`溯源都不增加交汇计数。
 - **agent 不得手动标注重要性**——连入口都不开（4.3 节"权重"来源以本节为准）。agent 表达"这条重要"的唯一途径是多建双链，让结构自己说话。
 - 用户置顶保留（面向未来的其他用户）。
 - 4.3 节"至少一条随机"保留：防高权重永久遮蔽。
@@ -59,7 +66,7 @@
 1. Memory 跟 `agentId` 走，不跟 Account 走。同一 Agent 在 Space A 获得并整理的长期 Memory 可在 Space B 检索；该 Agent 的主 Execution 或 subagent Execution 即使绑定不同 Account，也不切换 Memory。
 2. 跨 Agent 共享必须是未来明示的、有契约和授权的功能；本阶段不因 Space 成员关系、Account 授权或 subagent 派生而隐式共享 Memory。
 3. slug 一经建立不可由普通 PATCH 改名。正式改名只能作为一个 gateway 维护事务执行“新建新 slug → 全库替换双链 → 验证 → 归档旧 slug”；任一步失败都不得留下半改名状态。
-4. agent、dream 和 CLI 都只提交 create/update/archive/maintenance proposal，gateway memory queue 是唯一程序写者。CLI 可直接 Read 自己的 per-Agent vault，不得直接 Write。
+4. agent、dream和CLI通过Vera Memory MCP提交create/update/archive/maintenance proposal，gateway memory queue是唯一程序写者；读取同样通过MCP list/search/fetch tools，不直接读取per-Agent vault。
 5. 用户在 Obsidian 中的编辑是外部权威变更，不伪装成第二个程序写者；gateway 侦测后先校验，合法才重建该条索引，不合法则保留文件供用户修复并发出明确错误。
 
 > **历史材料边界**：以下第 0–18 节保留最初的 hook 算法、prompt 与 UI 设计素材。其中的随机 `memory_id`、`room_id/session_id`、SQL 真值表、`/memory/*` API、CLI 直写、普通 rename 或隐式全 Agent 共享均不是现行契约。实施时以 R1–R6、上述现行边界与 `api-contract.md` 为准。
@@ -365,7 +372,7 @@ retrieve hook 负责找出"可能对当前任务有用"的记忆。
 
 它不负责生成回复，也不负责解释记忆。
 
-输入当前上下文，输出候选 memory ids。
+输入当前上下文，输出有语义的召回节点；历史示例中的`memory_id`只表示内部候选身份，不能作为无语义结果单独交给agent。
 
 ---
 
@@ -391,12 +398,12 @@ retrieve hook 负责找出"可能对当前任务有用"的记忆。
 
 ### 4.3 检索策略
 
-记忆池是一张按权重×关联度降序排列的表。检索结果按标签聚合成若干方向，每个方向独立展开。
+本节是历史算法素材；实施时“关联度”统一称“本轮相关性”，“权重”统一称“派生权重”，ranking按R4的三项依据执行。检索结果按标签聚合成若干方向，每个方向独立展开。
 
 展开规则：
 
-- 关联度×权重高于阈值：多放几条
-- 关联度×权重低于阈值：少放几条
+- 三项ranking得分高于阈值：多放几条
+- 三项ranking得分低于阈值：少放几条
 - 每次默认从全量记忆池随机抽取至少一条，防止高权重记忆永远遮蔽边缘条目
 
 默认注入上限为 **10 条**，其中至少 **1 条为随机**。
@@ -409,12 +416,12 @@ retrieve hook 负责找出"可能对当前任务有用"的记忆。
 → 按 project / room / session / agent scope 过滤
 → embedding 召回
 → keyword 召回
-→ 合并去重
+→ 按稳定slug合并去重，并保留独立一级方向集合
 → 排除 archived / deprecated
 → 按标签聚合方向
-→ 每方向按权重×关联度排序截断
+→ 按本轮相关性×派生权重×单轮交汇因子排序截断
 → 补入随机条目
-→ 输出候选 memory ids
+→ 输出有语义的召回节点
 ```
 
 颜色不参与任何一步。
@@ -431,7 +438,7 @@ agent 在回复阶段可以主动扩展记忆池，有两个方向：
 memory.fetch_more(direction, offset)
 ```
 
-**深度扩展**——从摘要钻取到原文：
+**深度扩展**——从召回节点展开同一条Memory的权威正文（不是SourceRef来源原文）：
 
 ```
 memory.fetch_detail(memory_id)
@@ -861,6 +868,8 @@ CREATE TABLE memory_relations (
 
 `relation_score` 用于 fetch_more 时在方向内排序。
 
+> 历史字段`relation_score`只表示某条边在方向内的关系信号，实施时归入本轮相关性/方向展开，不是三项ranking之外的第四个顶层因子。
+
 关联展开深度固定为一跳，不递归。
 
 ---
@@ -1222,4 +1231,4 @@ Vera memory 必须满足：
 
 ## 18. 一句话版
 
-Vera memory 的颜色字段是一滴只存在于数据库和前端的沉默墨迹：agent 可以在写入和维护记忆时留下它，但普通调取时看不见它，也不能解释它；记忆池是一张排好序的表，agent 默认拿前几条，需要更多时沿方向横向扩展，需要细节时纵向钻取原文；dream 在 session 结束后独立运行，做集中整理，不打扰主流程；Vera 只把真正有用的记忆正文注入给 agent，用来减少遗忘和重复错误，而不是制造新的标签。
+Vera memory 的颜色字段是一滴只存在于数据库和前端的沉默墨迹：agent 可以在写入和维护记忆时留下它，但普通调取时看不见它，也不能解释它；召回节点按本轮相关性、派生权重和单轮交汇因子排序，agent默认拿前几条，需要更多时沿方向横向扩展，需要细节时纵向展开记忆正文，需要核验时再沿SourceRef溯源到来源原文；dream在session结束后独立运行，做集中整理，不打扰主流程；Vera只把真正有用的语义注入给agent，用来减少遗忘和重复错误，而不是制造新的标签。

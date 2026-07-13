@@ -56,10 +56,13 @@ Vera gateway (VPS, 7×24)
 | 触发判定（responseMode / 离线跳过 / blockAgentIds） | ✅ | ❌ |
 | Account.presence（在线/离线） | ✅ 维护 | ✅ 心跳维持 |
 | CLI/API 进程的 spawn 与生命周期 | ❌ | ✅（per Account runtime） |
-| 本机Tools（文件/进程）、MCP、Hook、Agent Plugin执行 | ❌ | ✅（在 Execution 绑定 Account 的 workspace 与权限策略内） |
+| 本机Tools（文件/进程）、第三方MCP、Hook、Agent Plugin执行 | ❌ | ✅（在 Execution 绑定 Account 的 workspace 与权限策略内） |
+| Vera Memory MCP server / vault / 单写队列 | ✅ | ❌（daemon仅作绑定agent身份的MCP client或CLI映射器） |
 | RuntimeCapabilities公开快照 | ✅ 按 Account 暂存/提供给前端 | ✅ 登录时按 Account 如实报告 |
 | 会话连续性具体实现（resume / daemon keepalive） | ❌ | ✅（agent 自己 spawn 的进程自己管） |
 | sessionState 真值 | 按 `(accountId, spaceId)` 备份兜底 | 每个 Account runtime 在线时持有最新副本 |
+
+上表中的“MCP”默认指第三方或本机MCP；Vera Memory MCP是gateway第一方能力，不属于Account Workspace。Phase 5先实现只接受可信内部`agentId/run/source`上下文的tool dispatcher；Phase 5.5 agent token落地后再绑定私网Streamable HTTP transport。daemon不得在tool参数中提交或切换`agentId`，subagent Execution即使换Account也沿用同一Agent的Memory MCP身份。
 
 ## 二、Daemon 接入协议
 

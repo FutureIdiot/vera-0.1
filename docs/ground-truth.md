@@ -170,7 +170,21 @@ Vera是单用户、自部署的多agent协作空间。
 - 触发机制：hook（详见《Memory Hook设计文档》）
 - 存储形态（2026-07-02定稿）：**文件即真相**——每条记忆一个markdown文件、语义化slug、`[[双链]]`互联，记忆库即Obsidian vault；数据库仅为派生索引。详见memory-hook.md《修订：文件库架构》
 - vault内按 `agentId` 分区；slug在对应Agent分区内创建后永久不可改名，纠错使用正文更新、归档或新建正确slug，不提供rename兼容别名
+- slug是Agent可见的稳定公共指针，不是跨job、跨措辞的事实去重身份。M2自动提炼必须先由程序使用独立于slug的确定性事实身份或等价规则匹配既有Memory：同一事实优先update/merge，纠错或新事实取代旧事实时走可追溯的supersede/archive语义，不得仅因模型换了slug就创建平行重复Memory。
 - 所有程序写入（主Agent、subagent、CLI adapter、hook与dream）只能向gateway提交proposal/operation，由Memory单写者校验并原子落盘；不得直接写vault。用户通过Obsidian所做的外部编辑由gateway重扫、校验并刷新派生索引，不构成第二个程序写入通道
+- **Vera Memory 本身是 gateway 托管的第一方 per-Agent MCP 服务**：Agent runtime 的读取、写入提议、检索、横向扩展和正文展开只走 Vera Memory MCP tools，不使用 `fs.read/fs.write` 直接碰 vault。MCP工具参数不接受 `agentId`，gateway从可信Execution/agent token上下文绑定身份；切换Account不切换Memory。owner前端继续使用HTTP管理API，但HTTP与MCP必须调用同一Memory facade和单写队列，不得复制业务实现。
+
+**召回术语与纵横边界：**
+- **召回节点**：粗召回后最先交给Agent的、可独立理解的最小语义卡片；每个节点是某一条长期Memory的简略投影，至少包含足以判断“直接使用还是展开”的核心命题，而不是只有slug、关键词或分数的无语义目录项。
+- **记忆正文**：召回节点所代表的同一条长期Memory的权威markdown全文。`memory_fetch_detail`只是把该节点从简略投影展开为正文，不创建第二个节点，也不是原文溯源。
+- **来源原文**：由Memory的`SourceRef`指向、保存在gateway store中的原始Message。沿`SourceRef`读取Message才叫溯源；来源原文不是横向关联图中的下一级节点。
+- **索引**：关键词、embedding、双链图、派生权重等可重建的程序结构；索引帮助程序选出召回节点，不是Agent纵向深入时看到的内容层。
+- 横向扩展只发生在同层长期Memory之间：节点可沿关联方向召回其他节点；纵向只有“召回节点 → 记忆正文 → 来源原文”。纵向展开和溯源都不参与横向路径数计算。
+
+**召回ranking三项依据：**
+- **派生权重**：该Memory跨轮稳定的长期权重，由图结构、使用统计、用户信号和按type的时间衰减派生；不得由Agent手工填写。
+- **本轮相关性**：当前query与该Memory的关键词、向量等匹配程度，只服务本轮。
+- **单轮交汇置信度**：同一候选节点在本轮被多少个相互独立的一级召回方向共同命中。程序按Agent分区内的稳定slug去重，节点只返回和计费一次，但保留独立方向集合并给予递减、封顶的本轮排序增益；同一一级方向内的多条路径只计一次。它不表示Memory内容真假，不写入frontmatter、不写回派生权重，本轮结束即丢弃。
 
 ### 3.2 Files
 附件、原始材料。内容存储层。
@@ -245,7 +259,7 @@ Account的项目与执行数据边界。
 
 #### 4.2.1 Tools（运行时基础能力，不属于扩展）
 
-- 逻辑能力名统一为 `web.search` / `web.fetch` / `fs.read` / `fs.write` / `process.execute` / Vera Memory/Files/消息工具；具体实现可以来自CLI原生工具、供应商API工具或agent daemon的tool host。
+- 逻辑能力名统一为 `web.search` / `web.fetch` / `fs.read` / `fs.write` / `process.execute` / Vera Memory/Files/消息工具；其中Vera Memory工具固定由gateway第一方MCP提供，不映射成`fs.read/fs.write`，其余能力可来自CLI原生工具、供应商API工具或agent daemon的tool host。
 - CLI已有原生Tools时Vera不重复安装；agent daemon登录时报告实际capabilities，前端只展示“可用/不可用/权限策略”。不能假设所有CLI能力相同。
 - API模型本身不能触及本地代码。只有承载该API Account的本地agent daemon实现tool-call循环并绑定runtime workspace后，API agent才能读写/执行本机代码；无本地daemon的纯API Account不能访问Mac文件。
 - `web.search` / `web.fetch` 可默认允许；`fs.read` 默认只限绑定workspace；`fs.write` / `process.execute` 必须受workspace边界、审批策略和审计约束。工具权限不由Space Module或第三方扩展自行扩大。
@@ -260,8 +274,8 @@ Account的项目与执行数据边界。
 
 #### 4.2.3 MCP（per-agent runtime）
 
-- MCP是外部Tools/数据连接；CLI已有原生MCP配置时由daemon复用或映射，API agent由daemon内的MCP client转成provider tool calls。
-- MCP连接、凭据与进程运行在agent daemon一侧；gateway只保存非敏感元信息/授权状态，不代理本机MCP进程。
+- 第三方MCP是外部Tools/数据连接；CLI已有原生MCP配置时由daemon复用或映射，API agent由daemon内的MCP client转成provider tool calls。其连接、凭据与进程运行在agent daemon一侧；gateway只保存非敏感元信息/授权状态，不代理本机MCP进程。
+- **Vera Memory MCP是唯一明确的第一方例外**：因为Memory真值和单写队列都在gateway，MCP server/dispatcher也由gateway持有，daemon只做MCP client或把tools映射给CLI/provider。不得把这个例外扩张成gateway代跑任意第三方MCP。
 
 #### 4.2.4 Hook（per-agent runtime）
 

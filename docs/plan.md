@@ -189,11 +189,11 @@
 
 **目标**：完成 Memory / Files 数据层闭环，并为 Phase 5.5 的 per-Space AgentState 与远程 daemon 接入提供稳定契约。设计依据：`ground-truth.md` 第三、四节 + `memory-hook.md`《修订：文件库架构》（R1–R6）；旧文中的 SQL、`room_id` / `session_id`、`/memory/*` 只作设计素材，不可直接照抄实现。
 
-> 提前量（2026-07-03，与 Theta 确认）：**最小闭环提前落地**——vault 骨架 + 文件格式 + 常驻索引会话首消息注入 + agent 文件工具直读直写 + 手动保存入口（API），形状已收编进 api-contract.md「Memory（最小闭环）」。目的：Phase 3–4「边用边修」阶段长期记忆已可用。**2026-07-13边界修订**：其中“agent文件工具直读直写”仅是旧实现现状，M1起所有程序写入统一提交gateway单写者，不再允许CLI/adapter直写vault；检索注入、派生权重、dream仍按本阶段推进。
+> 提前量（2026-07-03，与 Theta 确认）：**最小闭环提前落地**——vault骨架+文件格式+常驻索引会话首消息注入+手动保存入口（API）。**2026-07-13边界修订**：旧“agent文件工具直读直写”已废止，M1起所有程序写入统一提交gateway单写者。**2026-07-13 MCP修订**：Vera Memory自身是gateway第一方per-Agent MCP服务；Agent runtime的读写/检索统一走MCP，owner前端HTTP仅为管理入口。检索注入、派生权重、dream仍按本阶段推进。
 >
-> **Vault 位置策略**（2026-07-04，与 Theta 确认 + 联邦形态对齐）：vault 热数据**只在 VPS**（`/home/theta/.vera/memory/`，联邦后 gateway 跑在 VPS），所有 agent daemon 通过 Vera memory API 远程读写，本地不再有"原版"——避免双写冲突/双读漂移，保持 single source of truth。**备份走 git 镜像**：把 VPS vault init 成 git repo，每次整理后 `git push` 到一个私有 GitHub repo；Mac 上 `git pull` 即得只读备份，还能看版本历史（Obsidian vault 全 markdown，git 友好）。rsync 冷备份作次要手段（崩了需要快速回滚时用），不替代 git 镜像的版本维度。Phase 3-4 期间 vault 还在本机 Mac `~/.vera/memory/`，Phase 5.5 联邦落地时随数据 rsync 一起搬 VPS，搬完即切 git 镜像备份流。
+> **Vault 位置策略**（2026-07-04，与 Theta 确认 + 联邦形态对齐）：vault 热数据**只在 VPS**（`/home/theta/.vera/memory/`，联邦后 gateway 跑在 VPS），所有agent daemon通过gateway第一方Vera Memory MCP远程读写，本地不再有“原版”——避免双写冲突/双读漂移，保持single source of truth。**备份走git镜像**：把VPS vault init成git repo，每次整理后`git push`到私有GitHub repo；Mac上`git pull`只读备份并查看版本历史。rsync冷备份作次要手段，不替代git镜像的版本维度。Phase 3-4期间vault仍在本机Mac，Phase 5.5联邦落地时随数据迁到VPS并接通带agent token的MCP transport。
 
-**执行规则**：依赖顺序固定为 D0 → M1 → M2 → M3 →（M4 与 F1 可由不重叠文件的 subagent 并行）→ X1；每个切片的细化契约是该切片第一项，先改契约、再实现、再以临时数据目录验收并独立提交。D0只冻结跨切片不应再变化的身份/作用域/写入边界；M1未建立单写者与溯源链前不得接自动写入；M3未证明预算与哑墨边界前不得接dream；X1必须等待M4/F1都完成后统一收口。
+**执行规则**：依赖顺序固定为 D0 → M1 → M1.5（Memory MCP facade）→ M2 → M3 →（M4 与 F1 可由不重叠文件的 subagent 并行）→ X1；每个切片的细化契约是该切片第一项，先改契约、再实现、再以临时数据目录验收并独立提交。D0只冻结跨切片不应再变化的身份/作用域/写入边界；M1未建立单写者与溯源链前不得接自动写入；M1.5未冻结无agentId工具与可信身份上下文前M2/M3不得另造adapter私有接口；M3未证明预算与哑墨边界前不得接dream；X1必须等待M4/F1都完成后统一收口。
 
 ### P5-D0 — 文档与契约冻结
 
@@ -217,29 +217,40 @@
 
 **M1验收（2026-07-13完成）**：`npm test` 113/113、真实临时gateway黑盒68/68、Memory/迁移/中断定向测试17/17、`build:web`、全部改动文件`node --check`与`git diff --check`通过。并发create与同version并发update均一胜一409且败者拿到当前权威版本；exclusive迁移期间新写只落新vault；模拟temp写完、rename前中断后旧文件仍完整；外部create/update/remove、坏文件隔离与前端可见诊断、Message SourceRef→正确Space、索引缺失/语法及语义损坏重建等价均有自动化证据。独立终审未发现剩余阻断或高风险，且确认未进入M2/M3。
 
+### P5-M1.5 — Vera Memory MCP facade（M2前置）
+
+- [x] 契约先行：Vera Memory为gateway第一方per-Agent MCP；tool schema不含`agentId/scope/origin/sources`，身份与SourceRefs只从可信Execution上下文注入；owner HTTP继续管理但与MCP共用Memory facade/queue。
+- [x] 实现协议无关MCP dispatcher与M1工具：`memory_list/fetch_detail/create/update/archive`；create无可信Message SourceRefs即拒绝，Agent MCP不开放不可逆delete，不保留文件直读逃生口。
+- [x] 当前阶段不注册不安全网络transport；Phase 5.5 agent token落地后再绑定Tailscale私网Streamable HTTP。dispatcher单测已证明agent A不能通过参数选择agent B、MCP写入进入同一version/queue语义。
+
+**M1.5验收**：MCP tool schema无agentId；可信agent上下文下list/fetch_detail/create/update/archive闭环；错误使用标准MCP tool error；HTTP与MCP读取同一权威文件；无来源create拒绝且vault不变；未出现第二份Raw Message或第二套Memory实现。
+
+**M1.5验收（2026-07-13完成）**：新增gateway第一方MCP JSON-RPC dispatcher与5个M1 tools；4项MCP定向测试覆盖无`agentId/source` schema、可信Message SourceRefs、跨Agent参数冒充拒绝、无来源拒绝、create/list/fetch_detail/update/archive及标准tool error。常驻索引不再泄露vault路径并改为提示`memory_fetch_detail`。`npm test` 117/117、`build:web`、相关`node --check`与`git diff --check`通过；未注册无agent token保护的网络transport，未提前进入M2/M3。
+
 ### P5-M2 — memory_write_hook 与触发器
 
-- [ ] **M2契约先行**：钉死`realtime`是否等价context容量阈值、scheduled/realtime互斥关系、manual是否始终可用、session-end dream兜底开关，以及context水位按token/字符/adapter容量的唯一口径。
+- [ ] **M2契约先行**：钉死`realtime`是否等价context容量阈值、scheduled/realtime互斥关系、manual是否始终可用、session-end dream兜底开关，以及context水位按token/字符/adapter容量的唯一口径；冻结独立于slug的跨job确定性事实身份或等价匹配规则、同事实update/merge、纠错supersede/archive及SourceRefs保留语义。
+- [ ] M2只从gateway已全量保存的Message范围创建`memory_digest` job，不引入Aelios式重复Raw ingest；MCP tool只提交消息范围/模式，SourceRefs由gateway从可信run/message上下文生成。
 - [ ] 程序负责确定性分块、去重、阈值和 job 状态；模型只做标签/提炼/操作提议，不能直接写 store/vault。proposal 必须经过 schema、scope、source、slug/钩子行、双链和幂等校验后由 M1 单写者应用。
 - [ ] 接通 `memory.digestTrigger` 的 `scheduled` / `realtime` / `manual` consumer 与 `digestSchedule`；context 容量触发的计算口径、session 结束兜底和手动整理入口先写契约。各环节执行者按 ground truth 做成配置字段，但只接真实执行者，不预建插件系统。
 - [ ] slug 与一行钩子质量作为首要验收：无复用价值、无来源推断、agent 自创偏好不得写入；相同事实优先 update/merge，不制造平行重复记忆；stain 只以裸 hex 元数据写入。
 - [ ] hook 失败不阻塞聊天，不产生半条记忆；失败/重试/取消有可观察 job 状态与去重键，重试不得重复应用同一 proposal。
 
-**M2 验收**：使用固定 raw events 夹具覆盖 create/update/archive/skip/重复重试；定时、容量、手动三种触发走同一 pipeline；非法 proposal 全部拒绝且 vault 不变；聊天 run 不等待整理完成；测试日志/API 不泄露 provider secret 或 stain 解释。
+**M2 验收**：使用固定raw events夹具覆盖create/update/archive/skip/重复重试；同一事实换措辞、换建议slug、跨job再次出现仍只落一条Memory，纠错取代旧事实时双方sources可追溯；定时、容量、手动三种触发走同一pipeline；非法proposal全部拒绝且vault不变；聊天run不等待整理完成；测试日志/API不泄露provider secret或stain解释。
 
-### P5-M3 — 三渠道检索、注入预算与主动钻取
+### P5-M3 — 三渠道检索、注入预算、横向扩展与正文展开
 
-- [ ] **M3契约先行**：补齐retrieve/fetch_more/fetch_detail、游标、token预算、同session program-owned去重状态、使用统计、置顶、错误与必要SSE形状；不得污染adapter透明`sessionState`。
-- [ ] 常驻索引按 R3 批量换版，只在新外部 session 建立稳定前缀；用户置顶 + 派生 top 权重合计受 `memory.injectionBudgetResidentLines` 限制，普通编辑不逐条打穿 prompt cache。
-- [ ] 本地关键词 + 向量/等价可替换检索产生候选，按 token 而非条数执行逐消息预算；结果去 archived、按冻结 scope 过滤、同一 session 去重，并在当前消息信封尾部追加。索引/检索/日志都不携带 stain 或其自然语言含义。
-- [ ] 落地冻结后的 `fetch_more` / `fetch_detail`：广度分页游标稳定、方向可复现、双链只展开一跳；深度按 slug 取权威文件并记录使用统计。API/CLI adapter 走同一 memory facade，不让 adapter 直接碰 store。
+- [ ] **M3契约先行**：补齐retrieve/fetch_more/fetch_detail、游标、token预算、同session program-owned去重状态、使用统计、置顶、错误与必要SSE形状；冻结召回节点字段，以及单轮交汇因子的精确函数、上限、配置默认值和游标延续方式；不得污染adapter透明`sessionState`。
+- [ ] 常驻索引按 R3 批量换版，只在新外部 session 建立稳定前缀；用户置顶 + 按派生权重选出的top条目合计受 `memory.injectionBudgetResidentLines` 限制，普通编辑不逐条打穿 prompt cache。
+- [ ] 本地关键词 + 向量/等价可替换检索产生候选，按稳定slug合并同一节点并保留独立一级方向集合；ranking形状固定为本轮相关性×派生权重×单轮交汇因子，M4前派生权重输入统一为中性值1，再按 token 而非条数执行逐消息预算。结果去 archived、按冻结 scope 过滤、同一 session 去重，并在当前消息信封尾部追加。索引/检索/日志都不携带 stain 或其自然语言含义。
+- [ ] 落地冻结后的 MCP `memory_search` / `memory_fetch_more`，并增强既有 `memory_fetch_detail`：广度分页游标稳定、方向可复现、双链只展开一跳；深度按slug取权威文件并记录使用统计。所有adapter只消费同一MCP surface，不直接碰store/vault。
 - [ ] 明确物理顺序并做快照测试：adapter 的稳定 system/history 在 `promptText` 之外；本轮 `promptText` 为常驻索引稳定前缀 → 群聊 Message 声告 → 当前触发正文 → 本轮检索块（消息信封尾部）。Activity 永不因 Memory 接入而回流 prompt。
 
-**M3 验收**：跨 Space 命中符合 D0 scope 决定；同 session 不重复注入；超预算确定性截断；stain 在 push、排序、日志和最终回复中均不可见，fetch_detail 深读即使返回裸 hex 也不得解释/引用/参与判断；fetch_more 游标不重不漏、fetch_detail 返回权威正文；逐帧 SSE 仍正常且 prompt cache 稳定前缀不因单条记忆编辑变化。
+**M3 验收**：跨 Space 命中符合 D0 scope 决定；同一节点由多个独立一级方向命中时只返回/计费一次、保留方向证据并获得有界交汇增益，同一方向的重复路径不刷分，fetch_detail与SourceRef溯源不增加交汇；同 session 不重复注入；超预算确定性截断；stain 在 push、排序、日志和最终回复中均不可见，fetch_detail 深读即使返回裸 hex 也不得解释/引用/参与判断；fetch_more 游标不重不漏、fetch_detail 返回权威正文；逐帧 SSE 仍正常且 prompt cache 稳定前缀不因单条记忆编辑变化。
 
 ### P5-M4 — 派生权重与 dream 维护
 
-- [ ] 派生权重只来自双链入度、钻取/最近使用、用户编辑与置顶、按 type 的时间衰减；agent 无手工 importance 字段，stain 永不参与排序；保留有界随机探索且测试可注入 seed。
+- [ ] 用可重建的真实派生权重替换M3中性值1；派生权重只来自双链入度、展开/最近使用、用户编辑与置顶、按type的时间衰减。agent无手工importance字段，stain永不参与排序；保留有界随机探索且测试可注入seed。
 - [ ] dream 是聊天外异步维护 job，复用 M1 单写者与 M2 proposal 校验，只执行 keep/update/merge/archive 等冻结操作；默认不物理删除，保留 sources 和双链，失败不影响聊天与现有索引。
 - [ ] dream 后统一重建派生索引并批量发布新的常驻索引版本；整理模型、批量大小、频率、超时和重试均引用配置，使用便宜模型但不把供应商写死。
 
@@ -284,7 +295,7 @@
 - [ ] **5.5.0 Home Account / Execution / Workspace迁移**（其余联邦运行项的前置）：先按更新后的契约把现有 `Agent 1:N Account` 数据和Account组合UI一次迁移为每Agent一个Home Account；建立每Execution固定 `agentId + accountId`、主Execution只用Home Account、subagent按 `authorizedAgentIds` 使用其他Account的授权关系。Account增加唯一活跃Execution租约，竞争时排队或返回 `account_busy`，结束/取消/超时/失联必须释放。每Account建立唯一Workspace绑定，gateway只保存daemon宿主、绑定、策略、状态与校验时间；`sessionState`、Workspace和运行数据继续按 `accountId` 隔离，实际项目文件不迁入VPS store。迁移前后的旧字段与UI不得并存为兼容双名。
 - [ ] **5.5.1 AgentState per-Space 改造**（最浅，先做）：`src/agents/agent-state.js` 跟踪键 `agentId` → `agentId:spaceId`；形状加 `spaceId` + `detail` 字段；`status` 枚举扩到 `idle/thinking/typing/reading/coding/reviewing/on_task/away`；`/api/agent-states` 支持 `?spaceId` / `?agentId` 过滤；契约 + 4.1 已建跟踪器同步改。verify.mjs 加 per-Space 测试。
 - [ ] **5.5.2 Account.presence + 离线 @ 行为**：Account 形状加 `presence` / `lastSeenAt` 字段；`src/agents/accounts.js` 暴露 `setPresence`；`src/spaces/messages.js` 的 `shouldRespond` 加在线判定：offline 则不创建 run，改在 Space 时间线 insert 一条 `phase:"error", label:"agent-offline"` 的 Activity；SSE 加 `account.presence.updated` 事件。verify.mjs 加离线 @ 测试。
-- [ ] **5.5.3 Agent token 体系**：`src/core/agent-tokens.js` 新建——加载 `~/.vera/agent-tokens.json`，校验 Bearer token → 返回 agentId；token 文件格式 `{ "agt_xxx": "<long-random>", … }`，新建 agent 时自动生成一条；gateway 启动加载、不进 repo。tailnet ACL只做网络门禁，不替代此token。
+- [ ] **5.5.3 Agent token 体系**：`src/core/agent-tokens.js` 新建——加载 `~/.vera/agent-tokens.json`，校验 Bearer token → 返回 agentId；token 文件格式 `{ "agt_xxx": "<long-random>", … }`，新建 agent 时自动生成一条；gateway 启动加载、不进 repo。tailnet ACL只做网络门禁，不替代此token；同一解析结果也绑定Vera Memory MCP transport，tool参数不得覆盖agentId。
 - [ ] **5.5.4 Tailscale owner identity + 入口权限**：gateway只信任本机Tailscale Serve注入并去伪造的identity headers；普通API/SSE要求login命中`config.security.ownerTailscaleLogins`；生产列表为空时拒绝业务API。原生CORS使用配置化精确Origin白名单，不自建配对码/device session。
 - [ ] **5.5.5 `/api/agent/*` 路由层**：`src/api/agent-routes.js`新建——Bearer token识别Agent；login只登记daemon、per-Account Workspace/runtimeCapabilities与候选授权Account，不选择Account或取得租约。gateway创建主Run或父Run调用`POST /api/agent/runs/:id/subagents`时生成pending Execution；调度器取得目标Account唯一租约后转running、广播`run.started`并发`run.requested`。daemon不得重复创建/认领Run；终态/登出/超时释放租约，sync-state只接受租约持有者。
 - [ ] **5.5.6 Run触发与调度链路改造**：`src/spaces/messages.js`不再sync调用`executeRun`；主Execution固定Home Account，subagent才可绑定其他授权Account。触发先创建pending Run；Account空闲且Workspace宿主在线时由调度器原子取租约并下发，忙则内部排队，明确要求立即执行的请求返回`account_busy`，离线走error Activity。编译层复用`src/spaces/view-compiler.js`，mock adapter保留给gateway内部一致性测试。
