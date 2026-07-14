@@ -232,21 +232,22 @@
 
 - [x] **M2契约先行**：`scheduled/realtime`为互斥自动策略、manual始终可用；realtime统一按已保存completed Message的Unicode字符水位，默认16000；Run结束不冒充session-end dream，兜底归M4。事实地址/值由结构槽规范化后派生且不进frontmatter；同事实保留原slug并合并SourceRefs，明确纠错才允许同slug supersede，模糊匹配跳过。
 - [x] M2只从gateway已全量保存的Message范围创建`memory_digest` job，不引入Aelios式重复Raw ingest；MCP tool只提交消息范围/模式，SourceRefs由gateway从可信run/message上下文生成。
-- [x] 程序侧已完成确定性分块、per-Agent事实目录、proposal全量预校验、持久proposal/receipt与M1单写者应用；模型只能返回严格proposal，不能接触store/vault。现有OpenCode adapter已完成独立临时目录、全Tools deny、structured session与仅Navy结构化额度机器码触发一次免费V4 Flash的stub闭环，绝不改变聊天或Account模型。
+- [x] 程序侧已完成确定性分块、per-Agent事实目录、proposal全量预校验、持久proposal/receipt与M1单写者应用；模型只能返回严格proposal，不能接触store/vault。既有OpenCode独立digest与Navy quota fallback代码保留但暂停生产dispatch和M2闸门，不删除、不退化调用聊天run。
 - [x] 已接通 `memory.digestTrigger` 的 `scheduled` / `realtime` / `manual` consumer 与五段cron；实时阈值只用Unicode字符水位，M2不实现session-end dream。无关Settings更新不越过cron触发catch-up，成功watermark使用持久toSeq不因后续可见性变化倒退。
 - [x] 新provider adapter规范已冻结：一个adapter对应一套协议/生命周期，同provider多Account/模型复用；生产provider必须有`run(ctx)`，承担M2时再实现隔离`digestMemory`；固定kind/provider fail-fast、会话/stream、schema下沉、错误、取消、secret、资源清理和三层conformance闸门，不预建基类/注册表。
 - [x] 新增完整原生Ollama adapter：只接受`kind=api, provider=ollama`，以Account `connection.baseUrl`直连`/api/chat`，实现聊天stream/稳定history连续性与隔离digest；对0.23.2使用无`oneOf/patternProperties/pattern/const`的兼容transport schema，返回后仍走gateway完整validator。实现不经过OpenCode，也不是digest-only adapter。
 - [x] 在`test/adapters/`按同一行为矩阵回归Ollama/OpenCode：固定kind/provider、stream/session、稳定/临时prompt分层、容量裁剪、错误/取消/timeout、secret、cleanup和digest隔离断言，不抽取运行时BaseAdapter；`verify.mjs`的临时gateway+stub Ollama黑盒与真实Ollama 0.23.2/Gemma chat+digest smoke已完成后两层闸门。
+- [ ] **Codex CLI adapter**：新增只接受`kind=cli, provider=codex`的完整adapter，聊天使用非交互`codex exec --json`与`exec resume`保存threadId；digest使用全新ephemeral临时cwd、read-only/never、忽略用户配置与rules并强制`--output-schema`，任何tool item失败，无fallback。完成stub协议、临时gateway黑盒与真实Codex CLI chat+M2 digest三层闸门后才可勾选。
 - [ ] slug/钩子行、source、双链、stain裸hex、同事实targetFactId、手动Memory adopt与纠错supersede校验已落地；fact catalog已把现有`type`交给executor并回归mapped/unmapped旧分类可见；无复用价值/无来源推断/agent自创偏好的最终语义判断仍需固定raw夹具完成生产路径验收。
 - [x] hook入队不阻塞聊天；单Memory写入原子，失败/重试/取消有持久可观察job状态、幂等键与安全SSE，重试复用已flush proposal并续跑未应用receipt，不重复创建Memory。
 
 **M2 验收**：使用固定raw events夹具覆盖create/update/archive/skip/重复重试；同一事实换措辞、换建议slug、跨job再次出现仍只落一条Memory，纠错取代旧事实时双方sources可追溯；定时、容量、手动三种触发走同一pipeline；非法proposal全部拒绝且vault不变；聊天run不等待整理完成；测试日志/API不泄露provider secret或stain解释。
 
-真实executor补充验收分两条独立路径：Ollama/Gemma API Account必须由原生Ollama adapter直连并成功完成chat+digest，OpenCode/Navy CLI Account必须由OpenCode adapter成功完成chat+digest；两条digest请求均无Memory Tools/Workspace且返回再过gateway完整validator，chat则按各provider真实能力与Approval契约执行。Navy primary成功时不调用Flash，结构化额度机器码时恰好用新session重试一次Flash且Account.model不变；单独HTTP 402/403/429、自由文本、timeout、network、auth、model-not-found、invalid structured proposal均不调用Flash；fallback也失败时job安全`executor_failed`且vault不变。两条真实provider smoke显式执行，普通`npm test`不依赖本机模型服务或供应商额度。
+真实executor补充验收分两条独立路径：Ollama/Gemma API Account必须由原生Ollama adapter直连并成功完成chat+digest，Codex CLI Account必须由Codex adapter以非交互exec成功完成chat+digest。两条digest请求均不接Memory Tools/Account Workspace且返回再过gateway完整validator，chat则按各provider真实能力与Approval契约执行。Codex digest必须证明每次新ephemeral上下文、实际传入`--output-schema`、JSONL无tool item、没有resume聊天thread且没有模型fallback；失败时job安全`executor_failed`且vault不变。两条真实provider smoke显式执行，普通`npm test`不依赖本机模型服务或供应商额度。OpenCode代码保留但其digest不参与本轮真实executor验收。
 
-- [ ] **真实模型闸门**：原生Ollama adapter以`kind=api, provider=ollama, model=gemma4:e4b`显式跑chat+digest **已通过**；OpenCode adapter以`kind=cli, provider=opencode, model=navy/deepseek-v4-pro`显式跑chat+digest仍待执行，且只有结构化机器码明确额度耗尽才允许同job回退`opencode/deepseek-v4-flash-free`。必须断言两条实际transport互不借道，digest返回都再通过gateway权威proposal validator。Navy路径未通过前M2不标完成。
+- [ ] **真实模型闸门**：原生Ollama adapter以`kind=api, provider=ollama, model=gemma4:e4b`显式跑chat+digest **已通过**；Codex adapter须以本机真实`kind=cli, provider=codex`Account显式跑chat和当前M2端到端digest。必须断言两条实际transport互不借道，Codex真实使用`--output-schema`且digest不resume/不出现tool item，两条digest返回都再通过gateway权威proposal validator。Codex路径未通过前M2不标完成。
 
-**M2当前验收（2026-07-14，原生Ollama三层闸门已通过，Navy真实闸门待完成）**：`npm test` 161项通过、2个真实smoke默认skip；`verify.mjs` 72/72通过，其中固定临时gateway+stub Ollama黑盒已验证Account路由、chat stream/sessionState与digest job。原生Ollama adapter直连Ollama 0.23.2 `/api/chat`，以`gemma4:e4b`显式跑chat+digest 7/7通过，`num_ctx=16384`实际装载，digest返回再过Vera完整validator；聊天稳定history只保存用户原始触发和本人assistant回复，不持久化群聊声场。OpenCode stub已证明独立session/临时目录、Tools deny、structured response与严格Navy quota fallback；旧“Gemma通过OpenCode”测试已删除。Navy真实请求尚未执行，因此M2未标完成。
+**M2当前验收（2026-07-14，Codex切换前基线）**：`npm test` 161项通过、2个真实smoke默认skip；`verify.mjs` 72/72通过，其中固定临时gateway+stub Ollama黑盒已验证Account路由、chat stream/sessionState与digest job。原生Ollama adapter直连Ollama 0.23.2 `/api/chat`，以`gemma4:e4b`显式跑chat+digest 7/7通过，`num_ctx=16384`实际装载，digest返回再过Vera完整validator；聊天稳定history只保存用户原始触发和本人assistant回复，不持久化群聊声场。OpenCode stub已证明既有独立digest实现，但该路径现已按用户决定暂停并退出生产dispatch/M2闸门。Codex三层闸门尚未完成，因此M2未标完成。
 
 ### P5-M3 — 三渠道检索、注入预算、横向扩展与正文展开
 
@@ -328,7 +329,7 @@
 - [ ] **6.0 / F6 仓库结构与共享平台闸门**：`AGENTS.md`已预先放行单一Capacitor配置及生成的`android/`、`ios/`，但不构成执行授权。获当前任务明确授权并将本项标为进行中后，引入Capacitor，`webDir`指向F5冻结的共享Web产物，原生工程不复制业务JS/CSS；platform adapter补Android/iOS实现，根节点设置`data-platform`，统一gateway URL、fetch/SSE、secure storage、notification、file picker、keyboard/back、haptics与external auth/link；建立共享测试矩阵和构建脚本命名，平台特有代码只在bridge/原生壳。验收同一Web产物可被网页、Android、iOS加载，业务view无Capacitor直接import且Web fallback全过。
 - [ ] **6.1 Android**：生成独立Android壳，接入运行时gateway选择/安全存储、系统返回、键盘、安全区、前后台SSE恢复、通知权限与文件选择；真机验证蜂窝网络、锁屏/切后台、旋转/字体缩放、冷启动、长时间线及接口就绪后的上传/下载；固定`build:android:debug`与安装脚本，调试APK产物路径只写入本项验收记录、不进repo。完成标准为真实Android设备跑通登录/选Space/发消息/@/Approval/设置保存/断线重连，达到性能预算且无平台专属业务页面。
 - [ ] **6.2 iOS**：生成独立iOS壳，处理WKWebView safe-area、键盘、返回手势、外部认证回跳、通知权限、ATS与前后台SSE恢复；Xcode模拟器先跑共享矩阵，再上真机验证蜂窝网络、锁屏/切后台、字体缩放和文件选择；固定`build:ios:simulator`与archive校验流程，签名、Provisioning及TestFlight/App Store发布留到6.6。完成标准为iPhone模拟器和至少一台真机通过与Android相同核心场景，平台差异只存在于adapter/壳。
-- [ ] **6.3 CLI/API daemon适配补全**：Claude Code（`--resume`）、Codex及API tool-call host；全部复用Phase 5.5 daemon协议与RuntimeCapabilities，不回到gateway spawn。
+- [ ] **6.3 CLI/API daemon适配补全**：Claude Code（`--resume`）与API tool-call host；把M2已完成的Codex进程内driver迁移到Phase 5.5 daemon并补齐RuntimeCapabilities，不重复实现第二套Codex adapter，也不回到gateway spawn。
 - [ ] **6.4 联邦能力与配置补全**：Skill管理、Tools policy与`runtimeCapabilities`展示逐项闭环；Appearance的产品配置与Web闭环归F4，本项只验证三端读取同一gateway保存值，并处理不可编辑的safe-area/输入法平台叠加，不再重做主题系统。
 - [ ] **6.5 Extension体系**：先完成Extension Package manifest/安装/版本/权限契约，再实现Skill/MCP/Hook各自runtime、daemon侧Agent Plugin与隔离Space Module；Settings负责全局安装，Account/Space分别启用，不建万能Plugin runtime。Space Module使用可销毁sandbox并提供Web/Android/iOS一致bridge，未启用时零加载、崩溃不影响聊天Shell；第三方代码不得直接进入主DOM或持有gateway/secrets/宿主文件权限。
 - [ ] **6.6 原生发布与三端回归**：F5冻结的Web production缓存与性能基线只做回归，不在本项重建；完成Android release、iOS archive/TestFlight准备、三端共享核心场景与性能矩阵、Extension安装/卸载/升级/权限变更回归，并冻结可回退版本。签名、Provisioning、TestFlight/App Store正式发布作为独立发布步骤，不混进UI实现。

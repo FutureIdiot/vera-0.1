@@ -48,7 +48,11 @@ Vera gateway (VPS, 7×24)
 
 M2 adapter可选方法为`digestMemory({ account, payload, signal }) -> Promise<{ proposals, execution? }>`。`account`只供可信adapter控制层读取`id/kind/provider/connection/model`；`payload`严格为`{agent:{id,name},chunks,facts,proposalSchema}`，这是唯一可送入模型执行请求的内容，不含Account、connection、secret、sessionState、workspacePath、回调或写能力。完整`proposalSchema`或由它确定性派生的provider-compatible transport schema必须经provider structured-output通道传递；完整Schema不在用户文本中重复序列化，且gateway完整validator始终是写入权威。实现必须使用独立无工具会话，遵守signal取消与配置超时，只返回可JSON序列化对象；`execution`若返回，只允许`{adapter,primaryModel,effectiveModel,fallbackUsed,fallbackReason,attempts}`安全路由元数据。provider原始错误由digest service折叠为安全`executor_failed`。Agent的Home Account provider/model仍是当前唯一primary选择；程序分块与gateway写入是固定安全边界，不伪装成可替换插件。adapter未实现该方法时明确`executor_unavailable`。
 
-OpenCode实现只服务`kind=cli, provider=opencode`的Account：每次digest attempt创建独立临时目录与session，session权限全量deny，同时把daemon实际列出的每个tool id显式设为false；任何tool事件都视为契约违规并失败。结果只接受structured response，不从聊天stdout或Markdown猜proposal。
+OpenCode实现只服务`kind=cli, provider=opencode`的Account，其聊天`run(ctx)`与既有digest代码继续保留；但OpenCode digest当前暂停生产dispatch、fallback与M2完成闸门，`provider=opencode`的Home Account提交digest时明确`executor_unavailable`，不得退化为聊天run。恢复前必须由用户另行授权并重新通过三层闸门。
+
+Codex实现只服务`kind=cli, provider=codex`的Account，并同时实现聊天`run(ctx)`与隔离`digestMemory(...)`。聊天使用非交互`codex exec --json`，续轮使用`codex exec resume <threadId> --json`；prompt从stdin恰好投递一次，`thread.started.thread_id`立即持久化为`sessionState={threadId}`，只有明确thread不存在才上报`session-reset`并新建，普通provider失败不得重置。`item.completed`的`agent_message`按到达顺序映射`onDelta`，CLI未提供逐token事件时不得伪造；`command_execution`等真实tool item映射Activity。Account.model非空时必须显式传`-m`，为空则不传并使用Codex供应商默认模型。
+
+Codex digest每次创建新的临时cwd/schema/output文件，使用`codex -C <temp> -a never -s read-only exec --ephemeral --ignore-user-config --ignore-rules --skip-git-repo-check --json --output-schema <schema> --output-last-message <output> -`，并禁用CLI当前公开的shell/apps/multi-agent特性；绝不resume聊天thread，不传Account Workspace/connection.args，不创建Message/Activity。`--output-schema`接收gateway完整schema或经真实能力探针确认的确定性Codex-compatible投影；prompt不重复序列化schema，最终仍由gateway完整validator裁决。当前CLI没有单一“禁用全部工具”开关，因此可验证边界是空临时cwd、ephemeral、忽略用户配置/rules、read-only与never；JSONL一旦出现任何tool item即`executor_failed`且结果不得apply。Codex digest无fallback。
 
 本机Gemma是另一条独立Account：`kind=api, provider=ollama, model=gemma4:e4b`，由完整的原生Ollama adapter直接调用Account `connection.baseUrl`下的HTTP API，不经过OpenCode CLI/daemon，不共享Account、sessionState、连接或额度后备。该adapter必须同时实现聊天`run(ctx)`和隔离的`digestMemory(...)`，不得做成只能整理Memory的残缺provider。
 
@@ -81,7 +85,7 @@ OpenCode Memory digest的额度后备由gateway运行配置映射，不进入Acc
 
 本节规范“如何接一个新provider”，目的是把可重复的边界错误前移到固定验收，不承诺消除provider/version自身的协议差异。
 
-**adapter复用单位**：adapter对应一套真实的provider协议与运行生命周期，不对应单个Account、endpoint或model。多个Ollama Account和`gemma4:e4b`、Qwen、Llama等模型共用一个`ollama` adapter；多个OpenCode Account和模型共用一个`opencode` adapter。鉴权值、base URL、model及可配置参数能仅靠Account/config数据表达、无需在共享代码中按provider名称分支时，应复用既有adapter。若stream帧、会话连续性、tool loop、错误形状、取消清理或structured-output下沉需要provider专属解析与状态机，则新建该provider adapter。不得为单个模型复制adapter，也不得用兼容别名把两个协议伪装成同一provider。
+**adapter复用单位**：adapter对应一套真实的provider协议与运行生命周期，不对应单个Account、endpoint或model。多个Ollama Account和`gemma4:e4b`、Qwen、Llama等模型共用一个`ollama` adapter；多个OpenCode Account和模型共用一个`opencode` adapter；多个Codex Account和模型共用一个`codex` adapter。鉴权值、base URL、model及可配置参数能仅靠Account/config数据表达、无需在共享代码中按provider名称分支时，应复用既有adapter。若stream帧、会话连续性、tool loop、错误形状、取消清理或structured-output下沉需要provider专属解析与状态机，则新建该provider adapter。不得为单个模型复制adapter，也不得用兼容别名把两个协议伪装成同一provider。
 
 **第一版结构保持显式**：当前形态使用`src/adapters/<provider>-adapter.js`与镜像的`test/adapters/<provider>-adapter.test.js`，由`server.js`显式import并加入普通`provider -> adapter`对象。不得增加`BaseAdapter`、动态注册表、capability DSL或尚无第二个真实用例的`openai-compatible`抽象；未来daemon只迁移承载位置，以下provider翻译、会话、错误和安全语义不变。
 
@@ -292,7 +296,7 @@ daemon 向 gateway 报 run 失败时 PATCH `error: { code, message }`：
 - **隔离**：daemon 不得读其他 agent 的数据；gateway 在 `run.requested` 里给的 `promptText` 是它唯一该看的上下文。daemon 之间不直接通讯。
 - **Execution 隔离**：daemon 必须用 `run.accountId` 对应的唯一 Workspace、sessionState、secret 与 runtime 执行；不得因为同属一个 Agent 就混用两个 Account 的运行时数据。subagent 换 Account 不换 Agent Memory。
 - **spawn**：daemon 在本机 spawn CLI 一律走 `src/core/spawn.js` 同款的 PATH 修正 + kill 树逻辑（搬运参考，salvage-notes 第一节第 3 条）。daemon 是独立进程，可以从 Vera 仓库 import 这套工具。
-- **无交互模式**：CLI 必须以无交互参数运行（opencode `--dangerously-skip-permissions`、CC print 模式等），**禁止让 CLI 弹出选项式提问**。需要用户点头的危险操作走 `requestApproval`；其他问题让 agent 正常发消息问。
+- **无交互模式**：CLI 必须以无交互参数运行（opencode `--dangerously-skip-permissions`、CC print 模式、Codex `exec`等），**禁止让 CLI 弹出选项式提问**。Codex当前进程内adapter使用顶层`-a never`（必须位于`exec`前）使无法自动执行的动作直接回给模型；不得使用`--dangerously-bypass-approvals-and-sandbox`。Phase 5.5迁移后需要用户点头的危险操作再走`requestApproval`；其他问题让agent正常发消息问。
 - **常驻资源**：CLI daemon（opencode serve）等长命资源是 daemon 内部实现细节，daemon 自己管空闲回收、SIGTERM 关停，gateway 不帮忙清理。
 - **secrets**：API型Account的`secretRef`非null时，daemon只能为当前Execution的`accountId`向gateway（或VPS本地`~/.vera/secrets.json`）换取明文key，只存在于该Account runtime内存，不落日志、不进sessionState；`secretRef=null`表示provider无鉴权（如本机Ollama），adapter不得虚构或复用其他Account凭据。
 - **网络路径**：daemon 的 HTTP、SSE、心跳和重连全部固定走 Tailscale 私网 base URL。Mac 使用小火箭承载 Tailscale 时，daemon 不感知客户端品牌，只要求 MagicDNS、tailnet 路由与长连接真实可用；不得在私网失败时静默 fallback 到公网域名。
@@ -318,7 +322,18 @@ daemon 启动后在 daemon 那一侧维护一个 `opencode serve` 进程，sessi
 | 会话失效 | opencode daemon 重启后旧 sessionID 不存在 → 新建会话 + 上报 `activity { phase: "error", label: "session-reset" }` → sync-state |
 | 关停 | daemon 收到 `agent.heartbeat` 缺失 3 次 → 杀 opencode daemon + 杀在飞 runner 子进程 → PATCH run failed (gateway_unreachable) → exit(0) |
 
-### 示例 B：Claude Code resume 型
+### 示例 B：Codex CLI resume 型
+
+| 时机 | daemon 行为 |
+|---|---|
+| daemon启动 | 校验Account为`kind=cli, provider=codex`，从宿主runtime配置解析Codex binary与版本；Account只提供model等逻辑配置 |
+| 首轮聊天 | 在Account Workspace以顶层`-a never -s workspace-write`启动`codex exec --json --output-last-message <tmp> -`，非空Account.model显式传`-m`；stdin写入完整`prompt.text` |
+| 会话连续性 | JSONL `thread.started.thread_id`立即sync为`sessionState={threadId}`；续轮用`codex exec resume <threadId> --json ... -`，只对明确thread不存在执行session-reset |
+| 流式与Activity | `item.completed`的`agent_message`按段上报delta；CLI没有逐token事件时不伪造。真实command/tool item按契约上报Activity |
+| digest | 走独立ephemeral临时cwd，强制`--output-schema`，不resume聊天、不接Workspace/Tools；任何tool item使job失败 |
+| 取消/关停 | Abort或timeout终止完整进程组，finally清理临时cwd/schema/output；shutdown幂等并取消仍在飞的子进程 |
+
+### 示例 C：Claude Code resume 型
 
 会话不常驻：每条消息一个 `claude -p` 进程，靠 `--resume` 复活上下文。sessionState 存 resume id。
 
@@ -332,7 +347,7 @@ daemon 启动后在 daemon 那一侧维护一个 `opencode serve` 进程，sessi
 | 会话失效 | resume 报错（id 过期/被清理） → 去掉 `--resume` 重跑 + 上报 `session-reset` |
 | 关停 | 心跳缺失 → 杀在飞 claude 进程 → PATCH failed → exit(0) |
 
-### 示例 C：原生Ollama API型（Gemma，无CLI进程）
+### 示例 D：原生Ollama API型（Gemma，无CLI进程）
 
 | 接口点 | 映射 |
 |---|---|
@@ -344,7 +359,7 @@ daemon 启动后在 daemon 那一侧维护一个 `opencode serve` 进程，sessi
 | 会话失效 | sessionState不是预期history形状时明确上报`session-reset`并从空history开始，不借用其他Account历史 |
 | 关停 | 心跳缺失或Run取消 → abort HTTP请求/reader → PATCH对应状态 → exit(0)；无常驻CLI进程可杀 |
 
-### 示例 D：mock adapter（Phase 2 已实现，verify.mjs 使用）
+### 示例 E：mock adapter（Phase 2 已实现，verify.mjs 使用）
 
 回显两段落文本（验证多气泡），sessionState 存自增计数器并带进回复（验证会话连续性），并演示同 callId 的 tool activity 原地更新。prompt 内触发词：`!!error` → 抛 `provider_error`；`!!approve` → 走一次 requestApproval 全链路。延迟来自 config 的 mock 配置。
 
@@ -378,6 +393,7 @@ export function createOpencodeAdapter({ config }) {
 | Phase 2–5当前进程内形态 | Phase 5.5 daemon对应 |
 |---|---|
 | `createOpencodeAdapter({ config })` | `scripts/agent-daemon.js`（独立进程，opencode daemon 在它内部管） |
+| `createCodexAdapter({ config })` | `scripts/agent-daemon.js`内的Codex runtime（复用同一resume id和JSONL翻译规则） |
 | `adapter.run(ctx)` | daemon 收 `run.requested` → spawn CLI → 走 run 生命周期 |
 | `ctx.onDelta(text)` | `POST /api/agent/runs/:id/delta` |
 | `ctx.onActivity(evt)` | `POST /api/agent/runs/:id/activities` |

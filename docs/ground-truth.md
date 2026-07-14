@@ -58,7 +58,7 @@ Vera是单用户、自部署的多agent协作空间。
 - Workspace实际文件位于承载该Account的daemon宿主；gateway只保存Account到Workspace的绑定、策略、状态与校验信息，不复制项目内容，也不把宿主绝对路径当成跨设备可用数据
 - 换Key、换供应商、换模型改的是账户，agent身份与记忆不变
 - CLI供应商示例：Claude Code、Codex、OpenCode等；调用路径示例：build路径、`opencode go`
-- API供应商示例：本机Ollama Account使用`connection.baseUrl=http://127.0.0.1:11434`且`secretRef=null`；远程API使用对应endpoint和`secretRef`。Gemma/Ollama API Account与OpenCode/Navy CLI Account是两个独立Account，不共享连接、会话或额度。
+- API供应商示例：本机Ollama Account使用`connection.baseUrl=http://127.0.0.1:11434`且`secretRef=null`；远程API使用对应endpoint和`secretRef`。当前M2真实路径中的Gemma/Ollama API Account与Codex CLI Account是两个独立Account，不共享连接、会话或额度；OpenCode Account与代码继续保留，但其Memory digest能力暂停接入。
 - adapter按provider协议与运行生命周期划分，不按Account、endpoint或模型划分；同一Ollama adapter服务多个Ollama模型/Account。新增adapter先遵守`adapter-interface.md` 1.2的行为与三层验收规范，server保持显式import和普通provider map，不引入基类、动态注册表或无第二真实用例的兼容抽象。
 - 命名纪律：Agent、Account、Execution、Workspace各占一名，不得互作别名。Phase 4已经完成Agent/Account对象拆分，但当时落地的 `Agent 1:N Account` 管理形态现为待迁移旧形态，不代表当前设计
 
@@ -167,10 +167,10 @@ Vera是单用户、自部署的多agent协作空间。
 - 不存在所有Agent隐式共享的长期Memory池；未来若需要共享，必须新增显式scope、授权与来源契约后才能实现
 
 **记忆整理流程：**
-- 各agent由自身subagent负责整理和提炼
-- 流程环节：分块（程序）→ 标签（subagent）→ 提炼写入（subagent）
+- 各Agent由自身Home Account的完整provider adapter承担隔离整理，不把M2 digest伪装成聊天subagent或Execution
+- 流程环节：分块（gateway程序）→ 隔离proposal（Home Account adapter）→ 校验与写入（gateway单写者）
 - 分块与阈值固定由gateway程序执行、写入固定经gateway单写者；标签/提炼使用该Agent Home Account当前配置的provider/model与adapter隔离`digestMemory`能力。可信adapter控制层可读取Account路由字段，但送入模型的payload只能包含Agent最小身份、Message chunks、fact catalog和proposal schema，绝不包含Account connection/secret、sessionState或Workspace。Account本身可配置，不为每个环节预建第二套executor注册表。
-- M2按Home Account的真实provider选择完整adapter：`kind=api, provider=ollama, model=gemma4:e4b`由原生Ollama adapter直连`connection.baseUrl`，并按实测provider能力下沉structured-output schema；`kind=cli, provider=opencode, model=navy/deepseek-v4-pro`由OpenCode adapter创建独立无Tools会话。两条路径不共享Account、sessionState、连接或fallback，也不得为了整理Memory新增缺少聊天`run(ctx)`的digest-only provider。只有Navy primary返回经结构化机器码确认的额度耗尽信号时，才允许同一digest job用配置的免费模型再尝试一次；该后备模型不是Account模型、聊天模型、通用provider fallback或第二Execution，不修改Account.model/sessionState，下一job仍从Account.model开始。本地Ollama失败不走此fallback。
+- M2按Home Account的真实provider选择完整adapter：`kind=api, provider=ollama, model=gemma4:e4b`由原生Ollama adapter直连`connection.baseUrl`，并按实测provider能力下沉structured-output schema；`kind=cli, provider=codex`由Codex adapter同时提供非交互聊天`run(ctx)`与隔离`digestMemory(...)`。Codex digest每次使用新的临时cwd和ephemeral执行，不resume聊天thread，忽略用户配置与rules，在read-only sandbox和`approval_policy=never`下运行，并强制通过`--output-schema`传递provider-compatible transport schema；JSONL出现任何tool item即整次失败，结果仍须经过gateway完整validator。两条真实路径不共享Account、sessionState或连接，且均无模型fallback。OpenCode聊天与digest实现代码保留，但OpenCode digest暂停生产dispatch、fallback和M2完成闸门；不得为了整理Memory新增缺少聊天`run(ctx)`的digest-only provider。
 - M2 digest job不是聊天Run/Execution，不创建subagent、不取得Account lease，也不依赖Phase 5.5的daemon/token/presence/Tailscale/Workspace接线；5.5只迁移同一adapter能力的执行位置，不改变本条语义。
 - 触发机制：hook（详见《Memory Hook设计文档》）
 - `memory.digestTrigger` 只选择一种自动策略：`scheduled` 与 `realtime` 互斥，`manual` 表示关闭自动整理；无论选择哪种策略，owner 与可信 Agent 都始终可以手动提交整理。`realtime` 不是每轮都跑模型，而是按 `(agentId, Space)` 统计尚未整理、已完整保存的 Message 正文 Unicode 字符数，达到配置阈值后异步排队；Activity、流式 delta、工具过程与 provider token 估算都不进入水位。聊天 Run 不等待整理。
