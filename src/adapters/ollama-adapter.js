@@ -1,4 +1,4 @@
-// Native Ollama HTTP adapter (verified against Ollama 0.23.2 / gemma4:e4b).
+// Native Ollama HTTP adapter (implemented against Ollama 0.23.2 / gemma4:e4b).
 //
 // - accepts only Account kind=api, provider=ollama; baseUrl/model are Account data;
 // - session continuity is a JSON-serializable { history } array owned by the Account;
@@ -17,6 +17,9 @@ import {
 
 const ACTION_FALLBACK = ["create", "update", "archive", "supersede", "skip"];
 const SKIP_FALLBACK = ["no_reusable_fact", "unsupported_inference", "ambiguous_match", "duplicate_in_job"];
+const OLLAMA_DIGEST_SYSTEM_PROMPT = `${MEMORY_DIGEST_SYSTEM_PROMPT}
+Ollama's compatible transport schema uses one flat shape for every action. Fill action-irrelevant string fields with an empty string; they are removed deterministically before Vera's full proposal validator runs.
+For update, supersede, or archive, choose exactly one transport target. If the matching catalog entry has a non-empty factId, copy it to targetFactId and set targetMemorySlug to an empty string. Only when the matching catalog entry is unmapped with factId=null may you copy its slug to targetMemorySlug and set targetFactId to an empty string. Never fill both target fields.`;
 
 function inputByteLength(value) {
   return Buffer.byteLength(String(value ?? ""), "utf8");
@@ -49,16 +52,24 @@ export function projectOllamaDigestSchema(source) {
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["action"],
+          // Ollama 0.23.2 cannot express Vera's action-specific oneOf safely.
+          // Requiring sourced evidence for every transport item is a valid,
+          // stricter subset (skip also accepts evidence) and prevents the local
+          // model from emitting structurally unauditable write proposals.
+          required: [
+            "action", "evidenceMessageIds", "targetFactId", "targetMemorySlug",
+            "suggestedSlug", "fact", "type", "description", "content", "skipReason",
+          ],
           properties: {
             action: { type: "string", enum: actions.length ? actions : ACTION_FALLBACK },
-            evidenceMessageIds: { type: "array", items: { type: "string" } },
+            evidenceMessageIds: { type: "array", minItems: 1, uniqueItems: true, items: { type: "string" } },
             targetFactId: { type: "string" },
             targetMemorySlug: { type: "string" },
             suggestedSlug: { type: "string" },
             fact: {
               type: "object",
               additionalProperties: false,
+              required: ["subject", "relation", "qualifiers", "value"],
               properties: {
                 subject: { type: "string" },
                 relation: { type: "string" },
@@ -76,6 +87,33 @@ export function projectOllamaDigestSchema(source) {
       },
     },
   };
+}
+
+function normalizeOllamaDigestProposals(proposals) {
+  if (!Array.isArray(proposals)) return proposals;
+  return proposals.map((proposal) => {
+    if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) return proposal;
+    const base = {
+      action: proposal.action,
+      evidenceMessageIds: proposal.evidenceMessageIds,
+    };
+    if (proposal.action === "skip") return { ...base, skipReason: proposal.skipReason };
+    const target = {
+      ...(typeof proposal.targetFactId === "string" && proposal.targetFactId ? { targetFactId: proposal.targetFactId } : {}),
+      ...(typeof proposal.targetMemorySlug === "string" && proposal.targetMemorySlug ? { targetMemorySlug: proposal.targetMemorySlug } : {}),
+    };
+    if (proposal.action === "archive") return { ...base, ...target };
+    return {
+      ...base,
+      ...target,
+      fact: proposal.fact,
+      ...(proposal.action === "create" ? { suggestedSlug: proposal.suggestedSlug } : {}),
+      type: proposal.type,
+      description: proposal.description,
+      content: proposal.content,
+      ...(proposal.stains === undefined ? {} : { stains: proposal.stains }),
+    };
+  });
 }
 
 function resolveAccount(account) {
@@ -257,7 +295,7 @@ export function createOllamaAdapter({ config }) {
     try { resolved = resolveAccount(account); } catch { throw new AdapterError("executor_unavailable", "Ollama memory digest executor is unavailable"); }
     if (signal?.aborted) throw new AdapterError("cancelled", "Ollama memory digest cancelled");
     const prompt = buildMemoryDigestPrompt(payload);
-    if (inputByteLength(MEMORY_DIGEST_SYSTEM_PROMPT) + inputByteLength(prompt) > maxInputBytes) {
+    if (inputByteLength(OLLAMA_DIGEST_SYSTEM_PROMPT) + inputByteLength(prompt) > maxInputBytes) {
       throw new AdapterError("executor_failed", "Ollama memory digest input exceeds the configured capacity");
     }
     const format = projectOllamaDigestSchema(payload?.proposalSchema);
@@ -272,11 +310,11 @@ export function createOllamaAdapter({ config }) {
           stream: false,
           think: false,
           messages: [
-            { role: "system", content: MEMORY_DIGEST_SYSTEM_PROMPT },
+            { role: "system", content: OLLAMA_DIGEST_SYSTEM_PROMPT },
             { role: "user", content: prompt },
           ],
           format,
-          options: { num_ctx: numCtx },
+          options: { num_ctx: numCtx, temperature: 0 },
         }),
         signal: control.signal,
       });
@@ -285,7 +323,7 @@ export function createOllamaAdapter({ config }) {
       if (Array.isArray(body?.message?.tool_calls) && body.message.tool_calls.length) throw new Error("provider_error");
       const envelope = parseMemoryDigestEnvelope(body?.message?.content);
       return {
-        ...envelope,
+        proposals: normalizeOllamaDigestProposals(envelope.proposals),
         execution: {
           adapter: "ollama",
           primaryModel: resolved.model,

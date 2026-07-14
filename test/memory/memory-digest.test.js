@@ -101,6 +101,29 @@ test("incremental watermark does not rewind when later visibility rules hide its
   assert.deepEqual(resolved.messages.map((item) => item.id), ["msg_three"]);
 });
 
+test("executor chunks expose only Message evidence fields and omit internal chunk metadata", async () => {
+  const messages = [message("msg_one", 1, "Remember this durable rule")];
+  let received;
+  await withService(messages, async (input) => {
+    received = input.chunks;
+    return { proposals: [{ action: "skip", evidenceMessageIds: ["msg_one"], skipReason: "no_reusable_fact" }] };
+  }, async ({ service }) => {
+    const queued = service.enqueue({
+      agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual",
+      fromMessageId: "msg_one", toMessageId: "msg_one",
+    });
+    const job = await waitForJob(service, queued.id);
+    assert.equal(job.status, "succeeded");
+  });
+  assert.deepEqual(received, [{ messages: [{
+    messageId: "msg_one",
+    author: { type: "user" },
+    target: { type: "broadcast" },
+    content: "Remember this durable rule",
+    createdAt: "2026-07-13T00:00:01.000Z",
+  }] }]);
+});
+
 test("fact address ignores qualifier order while fact value remains separate", () => {
   const left = deriveFactHashes(AGENT, { subject: " Vera ", relation: "USES", qualifiers: [" Scope A ", "Project"], value: "JSON" });
   const right = deriveFactHashes(AGENT, { subject: "vera", relation: "uses", qualifiers: ["project", "scope a"], value: "Markdown" });

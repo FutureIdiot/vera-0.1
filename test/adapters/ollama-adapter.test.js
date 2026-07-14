@@ -91,6 +91,11 @@ test("transport schema keeps proposal structure without Ollama 0.23.2 crash keyw
   assert.equal(schemaHasKey(schema, new Set(["oneOf", "patternProperties", "pattern", "const"])), false);
   assert.deepEqual(schema.properties.proposals.items.properties.action.enum.sort(),
     ["archive", "create", "skip", "supersede", "update"]);
+  assert.deepEqual(schema.properties.proposals.items.required, [
+    "action", "evidenceMessageIds", "targetFactId", "targetMemorySlug",
+    "suggestedSlug", "fact", "type", "description", "content", "skipReason",
+  ]);
+  assert.equal(schema.properties.proposals.items.properties.evidenceMessageIds.minItems, 1);
   assert.ok(schema.properties.proposals.items.properties.fact.properties.value);
   assert.ok(schema.properties.proposals.items.properties.targetFactId);
 });
@@ -211,14 +216,17 @@ test("chat abort, timeout, provider errors and shutdown expose stable codes", as
 test("digest is isolated, schema-projected, parsed, and accepted by the full gateway validator", async (t) => {
   const proposal = {
     action: "create", evidenceMessageIds: ["msg_1"],
+    targetFactId: "", targetMemorySlug: "",
     fact: { subject: "Vera", relation: "test port", qualifiers: [], value: "3210" },
     suggestedSlug: "vera-test-port", type: "rule",
     description: "Vera uses test port 3210", content: "Use port 3210 for Vera tests.",
+    skipReason: "no_reusable_fact",
   };
   const stub = await startStub(t, async ({ res, body }) => {
     assert.equal(body.stream, false);
     assert.equal(body.think, false);
     assert.equal(body.tools, undefined);
+    assert.equal(body.options.temperature, 0);
     assert.equal(body.messages.length, 2);
     assert.equal(body.messages[1].content.includes("proposalSchema"), false);
     assert.equal(schemaHasKey(body.format, new Set(["oneOf", "patternProperties", "pattern", "const"])), false);
@@ -230,6 +238,12 @@ test("digest is isolated, schema-projected, parsed, and accepted by the full gat
   const before = JSON.stringify(input.payload);
   const result = await adapter.digestMemory(input);
   assert.equal(JSON.stringify(input.payload), before, "adapter must not mutate the frozen digest payload");
+  assert.deepEqual(result.proposals, [{
+    action: "create", evidenceMessageIds: ["msg_1"],
+    fact: { subject: "Vera", relation: "test port", qualifiers: [], value: "3210" },
+    suggestedSlug: "vera-test-port", type: "rule",
+    description: "Vera uses test port 3210", content: "Use port 3210 for Vera tests.",
+  }]);
   assert.deepEqual(result.execution, {
     adapter: "ollama", primaryModel: "gemma4:e4b", effectiveModel: "gemma4:e4b",
     fallbackUsed: false, fallbackReason: null, attempts: 1,

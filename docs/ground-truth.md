@@ -34,6 +34,7 @@ Vera是单用户、自部署的多agent协作空间。
 | 命名 | 用户定义的身份标识，永久绑定记忆和历史 |
 | 记忆 | 私有，随身份走（见3.1） |
 | Home Account | 每个Agent恰有一个日常主账户；这是身份的默认执行连接，不代表Agent拥有一组可同时驾驶的账户 |
+| 扩展能力绑定 `[Phase 5.5/6]` | Skills / MCP / Hooks / Agent Plugins 在Agent设置中各有独立目录；Memory只作为内置MCP与Hook单元出现，不在Agent身份上另造专用字段 |
 | 当前窗口 | 动态状态，当前所在Space（属Agent State层） |
 
 **Account（账户）**：供应商连接 + 项目与窗口上下文。
@@ -55,6 +56,7 @@ Vera是单用户、自部署的多agent协作空间。
 - 主Execution无需退出Home Account。获得用户授权后，它可以派subagent创建绑定其他Account的Execution；授权资格由目标Account的 `authorizedAgentIds` 决定。subagent只接收父Execution明确传入的任务包和必要上下文，不继承父Account的供应商会话历史
 - **每个Account同一时刻只允许一个活跃Execution租约**，无论执行者是Home Agent还是获授权的其他Agent；竞争请求必须排队或明确返回 `account_busy`，不得让多个Agent/daemon并发驾驶同一sessionState与Workspace
 - Memory始终按 `agentId` 隔离并跟随该Agent的所有Execution；供应商侧 `sessionState`、Workspace与运行数据始终按 `accountId` 隔离。Seat不携带 `accountId`，具体账户只由Execution绑定
+- MCP/Hook单元的执行者统一叫`executorAgentId`：默认指向当前Agent；owner可在该单元的执行Agent下拉框中改选其他可用Agent。选择只授权该Agent代理执行该单元，不改变Memory归属、Account所有权或普通Execution授权，不授予无关Workspace/Tools/sessionState访问；所选Agent不可用时保持原选择并显示`!`要求用户手动改选，不得自动fallback
 - Workspace实际文件位于承载该Account的daemon宿主；gateway只保存Account到Workspace的绑定、策略、状态与校验信息，不复制项目内容，也不把宿主绝对路径当成跨设备可用数据
 - 换Key、换供应商、换模型改的是账户，agent身份与记忆不变
 - CLI供应商示例：Claude Code、Codex、OpenCode等；调用路径示例：build路径、`opencode go`
@@ -167,10 +169,11 @@ Vera是单用户、自部署的多agent协作空间。
 - 不存在所有Agent隐式共享的长期Memory池；未来若需要共享，必须新增显式scope、授权与来源契约后才能实现
 
 **记忆整理流程：**
-- 各Agent由自身Home Account的完整provider adapter承担隔离整理，不把M2 digest伪装成聊天subagent或Execution
-- 流程环节：分块（gateway程序）→ 隔离proposal（Home Account adapter）→ 校验与写入（gateway单写者）
-- 分块与阈值固定由gateway程序执行、写入固定经gateway单写者；标签/提炼使用该Agent Home Account当前配置的provider/model与adapter隔离`digestMemory`能力。可信adapter控制层可读取Account路由字段，但送入模型的payload只能包含Agent最小身份、Message chunks、fact catalog和proposal schema，绝不包含Account connection/secret、sessionState或Workspace。Account本身可配置，不为每个环节预建第二套executor注册表。
-- M2按Home Account的真实provider选择完整adapter：`kind=api, provider=ollama, model=gemma4:e4b`由原生Ollama adapter直连`connection.baseUrl`，并按实测provider能力下沉structured-output schema；`kind=cli, provider=codex`由Codex adapter同时提供非交互聊天`run(ctx)`与隔离`digestMemory(...)`。Codex digest每次使用新的临时cwd和ephemeral执行，不resume聊天thread，忽略用户配置与rules，在read-only sandbox和`approval_policy=never`下运行，并强制通过`--output-schema`传递provider-compatible transport schema；JSONL出现任何tool item即整次失败，结果仍须经过gateway完整validator。两条真实路径不共享Account、sessionState或连接，且均无模型fallback。OpenCode聊天与digest实现代码保留，但OpenCode digest暂停生产dispatch、fallback和M2完成闸门；不得为了整理Memory新增缺少聊天`run(ctx)`的digest-only provider。
+- Memory整理在Agent设置的Hooks目录中表现为内置`Vera Memory Digest Hook`单元。默认执行Agent是Memory所属Agent自身；自身不可用时该Hook默认关闭，owner手动开启或改配时只通过执行Agent下拉框指定另一名可用Agent，不展示Account/model选择器。不把M2 digest伪装成聊天subagent或普通Execution
+- 流程环节：分块（gateway程序）→ 隔离proposal（选定Account adapter）→ 校验与写入（gateway单写者）
+- 分块与阈值固定由gateway程序执行、写入固定经gateway单写者；标签/提炼使用入队时解析并冻结的`executorAgentId`及该执行Agent的Home Account/provider/model与adapter隔离`digestMemory`能力。可信adapter控制层可读取所选Home Account路由字段，但送入模型的payload只能包含Memory所属Agent最小身份、Message chunks、fact catalog和proposal schema，绝不包含Account connection/secret、sessionState或Workspace。选择其他执行Agent不改变最终Memory的`agentId`归属。
+- 可选模型必须按精确provider/runtime版本、adapter profile与model（本地模型含不可变模型标识/量化变体）分别通过transport和固定raw语义夹具；同adapter跑通一个模型不自动认证其他模型。前端默认只列“已验证”组合，离线与未验证是两种不同状态；owner不能自行把任意字符串标成已验证。
+- 当前M2未配置选择器时按Home Account的真实provider选择完整adapter：`kind=api, provider=ollama, model=gemma4:e4b`由原生Ollama adapter直连`connection.baseUrl`，并按实测provider能力下沉structured-output schema；`kind=cli, provider=codex`由Codex adapter同时提供非交互聊天`run(ctx)`与隔离`digestMemory(...)`。Codex digest每次使用新的临时cwd和ephemeral执行，不resume聊天thread，忽略用户配置与rules，在read-only sandbox和`approval_policy=never`下运行，并强制通过`--output-schema`传递provider-compatible transport schema；JSONL出现任何tool item即整次失败，结果仍须经过gateway完整validator。两条真实路径不共享Account、sessionState或连接，且均无模型fallback。OpenCode聊天与digest实现代码保留，但OpenCode digest暂停生产dispatch、fallback和M2完成闸门；不得为了整理Memory新增缺少聊天`run(ctx)`的digest-only provider。
 - M2 digest job不是聊天Run/Execution，不创建subagent、不取得Account lease，也不依赖Phase 5.5的daemon/token/presence/Tailscale/Workspace接线；5.5只迁移同一adapter能力的执行位置，不改变本条语义。
 - 触发机制：hook（详见《Memory Hook设计文档》）
 - `memory.digestTrigger` 只选择一种自动策略：`scheduled` 与 `realtime` 互斥，`manual` 表示关闭自动整理；无论选择哪种策略，owner 与可信 Agent 都始终可以手动提交整理。`realtime` 不是每轮都跑模型，而是按 `(agentId, Space)` 统计尚未整理、已完整保存的 Message 正文 Unicode 字符数，达到配置阈值后异步排队；Activity、流式 delta、工具过程与 provider token 估算都不进入水位。聊天 Run 不等待整理。
@@ -271,6 +274,10 @@ Account的项目与执行数据边界。
 
 扩展体系遵守“统一安装入口，不统一运行时”。禁止用一个万能 `plugin.run()` 同时承载Tools、Skill、MCP、Hook、Agent Plugin和Space Module。
 
+Agent组合设置中，Skills / MCP / Hooks / Agent Plugins与基本信息、状态、来源/Runtime并列为独立目录，不为Memory或任何单个扩展另开专用配置体系。MCP和Hook目录中的每个单元只展示启用开关与“执行Agent”下拉框：默认选择当前Agent；gateway只把实际可用Agent放入可改选候选。已选执行Agent后来不可用时保留该选择并在控件旁显示`!`，提示用户指定其他可用Agent；不额外展示“兼容/不兼容”字段，不静默换人。Skills沿用自身加载/卸载语义，不强塞执行Agent字段。
+
+各目录可以发起导入/加载，但底层仍归一到同一Extension Package安装与校验流程；安装完成后只把包内对应unit绑定到当前Agent。不得因多个前端入口复制包格式、安装记录、权限或运行时。
+
 #### 4.2.1 Tools（运行时基础能力，不属于扩展）
 
 - 逻辑能力名统一为 `web.search` / `web.fetch` / `fs.read` / `fs.write` / `process.execute` / Vera Memory/Files/消息工具；其中Vera Memory工具固定由gateway第一方MCP提供，不映射成`fs.read/fs.write`，其余能力可来自CLI原生工具、供应商API工具或agent daemon的tool host。
@@ -290,11 +297,13 @@ Account的项目与执行数据边界。
 
 - 第三方MCP是外部Tools/数据连接；CLI已有原生MCP配置时由daemon复用或映射，API agent由daemon内的MCP client转成provider tool calls。其连接、凭据与进程运行在agent daemon一侧；gateway只保存非敏感元信息/授权状态，不代理本机MCP进程。
 - **Vera Memory MCP是唯一明确的第一方例外**：因为Memory真值和单写队列都在gateway，MCP server/dispatcher也由gateway持有，daemon只做MCP client或把tools映射给CLI/provider。不得把这个例外扩张成gateway代跑任意第三方MCP。
+- Agent设置的MCP目录必须把`Vera Memory MCP`（unit id=`vera.memory`）作为内置unit展示；它与第三方MCP共用启用开关/执行Agent绑定外壳，但仍遵守上述不同运行位置，不能借统一UI伪装成相同runtime。
 
 #### 4.2.4 Hook（per-agent runtime）
 
 - Hook监听明确的生命周期事件（run开始/结束、tool调用前后等），运行在agent daemon；必须声明触发点、权限和失败策略。
 - Hook不得阻塞gateway或直接修改主前端；高风险命令仍走Tools审批。
+- Agent设置的Hooks目录必须把`Vera Memory Digest Hook`（unit id=`vera.memory.digest`）作为内置unit展示；该Hook的执行Agent只负责隔离proposal，Memory所属Agent与gateway单写者边界不变。
 
 #### 4.2.5 Agent Plugin（per-agent）
 

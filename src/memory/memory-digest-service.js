@@ -376,8 +376,11 @@ export function createMemoryDigestService({
       let rawProposals = job.proposals;
       if (!rawProposals) {
         if (typeof executor !== "function") throw Object.assign(new Error("memory digest executor is unavailable"), { code: "executor_unavailable" });
+        const executorChunks = chunks.map((chunk) => ({
+          messages: chunk.messages.map((message) => structuredClone(message)),
+        }));
         const output = await executor({
-          job: safeJob(job), chunks, facts,
+          job: safeJob(job), chunks: executorChunks, facts,
           proposalSchema: MEMORY_DIGEST_OUTPUT_JSON_SCHEMA, signal: controller.signal,
         });
         rawProposals = Array.isArray(output) ? output : output?.proposals;

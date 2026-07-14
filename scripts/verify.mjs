@@ -139,6 +139,7 @@ async function main() {
   await settings.run(ctx);
   await memoryDigest.run(ctx);
   await ollamaAdapter.run(ctx);
+  await ollamaAdapter.runReal(ctx);
   await codexAdapter.run(ctx);
   await codexAdapter.runReal(ctx);
   await f1Extensions.run(ctx);

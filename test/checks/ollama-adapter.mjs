@@ -7,6 +7,36 @@ import { join } from "node:path";
 
 import { createHttpClient, startGateway } from "./_helpers.mjs";
 
+async function waitForJob(request, agentId, jobId, sleep, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let job;
+  while (Date.now() < deadline) {
+    job = (await request("GET", `/api/agents/${agentId}/memory/_digest-jobs/${jobId}`)).json.job;
+    if (["succeeded", "failed", "cancelled"].includes(job.status)) return job;
+    await sleep(50);
+  }
+  return job;
+}
+
+async function waitForStoredJob(path, jobId, sleep, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const jobs = JSON.parse(await readFile(path, "utf8"));
+      const job = jobs.find((item) => item.id === jobId);
+      if (job?.proposals && ["succeeded", "failed", "cancelled"].includes(job.status)) return job;
+    } catch {
+      // Store debounce may not have created/flushed the collection file yet.
+    }
+    await sleep(50);
+  }
+  return null;
+}
+
+function proposalForEvidence(proposals, messageId) {
+  return proposals.find((proposal) => proposal.evidenceMessageIds?.includes(messageId));
+}
+
 async function readBody(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
@@ -112,6 +142,166 @@ export async function run(ctx) {
     } finally {
       if (gateway) await gateway.stop();
       await ollama.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+export async function runReal(ctx) {
+  if (process.env.VERA_TEST_OLLAMA_NATIVE !== "1") return;
+  const { check, assert, assertEqual, repoRoot, sleep } = ctx;
+  await check("p5-m2.7 real Gemma fixed raw semantic qualification through gateway", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vera-ollama-real-"));
+    const baseUrl = process.env.VERA_TEST_OLLAMA_BASE_URL || "http://127.0.0.1:11434";
+    const model = process.env.VERA_TEST_OLLAMA_MODEL || "gemma4:e4b";
+    let gateway;
+    try {
+      gateway = await startGateway({
+        repoRoot,
+        cwd: dir,
+        env: {
+          VERA_DATA_PATH: join(dir, "data"),
+          VERA_MEMORY_VAULT_PATH: join(dir, "memory"),
+          VERA_OLLAMA_WATCHDOG_MS: "300000",
+          VERA_OLLAMA_MEMORY_DIGEST_TIMEOUT_MS: "300000",
+        },
+      });
+      const request = createHttpClient(gateway.port);
+      const created = await request("POST", "/api/agents", {
+        name: "Gemma raw qualification",
+        kind: "api",
+        provider: "ollama",
+        connection: { baseUrl, secretRef: null },
+        model,
+      });
+      assertEqual(created.status, 201);
+      const { agent } = created.json;
+      const other = await request("POST", "/api/agents", { name: "Raw fixture peer" });
+      assertEqual(other.status, 201);
+      const madeSpace = await request("POST", "/api/spaces", {
+        name: "Gemma raw qualification",
+        seats: [{ agentId: agent.id, responseMode: "silent" }],
+      });
+      const space = madeSpace.json.space;
+      const post = async (author, content) => (await request("POST", `/api/spaces/${space.id}/messages`, {
+        author, target: { type: "broadcast" }, content,
+      })).json.message;
+
+      const durable = await post(
+        { type: "user" },
+        "项目长期规则：Vera 的人工验收端口固定为 3210。以后每次人工验收都使用这个端口，除非用户明确更正。",
+      );
+      const duplicate = await post(
+        { type: "user" },
+        "再次确认同一条规则：Vera 人工验收仍使用端口 3210。",
+      );
+      const chatter = await post(
+        { type: "user" },
+        "刚才页面转圈两秒，刷新后已经恢复；今天只发生了这一次。",
+      );
+      const inference = await post(
+        { type: "agent", agentId: other.json.agent.id },
+        "因为用户没有反对，我猜用户长期偏好所有 Vera 页面使用紫色；用户从未表达过这个偏好。",
+      );
+      const invented = await post(
+        { type: "agent", agentId: agent.id },
+        "我个人觉得蓝色标题更好看；这是我刚刚临时产生的审美偏好，不是用户要求，也不来自项目规范。",
+      );
+
+      const firstQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
+        spaceId: space.id, mode: "range",
+        fromMessageId: durable.id, toMessageId: duplicate.id,
+      });
+      const first = await waitForJob(request, agent.id, firstQueued.json.job.id, sleep, 300000);
+      assertEqual(first.status, "succeeded", JSON.stringify(first.error));
+      const firstStored = await waitForStoredJob(
+        join(dir, "data", "memoryDigestJobs.json"), first.id, sleep, 5000,
+      );
+      assert(firstStored, "first raw semantic job must be flushed with proposals");
+      const writes = firstStored.proposals.filter((proposal) => proposal.action !== "skip");
+      assertEqual(writes.length, 1, JSON.stringify(firstStored.proposals));
+      assert(writes[0].evidenceMessageIds.includes(durable.id), "durable rule must source the single write");
+      if (!writes[0].evidenceMessageIds.includes(duplicate.id)) {
+        const duplicateProposal = proposalForEvidence(firstStored.proposals, duplicate.id);
+        assertEqual(duplicateProposal?.action, "skip");
+        assertEqual(duplicateProposal?.skipReason, "duplicate_in_job");
+      }
+
+      for (const [negative, reason] of [
+        [chatter, "no_reusable_fact"],
+        [inference, "unsupported_inference"],
+        [invented, "unsupported_inference"],
+      ]) {
+        const negativeQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
+          spaceId: space.id, mode: "range",
+          fromMessageId: negative.id, toMessageId: negative.id,
+        });
+        const negativeJob = await waitForJob(request, agent.id, negativeQueued.json.job.id, sleep, 300000);
+        const negativeStored = await waitForStoredJob(
+          join(dir, "data", "memoryDigestJobs.json"), negativeJob.id, sleep, 5000,
+        );
+        assertEqual(negativeJob.status, "succeeded", JSON.stringify({ error: negativeJob.error, proposals: negativeStored?.proposals }));
+        assert(negativeStored.proposals.length >= 1, "each negative qualification range must return a skip");
+        assert(negativeStored.proposals.every((proposal) => proposal.action === "skip"), JSON.stringify(negativeStored.proposals));
+        const proposal = proposalForEvidence(negativeStored.proposals, negative.id);
+        assertEqual(proposal?.skipReason, reason, JSON.stringify(negativeStored.proposals));
+      }
+
+      let memories = (await request("GET", `/api/agents/${agent.id}/memory`)).json.memories;
+      assertEqual(memories.length, 1);
+      const slug = memories[0].slug;
+      let detail = (await request("GET", `/api/agents/${agent.id}/memory/${slug}`)).json.memory;
+      const negativeIds = new Set([chatter.id, inference.id, invented.id]);
+      assert(detail.sources.every((source) => !negativeIds.has(source.messageId)), "negative raw Messages must not become sources");
+      const factId = first.result.facts[0].factId;
+
+      const repeated = await post(
+        { type: "user" },
+        "再次确认：Vera 的人工验收端口仍固定为 3210。",
+      );
+      const repeatedQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
+        spaceId: space.id, mode: "range",
+        fromMessageId: repeated.id, toMessageId: repeated.id,
+      });
+      const repeatedJob = await waitForJob(request, agent.id, repeatedQueued.json.job.id, sleep, 300000);
+      assertEqual(repeatedJob.status, "succeeded", JSON.stringify(repeatedJob.error));
+      const repeatedStored = await waitForStoredJob(
+        join(dir, "data", "memoryDigestJobs.json"), repeatedJob.id, sleep, 5000,
+      );
+      assertEqual(repeatedStored.proposals.length, 1, JSON.stringify(repeatedStored.proposals));
+      assertEqual(repeatedStored.proposals[0].action, "update");
+      assertEqual(repeatedStored.proposals[0].targetFactId, factId);
+      assertEqual(repeatedStored.proposals[0].evidenceMessageIds[0], repeated.id);
+
+      const correction = await post(
+        { type: "user" },
+        "纠正：Vera 的人工验收端口不再是 3210，改为 3211；这条更正取代之前的 3210 规则。",
+      );
+      const correctionQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
+        spaceId: space.id, mode: "range",
+        fromMessageId: correction.id, toMessageId: correction.id,
+      });
+      const correctionJob = await waitForJob(request, agent.id, correctionQueued.json.job.id, sleep, 300000);
+      assertEqual(correctionJob.status, "succeeded", JSON.stringify(correctionJob.error));
+      const correctionStored = await waitForStoredJob(
+        join(dir, "data", "memoryDigestJobs.json"), correctionJob.id, sleep, 5000,
+      );
+      assertEqual(correctionStored.proposals.length, 1, JSON.stringify(correctionStored.proposals));
+      assertEqual(correctionStored.proposals[0].action, "supersede");
+      assertEqual(correctionStored.proposals[0].targetFactId, factId);
+      assertEqual(correctionStored.proposals[0].evidenceMessageIds[0], correction.id);
+      assert(String(correctionStored.proposals[0].fact?.value).includes("3211"), "correction must carry the new value");
+
+      memories = (await request("GET", `/api/agents/${agent.id}/memory`)).json.memories;
+      assertEqual(memories.length, 1);
+      assertEqual(memories[0].slug, slug);
+      detail = (await request("GET", `/api/agents/${agent.id}/memory/${slug}`)).json.memory;
+      assert(detail.content.includes("3211"), "same Memory must contain corrected value");
+      const sourceIds = new Set(detail.sources.map((source) => source.messageId));
+      assert(sourceIds.has(durable.id) && sourceIds.has(repeated.id) && sourceIds.has(correction.id), "durable, repeated and correction sources must remain traceable");
+      for (const negativeId of negativeIds) assert(!sourceIds.has(negativeId), "negative source must stay excluded after later jobs");
+    } finally {
+      if (gateway) await gateway.stop();
       await rm(dir, { recursive: true, force: true });
     }
   });
