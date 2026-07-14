@@ -35,6 +35,13 @@ const DEFAULTS = {
     memoryDigestPrimaryModel: "navy/deepseek-v4-pro",
     memoryDigestQuotaFallbackModel: "opencode/deepseek-v4-flash-free",
   },
+  codex: {
+    binary: "codex",
+    chatSandbox: "workspace-write",
+    watchdogMs: 30 * 60 * 1000,
+    digestTimeoutMs: 5 * 60 * 1000,
+    maxInputBytes: 12000,
+  },
   ollama: {
     watchdogMs: 30 * 60 * 1000,
     digestTimeoutMs: 5 * 60 * 1000,
@@ -137,6 +144,18 @@ export function loadConfig(env = process.env) {
       memoryDigestQuotaFallbacks: opencodeDigestFallbackModel
         ? { [opencodeDigestPrimaryModel]: opencodeDigestFallbackModel }
         : {},
+    },
+    codex: {
+      binary: env.VERA_CODEX_BIN || DEFAULTS.codex.binary,
+      chatSandbox: ["read-only", "workspace-write"].includes(env.VERA_CODEX_CHAT_SANDBOX)
+        ? env.VERA_CODEX_CHAT_SANDBOX
+        : DEFAULTS.codex.chatSandbox,
+      watchdogMs: positiveInt(env.VERA_CODEX_WATCHDOG_MS, DEFAULTS.codex.watchdogMs),
+      digestTimeoutMs: positiveInt(
+        env.VERA_CODEX_MEMORY_DIGEST_TIMEOUT_MS,
+        DEFAULTS.codex.digestTimeoutMs,
+      ),
+      maxInputBytes: positiveInt(env.VERA_CODEX_MAX_INPUT_BYTES, DEFAULTS.codex.maxInputBytes),
     },
     ollama: {
       watchdogMs: positiveInt(env.VERA_OLLAMA_WATCHDOG_MS, DEFAULTS.ollama.watchdogMs),

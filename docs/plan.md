@@ -237,7 +237,7 @@
 - [x] 新provider adapter规范已冻结：一个adapter对应一套协议/生命周期，同provider多Account/模型复用；生产provider必须有`run(ctx)`，承担M2时再实现隔离`digestMemory`；固定kind/provider fail-fast、会话/stream、schema下沉、错误、取消、secret、资源清理和三层conformance闸门，不预建基类/注册表。
 - [x] 新增完整原生Ollama adapter：只接受`kind=api, provider=ollama`，以Account `connection.baseUrl`直连`/api/chat`，实现聊天stream/稳定history连续性与隔离digest；对0.23.2使用无`oneOf/patternProperties/pattern/const`的兼容transport schema，返回后仍走gateway完整validator。实现不经过OpenCode，也不是digest-only adapter。
 - [x] 在`test/adapters/`按同一行为矩阵回归Ollama/OpenCode：固定kind/provider、stream/session、稳定/临时prompt分层、容量裁剪、错误/取消/timeout、secret、cleanup和digest隔离断言，不抽取运行时BaseAdapter；`verify.mjs`的临时gateway+stub Ollama黑盒与真实Ollama 0.23.2/Gemma chat+digest smoke已完成后两层闸门。
-- [ ] **Codex CLI adapter**：新增只接受`kind=cli, provider=codex`的完整adapter，聊天使用非交互`codex exec --json`与`exec resume`保存threadId；digest使用全新ephemeral临时cwd、read-only/never、忽略用户配置与rules并强制`--output-schema`，任何tool item失败，无fallback。完成stub协议、临时gateway黑盒与真实Codex CLI chat+M2 digest三层闸门后才可勾选。
+- [x] **Codex CLI adapter**：新增只接受`kind=cli, provider=codex`的完整adapter，聊天使用非交互`codex exec --json`与`exec resume`保存threadId；digest使用全新ephemeral临时cwd、read-only/never、忽略用户配置与rules并强制`--output-schema`，任何tool item失败，无fallback。stub协议、临时gateway黑盒与真实Codex CLI chat+M2 digest三层闸门均已通过。
 - [ ] slug/钩子行、source、双链、stain裸hex、同事实targetFactId、手动Memory adopt与纠错supersede校验已落地；fact catalog已把现有`type`交给executor并回归mapped/unmapped旧分类可见；无复用价值/无来源推断/agent自创偏好的最终语义判断仍需固定raw夹具完成生产路径验收。
 - [x] hook入队不阻塞聊天；单Memory写入原子，失败/重试/取消有持久可观察job状态、幂等键与安全SSE，重试复用已flush proposal并续跑未应用receipt，不重复创建Memory。
 
@@ -245,9 +245,9 @@
 
 真实executor补充验收分两条独立路径：Ollama/Gemma API Account必须由原生Ollama adapter直连并成功完成chat+digest，Codex CLI Account必须由Codex adapter以非交互exec成功完成chat+digest。两条digest请求均不接Memory Tools/Account Workspace且返回再过gateway完整validator，chat则按各provider真实能力与Approval契约执行。Codex digest必须证明每次新ephemeral上下文、实际传入`--output-schema`、JSONL无tool item、没有resume聊天thread且没有模型fallback；失败时job安全`executor_failed`且vault不变。两条真实provider smoke显式执行，普通`npm test`不依赖本机模型服务或供应商额度。OpenCode代码保留但其digest不参与本轮真实executor验收。
 
-- [ ] **真实模型闸门**：原生Ollama adapter以`kind=api, provider=ollama, model=gemma4:e4b`显式跑chat+digest **已通过**；Codex adapter须以本机真实`kind=cli, provider=codex`Account显式跑chat和当前M2端到端digest。必须断言两条实际transport互不借道，Codex真实使用`--output-schema`且digest不resume/不出现tool item，两条digest返回都再通过gateway权威proposal validator。Codex路径未通过前M2不标完成。
+- [x] **真实模型闸门**：原生Ollama adapter以`kind=api, provider=ollama, model=gemma4:e4b`显式跑chat+digest已通过；Codex adapter也已用本机真实`kind=cli, provider=codex, model=gpt-5.6-sol`Account显式跑通chat和当前M2端到端digest。两条实际transport互不借道，Codex真实使用`--output-schema`、digest不resume且JSONL无tool item，两条digest返回都再通过gateway权威proposal validator。
 
-**M2当前验收（2026-07-14，Codex切换前基线）**：`npm test` 161项通过、2个真实smoke默认skip；`verify.mjs` 72/72通过，其中固定临时gateway+stub Ollama黑盒已验证Account路由、chat stream/sessionState与digest job。原生Ollama adapter直连Ollama 0.23.2 `/api/chat`，以`gemma4:e4b`显式跑chat+digest 7/7通过，`num_ctx=16384`实际装载，digest返回再过Vera完整validator；聊天稳定history只保存用户原始触发和本人assistant回复，不持久化群聊声场。OpenCode stub已证明既有独立digest实现，但该路径现已按用户决定暂停并退出生产dispatch/M2闸门。Codex三层闸门尚未完成，因此M2未标完成。
+**M2当前验收（2026-07-14，Codex三层闸门已通过）**：`npm test` 172项通过、2个既有真实smoke默认skip；普通`verify.mjs` 73/73通过，显式真实Codex模式74/74通过。原生Ollama adapter直连Ollama 0.23.2 `/api/chat`，以`gemma4:e4b`完成chat+digest；Codex adapter以本机`codex-cli 0.144.2`、`gpt-5.6-sol`完成真实gateway chat与当前M2 digest，聊天持久化threadId，digest在空临时cwd使用ephemeral/read-only/never、强制`--output-schema`且无tool item，proposal经Vera完整validator后写入带SourceRef的Memory；真实capability probe另验证JSONL事件翻译与mid-flight abort。真实smoke的chat安全覆盖为read-only，生产默认仍为workspace-write。OpenCode聊天与digest代码未删除，但OpenCode digest已退出生产dispatch/M2闸门并明确`executor_unavailable`。本轮未进入M3；M2是否整体完成仍取决于上方尚未勾选的固定raw语义夹具，不因真实provider闸门通过而越级。
 
 ### P5-M3 — 三渠道检索、注入预算、横向扩展与正文展开
 

@@ -198,10 +198,10 @@ export async function waitForHealth(port, timeoutMs = 8000) {
 
 // 起一个临时 gateway 子进程（mock adapter），用 passed env 覆盖默认。返回
 // { child, port, stop() }。调用方负责手动 stop。
-export async function startGateway({ repoRoot, env }) {
+export async function startGateway({ repoRoot, env, cwd = repoRoot }) {
   const port = await getFreePort();
   const child = spawn(process.execPath, [`${repoRoot}/src/server.js`], {
-    cwd: repoRoot,
+    cwd,
     env: { ...process.env, PORT: String(port), ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });

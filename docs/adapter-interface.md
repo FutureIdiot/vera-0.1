@@ -50,9 +50,11 @@ M2 adapter可选方法为`digestMemory({ account, payload, signal }) -> Promise<
 
 OpenCode实现只服务`kind=cli, provider=opencode`的Account，其聊天`run(ctx)`与既有digest代码继续保留；但OpenCode digest当前暂停生产dispatch、fallback与M2完成闸门，`provider=opencode`的Home Account提交digest时明确`executor_unavailable`，不得退化为聊天run。恢复前必须由用户另行授权并重新通过三层闸门。
 
-Codex实现只服务`kind=cli, provider=codex`的Account，并同时实现聊天`run(ctx)`与隔离`digestMemory(...)`。聊天使用非交互`codex exec --json`，续轮使用`codex exec resume <threadId> --json`；prompt从stdin恰好投递一次，`thread.started.thread_id`立即持久化为`sessionState={threadId}`，只有明确thread不存在才上报`session-reset`并新建，普通provider失败不得重置。`item.completed`的`agent_message`按到达顺序映射`onDelta`，CLI未提供逐token事件时不得伪造；`command_execution`等真实tool item映射Activity。Account.model非空时必须显式传`-m`，为空则不传并使用Codex供应商默认模型。
+Codex实现只服务`kind=cli, provider=codex`的Account，并同时实现聊天`run(ctx)`与隔离`digestMemory(...)`。聊天使用非交互`codex exec --json`，续轮使用`codex exec resume <threadId> --json`；prompt从stdin恰好投递一次，`thread.started.thread_id`立即持久化为`sessionState={threadId}`，只有明确thread不存在才上报`session-reset`并新建，普通provider失败不得重置。`item.completed`的`agent_message`按到达顺序映射`onDelta`，CLI未提供逐token事件时不得伪造；`command_execution`等真实tool item映射Activity。Account.model非空时必须显式传`-m`，为空则不传并使用Codex供应商默认模型。当前Codex Account要求`connection.args=[]`，不得借args覆盖sandbox/approval、注入危险bypass或改变Vera固定参数顺序；需要新的受控参数时先改本文再实现。
 
 Codex digest每次创建新的临时cwd/schema/output文件，使用`codex -C <temp> -a never -s read-only exec --ephemeral --ignore-user-config --ignore-rules --skip-git-repo-check --json --output-schema <schema> --output-last-message <output> -`，并禁用CLI当前公开的shell/apps/multi-agent特性；绝不resume聊天thread，不传Account Workspace/connection.args，不创建Message/Activity。`--output-schema`接收gateway完整schema或经真实能力探针确认的确定性Codex-compatible投影；prompt不重复序列化schema，最终仍由gateway完整validator裁决。当前CLI没有单一“禁用全部工具”开关，因此可验证边界是空临时cwd、ephemeral、忽略用户配置/rules、read-only与never；JSONL一旦出现任何tool item即`executor_failed`且结果不得apply。Codex digest无fallback。
+
+Codex运行配置不进Account API/Settings UI：`chatSandbox=workspace-write`、`maxInputBytes=12000`、`watchdogMs=1800000`、`digestTimeoutMs=300000`，env分别为`VERA_CODEX_CHAT_SANDBOX`、`VERA_CODEX_MAX_INPUT_BYTES`、`VERA_CODEX_WATCHDOG_MS`、`VERA_CODEX_MEMORY_DIGEST_TIMEOUT_MS`。`chatSandbox`只允许`read-only/workspace-write`，真实smoke可在空临时cwd显式覆盖为`read-only`；不得允许`danger-full-access`或危险bypass。`maxInputBytes`是请求前保守UTF-8容量门槛，不伪装成provider tokenizer计数。
 
 本机Gemma是另一条独立Account：`kind=api, provider=ollama, model=gemma4:e4b`，由完整的原生Ollama adapter直接调用Account `connection.baseUrl`下的HTTP API，不经过OpenCode CLI/daemon，不共享Account、sessionState、连接或额度后备。该adapter必须同时实现聊天`run(ctx)`和隔离的`digestMemory(...)`，不得做成只能整理Memory的残缺provider。
 
@@ -60,7 +62,7 @@ Ollama容量与超时走gateway运行配置，不进Account API/Settings UI：`n
 
 Ollama 0.23.2实测会在把Vera完整proposal schema转换为grammar时被`oneOf`/`patternProperties`/部分`pattern`组合触发进程崩溃。Ollama adapter必须把gateway权威`proposalSchema`下沉为该版本可接受的基础结构schema，禁止把已知不兼容关键字原样发送；该下沉只约束provider输出，不改变Vera契约。模型返回后仍必须由gateway完整proposal validator复核，provider返回200或合法JSON不等于写入合法。未来Ollama版本只有通过1.2的schema能力探针和真实smoke后才能放宽下沉规则，不能按版本号猜测。
 
-OpenCode Memory digest的额度后备由gateway运行配置映射，不进入Account API或Settings UI。只有402/403/429结构化错误的`code/type`精确为`insufficient_quota`、`quota_exhausted`或`quota_exceeded`时，adapter才规范化为`quota_exhausted`，允许丢弃primary残片并用相同不可变payload在新session中重试一次；HTTP状态或自由文本本身不是额度证据。取消、超时、网络、认证、模型不存在、普通rate limit、provider 5xx、坏JSON或非法proposal均不得fallback。后备失败仍由digest service安全折叠。聊天`run(ctx)`永远只使用`account.model`且不读取该映射。
+OpenCode Memory digest的额度后备逻辑与运行配置映射作为暂停代码保留，不进入Account API或Settings UI，也不在当前生产dispatch中生效。若未来另行授权恢复，仍只允许在402/403/429结构化错误的`code/type`精确为`insufficient_quota`、`quota_exhausted`或`quota_exceeded`时规范化为`quota_exhausted`，丢弃primary残片并用相同不可变payload在新session中重试一次；HTTP状态或自由文本本身不是额度证据。取消、超时、网络、认证、模型不存在、普通rate limit、provider 5xx、坏JSON或非法proposal均不得fallback。聊天`run(ctx)`始终只使用`account.model`且不读取该映射。当前OpenCode digest在进入这些逻辑前即由gateway明确`executor_unavailable`。
 
 因此，daemon 是一个 Agent 的长连接执行宿主，可同时管理多个已授权 Account 的独立 runtime；登录用于拉齐“这个 Agent 可驾驶哪些 Account”，不是把整个 Agent 切换到某个 Account。
 
@@ -404,8 +406,8 @@ export function createOpencodeAdapter({ config }) {
 | `adapter.shutdown()` | daemon `exit(0)` 时自管的资源回收（杀 CLI daemon 等） |
 | `ctx.agent / ctx.account / ctx.prompt.text` | `run.requested` 事件 data 字段 |
 
-`digestMemory`暂无可用的daemon wire对应。Phase 5.5必须先在本文冻结专用digest request/result内部通道、取消/超时、安全摘要与OpenCode fallback配置传递，并完成迁移验收后，才能退役进程内digest adapter。该通道不得复用聊天`run.requested`、Message/Activity或聊天`sessionState`；wire冻结前，digest仍由Phase 2–5进程内adapter承载。
+`digestMemory`暂无可用的daemon wire对应。Phase 5.5必须先在本文冻结专用digest request/result内部通道、取消/超时、安全摘要、Codex无fallback语义及暂停的OpenCode fallback配置状态，并完成迁移验收后，才能退役进程内digest adapter。该通道不得复用聊天`run.requested`、Message/Activity或聊天`sessionState`；wire冻结前，digest仍由Phase 2–5进程内adapter承载。
 
-Phase 2–5形态的三类provider映射示例（OpenCode daemon / Claude Code resume / 原生Ollama API）行为约束仍成立——Phase 5.5只把协议载体从"进程内函数调用"换成"HTTP/SSE 跨进程消息"。上述表格作为daemon实现的对照参考保留。
+Phase 2–5形态的四类provider映射示例（OpenCode daemon / Codex CLI resume / Claude Code resume / 原生Ollama API）行为约束仍成立——Phase 5.5只把协议载体从"进程内函数调用"换成"HTTP/SSE 跨进程消息"。上述表格作为daemon实现的对照参考保留。
 
 `docs/salvage-notes.md` 第五节记录的 cloudflared 边缘漂移假活是 2026-07-04 联邦决策的导火索；2026-07-11 纯私网修订直接移除了 cloudflared 与公网入口。历史只用于排查旧部署，不再建设 tunnel watchdog。

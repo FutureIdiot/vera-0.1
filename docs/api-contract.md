@@ -84,7 +84,7 @@ Account = 供应商连接 + 项目/会话上下文，随账户不随 agent。
 - `owningAgentId`：该账户唯一的主人 Agent，也就是该 Agent 的 Home Account。`Agent 1:1 Home Account`；同一 Agent 不得再创建第二条 owned Account，一个 Account 也不得有第二个 owner。
 - **Account 选择是 Execution 级，不是 daemon 登录级或 Seat 级**：主 Execution 默认绑定 Agent 的 Home Account；subagent Execution 可绑定 `authorizedAgentIds` 已授权的其他 Account。`run` 同时记录 `agentId + accountId`：Memory 随 `agentId`，Workspace、sessionState、供应商连接和 runtime data 随 `accountId`。
 - `authorizedAgentIds: ["agt_…"]` `[P5.5]`：哪些Agent有资格创建绑定该Account的subagent Execution（默认仅`[owningAgentId]`）。API型Account据此决定是否可换取明文key；CLI型key虽不由gateway持有，仍必须先过相同的Execution授权与租约判定，daemon宿主文件权限只提供额外物理边界。名单外一律403。
-- `kind: "cli"` 时 `connection.command/args` 有效；`kind: "api"` 时 `connection.baseUrl/secretRef` 有效。`baseUrl`是adapter宿主看到的provider根URL，必须由Account/config显式给出并规范化为无尾斜杠；loopback本机服务允许`http://127.0.0.1`/`http://localhost`，非loopback只允许当前Tailscale私网或HTTPS，不得静默fallback公网。无鉴权provider（如本机Ollama）`secretRef`为`null`。
+- `kind: "cli"` 时 `connection.command/args` 有效；具体adapter可因安全与参数顺序约束收窄args，当前Codex adapter要求`args=[]`，只从Account读取command/model，不允许用args注入sandbox、approval或bypass参数。`kind: "api"` 时 `connection.baseUrl/secretRef` 有效。`baseUrl`是adapter宿主看到的provider根URL，必须由Account/config显式给出并规范化为无尾斜杠；loopback本机服务允许`http://127.0.0.1`/`http://localhost`，非loopback只允许当前Tailscale私网或HTTPS，不得静默fallback公网。无鉴权provider（如本机Ollama）`secretRef`为`null`。
 - `provider`以精确小写token选择adapter，不接受兼容别名；adapter在任何网络/进程副作用前校验`kind/provider`。切换同provider的model或baseUrl复用同一adapter，不能靠复制adapter文件实现；协议或生命周期不同才新增provider adapter，具体判据与三层验收见`adapter-interface.md` 1.2。
 - `model` 为空串 = 使用该供应商默认模型（CLI 型 adapter 不传 `-m` 类参数）。
 - secret 永不出现在响应里；`connection` 里只用 `secretRef` 引用 `~/.vera/secrets.json` 中的键名。

@@ -30,6 +30,7 @@ import { getOwningAccount, listAccounts } from "./agents/accounts.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOllamaAdapter } from "./adapters/ollama-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
+import { createCodexAdapter } from "./adapters/codex-adapter.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
@@ -59,10 +60,11 @@ const adapters = {
   mock: createMockAdapter({ chunkDelayMs: config.mock.delayMs }),
   ollama: createOllamaAdapter({ config: config.ollama }),
   opencode: createOpencodeAdapter({ config: config.opencode }),
+  codex: createCodexAdapter({ config: config.codex }),
 };
 const memoryDigestAdapters = {
   ollama: adapters.ollama,
-  opencode: adapters.opencode,
+  codex: adapters.codex,
 };
 
 function resolveAdapter(account) {
