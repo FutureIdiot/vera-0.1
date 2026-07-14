@@ -261,7 +261,7 @@
 
 **M3 验收**：跨 Space 命中符合 D0 scope 决定，图扩散可跨type且直接语义命中不因无图路径被排除；同一节点由多个独立一级方向命中时只返回/计费一次、保留方向证据并获得有界交汇增益，同一方向的重复路径不刷分，跨slug近重复在基础评分后聚类且只合并独立方向，fetch_detail与SourceRef溯源不增加交汇；同 session 不重复注入。专门固定“当前需要5条彼此独立的规则类Memory、该类软目标为3”的夹具：总token预算容纳且其边际收益领先时必须返回5条，不能按type硬截；未知type取中性适配并进入默认软配额组。预算不足时先选更短但可独立理解的节点投影，再确定性截断并把剩余项放入稳定cursor；stain 在push、排序、日志和最终回复中均不可见，fetch_detail深读即使返回裸hex也不得解释/引用/参与判断；fetch_more游标不重不漏、fetch_detail返回权威正文；逐帧SSE仍正常且prompt cache稳定前缀不因单条记忆编辑变化。
 
-**M3当前验收（2026-07-14）**：三渠道retrieval facade、`m3-r1`排序、R3常驻索引、program-owned recall sidecar、24小时冻结cursor、usage/pin、MCP三工具、四段prompt顺序与三种provider失效换代均已接入。固定夹具已覆盖同Agent跨Space黑盒场景、跨type图扩散、超过32条一跳链接的cursor续页、并发跨渠道去重，以及普通编辑只在新外部session批量更新常驻前缀。普通`npm test`为198通过、2个真实provider smoke默认skip；`npm run analyze:web`通过，默认chat gzip 19432/204800。`verify.mjs`已新增3项M3临时gateway/SSE黑盒，当前执行在沙箱内被loopback权限拒绝，申请沙箱外执行又被Codex账户usage limit拒绝；因此代码与验收项已落盘，但本次不能把这3项登记为已实际跑过，待额度恢复后必须原命令补跑，不得以普通单测冒充黑盒通过。
+**M3当前验收（2026-07-15）**：三渠道retrieval facade、`m3-r1`排序、R3常驻索引、program-owned recall sidecar、24小时冻结cursor、usage/pin、MCP三工具、四段prompt顺序与三种provider失效换代均已接入。固定夹具已覆盖同Agent跨Space黑盒场景、跨type图扩散、超过32条一跳链接的cursor续页、并发跨渠道去重，以及普通编辑只在新外部session批量更新常驻前缀。普通`npm test`为198通过、2个真实provider smoke默认skip；`npm run analyze:web`通过，默认chat gzip 19432/204800。恢复本地监听权限后已按原命令补跑完整`node scripts/verify.mjs`，包括M3自动注入且SSE事件词表不变、同Agent跨Space召回、跨Agent隔离在内共76项全部通过、0失败；M3代码、单测与临时gateway/SSE黑盒验收现已完整闭环。
 
 ### P5-M4 — 派生权重与 dream 维护
 
