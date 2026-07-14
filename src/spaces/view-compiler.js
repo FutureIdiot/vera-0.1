@@ -8,7 +8,7 @@
 //   2. 群聊视角以署名声告段注入 ctx.prompt.text 头部，不伪装一对一 user 历史轮次。
 //   3. 编译层无状态——每次 run 临时查 messages 派生 delta，幂等，不维护水位。
 //
-// 物理拼装顺序：[常驻索引块]?\n\n[群聊声告段]?\n\n[触发消息正文]
+// 物理拼装顺序：[常驻索引块]?\n\n[群聊声告段]?\n\n[触发消息正文]\n\n[本轮Memory检索块]?
 // 缺哪段哪段连同其后的空行一起省略；最终 text 永远至少含触发消息正文。
 //
 // 模块级无可变状态。同一输入两次产出同一 text。本模块不持有 hub / agentStates / 副作用依赖，
@@ -117,18 +117,25 @@ function buildGroupDelta({ kept, truncated, config, store, agentId }) {
   return [header, ...lines].join("\n");
 }
 
-export async function compilePrompt({ store, space, seat, agent, account, triggerMessage, memory, config }) {
+export async function compilePrompt({
+  store, space, seat, agent, account, triggerMessage, memoryRetrieval,
+  memorySessionId = null, priorSessionState, runId, config,
+}) {
   // seat 可由调用方传入（messages.js 已知当前 seat），也可由编译层自己从 space.seats
   // 找——run-controller 不传 seat 时走后者。blockAgentIds 来自 seat。
   const resolvedSeat = seat ?? (space?.seats ?? []).find((s) => s.agentId === agent.id) ?? null;
   const blockAgentIds = resolvedSeat?.blockAgentIds ?? null;
 
-  const priorSessionState = store.getSessionState(account.id, space.id);
+  const resolvedPriorSessionState = priorSessionState === undefined
+    ? store.getSessionState(account.id, space.id)
+    : priorSessionState;
 
   // 常驻索引块：text仅在无sessionState时注入；同时始终返回当前候选，
   // 供API adapter在provider私有state非法、必须重置时恢复稳定前缀。
-  const residentBlock = await memory?.residentIndex(agent.id) ?? null;
-  const injectedResidentBlock = priorSessionState === null ? residentBlock : null;
+  let residentBlock = null;
+  try { residentBlock = await memoryRetrieval?.residentIndex(agent.id) ?? null; }
+  catch { residentBlock = null; }
+  const injectedResidentBlock = resolvedPriorSessionState === null ? residentBlock : null;
 
   // 群聊声告段：从 store 临时派生，幂等。
   const spaceMessages = store.list("messages").filter((m) => m.spaceId === space.id);
@@ -141,13 +148,36 @@ export async function compilePrompt({ store, space, seat, agent, account, trigge
   });
   const groupDelta = buildGroupDelta({ kept, truncated, config, store, agentId: agent.id });
 
-  // 拼装：[常驻索引块]?\n\n[群聊声告段]?\n\n[触发消息正文]
+  // 检索块是当前消息信封的 volatile 尾部。自动检索 fail-open：索引损坏或
+  // 预算服务失败不得让聊天 run 失败，本轮只省略该块。
   // 缺哪段哪段连同其后的空行一起省略，不留前导/尾部空行。
   const triggerText = triggerMessage.content ?? "";
+  let retrievalBlock = null;
+  if (memorySessionId && typeof memoryRetrieval?.searchForInjection === "function") {
+    try {
+      const retrieval = await memoryRetrieval.searchForInjection({
+        context: {
+          agentId: agent.id,
+          memorySessionId,
+          runId,
+          spaceId: space.id,
+          triggerMessageId: triggerMessage.id,
+        },
+        query: triggerText,
+      });
+      retrievalBlock = typeof retrieval?.block === "string" && retrieval.block ? retrieval.block : null;
+    } catch {
+      retrievalBlock = null;
+    }
+  }
+
+  // 拼装：[常驻索引块]?\n\n[群聊声告段]?\n\n[触发消息正文]\n\n[检索块]?
   const turnParts = [];
   if (groupDelta) turnParts.push(groupDelta);
   turnParts.push(triggerText);
+  if (retrievalBlock) turnParts.push(retrievalBlock);
   const turnText = turnParts.join("\n\n");
+  const historyEnvelopeText = [triggerText, retrievalBlock].filter(Boolean).join("\n\n");
   const parts = [];
   if (injectedResidentBlock) parts.push(injectedResidentBlock);
   parts.push(turnText);
@@ -157,7 +187,8 @@ export async function compilePrompt({ store, space, seat, agent, account, trigge
     text,
     turnText,
     historyUserText: triggerMessage.author?.type === "user" ? triggerText : null,
+    historyEnvelopeText,
     residentBlock,
-    sessionState: priorSessionState,
+    retrievalBlock,
   };
 }

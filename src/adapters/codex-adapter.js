@@ -257,21 +257,28 @@ export function createCodexAdapter({ config = {} }) {
 
   async function runInner(ctx) {
     assertAccount(ctx.account);
-    const promptText = String(ctx.prompt?.text ?? "");
-    if (byteLength(promptText) > maxInputBytes) {
+    const assertPromptCapacity = (prompt) => {
+      if (byteLength(prompt?.text) <= maxInputBytes) return;
       throw new AdapterError("provider_error", "Codex current prompt exceeds the configured input capacity");
-    }
+    };
+    let prompt = ctx.prompt;
     let threadId = null;
     if (ctx.sessionState != null) {
       if (typeof ctx.sessionState?.threadId === "string" && ctx.sessionState.threadId) threadId = ctx.sessionState.threadId;
-      else ctx.onActivity?.({ phase: "error", label: "session-reset", detail: "Codex session state was invalid and has been reset" });
+      else {
+        ctx.onActivity?.({ phase: "error", label: "session-reset", detail: "Codex session state was invalid and has been reset" });
+        prompt = await ctx.recompileForNewSession?.({ reason: "invalid" }) ?? prompt;
+      }
     }
+    assertPromptCapacity(prompt);
     try {
-      return await runAttempt(ctx, threadId);
+      return await runAttempt({ ...ctx, prompt }, threadId);
     } catch (error) {
       if (!threadId || !error?.missingThread) throw error;
       ctx.onActivity?.({ phase: "error", label: "session-reset", detail: "Codex thread was unavailable and has been reset" });
-      return runAttempt(ctx, null);
+      const prompt = await ctx.recompileForNewSession?.({ reason: "missing" }) ?? ctx.prompt;
+      assertPromptCapacity(prompt);
+      return runAttempt({ ...ctx, prompt }, null);
     }
   }
 

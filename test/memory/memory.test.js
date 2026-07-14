@@ -32,11 +32,11 @@ function operation({ kind, slug, value, patch, ifMatch, agentId = AGENT_ID, orig
   };
 }
 
-async function withVault(fn, { residentIndexMaxLines = 25, resolveSource, writeMemoryFile } = {}) {
+async function withVault(fn, { resolveSource, writeMemoryFile } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "vera-memory-test-"));
   const vaultPath = join(dir, "vault");
   const agentPath = join(vaultPath, AGENT_ID);
-  const vault = createMemoryVault({ vaultPath, residentIndexMaxLines, resolveSource, writeMemoryFile });
+  const vault = createMemoryVault({ vaultPath, resolveSource, writeMemoryFile });
   try {
     await fn({ vault, vaultPath, agentPath, agentId: AGENT_ID });
   } finally {
@@ -44,8 +44,8 @@ async function withVault(fn, { residentIndexMaxLines = 25, resolveSource, writeM
   }
 }
 
-test("canonical save writes strict scope, manual source, stains, and byte version", async () => {
-  await withVault(async ({ vault, agentPath, agentId }) => {
+test("canonical save writes strict scope and owner stains while the derived index omits stains", async () => {
+  await withVault(async ({ vault, vaultPath, agentPath, agentId }) => {
     const saved = await vault.saveMemory(agentId, memoryInput({
       slug: "bubble-split-rule",
       description: "切分规则：按段落边界",
@@ -66,6 +66,9 @@ test("canonical save writes strict scope, manual source, stains, and byte versio
     assert.match(raw, /sources:\n  - kind: manual\n    actor: user/);
     assert.match(raw, /createdAt: \d{4}-\d{2}-\d{2}T/);
     assert.match(raw, /\n\n正文见 \[\[other-rule\]\]。\n$/);
+
+    const derivedIndex = await readFile(join(vaultPath, ".vera-index", `${agentId}.json`), "utf8");
+    assert.doesNotMatch(derivedIndex, /stains|#7A8FA6/u);
   });
 });
 
@@ -244,8 +247,6 @@ test("bad files stay on disk, are excluded, and expose relative diagnostics plus
     assert.equal(result.errors[0].relativePath, `${agentId}/broken-memory.md`);
     assert.ok(!JSON.stringify(result.errors[0]).includes(agentPath), "diagnostics must not leak the absolute vault path");
     assert.equal(await readFile(join(agentPath, "broken-memory.md"), "utf8"), "---\ntype: decision\nmissing end marker");
-    assert.doesNotMatch(await vault.residentIndex(agentId), /broken-memory/);
-
     await assert.rejects(
       () => vault.getMemory(agentId, "broken-memory"),
       (error) => error.code === "invalid_memory_file" && error.details.file.relativePath === `${agentId}/broken-memory.md`,
@@ -289,7 +290,7 @@ test("missing and corrupt derived indexes rebuild to equivalent entries without 
   });
 });
 
-test("Agent partitions isolate equal slugs and resident index excludes archived entries within its budget", async () => {
+test("Agent partitions isolate equal slugs and active listings exclude archived entries", async () => {
   await withVault(async ({ vault, agentId }) => {
     const secondAgent = "agt_test02";
     const first = await vault.saveMemory(agentId, memoryInput({ slug: "same-slug", content: "A" }));
@@ -299,10 +300,9 @@ test("Agent partitions isolate equal slugs and resident index excludes archived 
     await vault.saveMemory(agentId, memoryInput({ slug: "active-two", description: "second active" }));
 
     assert.equal((await vault.getMemory(secondAgent, "same-slug")).content, "B");
-    const index = await vault.residentIndex(agentId);
-    assert.doesNotMatch(index, /same-slug/);
-    assert.equal(index.split("\n").filter((line) => line.startsWith("- [[")).length, 2);
-  }, { residentIndexMaxLines: 2 });
+    const active = (await vault.listWithDiagnostics(agentId)).memories.filter((item) => item.status === "active");
+    assert.deepEqual(active.map((item) => item.slug).sort(), ["active-one", "active-two"]);
+  });
 });
 
 test("root markdown remains unscoped and absent agent directory lists cleanly", async () => {

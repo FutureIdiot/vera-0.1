@@ -5,7 +5,7 @@ import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
-export const MEMORY_INDEX_SCHEMA_VERSION = 1;
+export const MEMORY_INDEX_SCHEMA_VERSION = 2;
 
 function indexPath(root, agentId) {
   return join(root, ".vera-index", `${agentId}.json`);
@@ -20,7 +20,12 @@ export async function readMemoryIndex(root, agentId) {
       !Number.isInteger(parsed?.generation) ||
       typeof parsed?.builtAt !== "string" ||
       !Array.isArray(parsed?.entries) ||
-      !parsed.entries.every((entry) => entry && typeof entry === "object" && typeof entry.slug === "string") ||
+      !parsed.entries.every((entry) => (
+        entry &&
+        typeof entry === "object" &&
+        typeof entry.slug === "string" &&
+        !Object.prototype.hasOwnProperty.call(entry, "stains")
+      )) ||
       !Array.isArray(parsed?.errors) ||
       !parsed.errors.every((error) => error && typeof error === "object") ||
       !parsed?.fingerprints ||

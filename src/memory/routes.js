@@ -3,7 +3,7 @@
 import { asHandler, readJsonBody, sendJson, sendNoContent } from "../api/http.js";
 import { ApiError } from "../core/errors.js";
 
-export function registerMemoryRoutes(router, { memory, store, digestService = null }) {
+export function registerMemoryRoutes(router, { memory, retrieval, store, digestService = null }) {
   function requireAgent(agentId) {
     const agent = store.find("agents", agentId);
     if (!agent) throw new ApiError("not_found", `agent ${agentId} does not exist`);
@@ -17,6 +17,7 @@ export function registerMemoryRoutes(router, { memory, store, digestService = nu
       const result = await memory.listWithDiagnostics(params.agentId);
       const memories = result.memories.map(({ sourceRefs, links, schemaVersion, scope, ...summary }) => ({
         ...summary,
+        pinned: retrieval.getPin(params.agentId, summary.slug).pinned,
         sourceCount: sourceRefs?.length ?? summary.sourceCount ?? 0,
       }));
       sendJson(res, 200, { memories, errors: result.errors, index: result.index });
@@ -45,6 +46,25 @@ export function registerMemoryRoutes(router, { memory, store, digestService = nu
         toMessageId: body?.toMessageId,
       });
       sendJson(res, 202, { job });
+    }),
+  );
+
+  router.put(
+    "/api/agents/:agentId/memory/:slug/pin",
+    asHandler(async ({ req, res, params }) => {
+      requireAgent(params.agentId);
+      await memory.getMemory(params.agentId, params.slug);
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+          Object.keys(body).length !== 1 || typeof body.pinned !== "boolean") {
+        throw new ApiError("invalid_request", "pin body must be exactly { pinned: boolean }");
+      }
+      const signal = retrieval.setPinned(params.agentId, params.slug, body.pinned);
+      sendJson(res, 200, { pin: {
+        slug: signal.slug,
+        pinned: signal.pinned,
+        ...(signal.pinnedAt ? { pinnedAt: signal.pinnedAt } : {}),
+      } });
     }),
   );
 

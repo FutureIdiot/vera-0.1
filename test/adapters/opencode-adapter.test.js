@@ -218,7 +218,7 @@ after(async () => {
   await rm(binDir, { recursive: true, force: true });
 });
 
-function makeCtx({ text = "hi", sessionState = null } = {}) {
+function makeCtx({ text = "hi", sessionState = null, recompileForNewSession } = {}) {
   const deltas = [];
   const activities = [];
   const persisted = [];
@@ -243,6 +243,7 @@ function makeCtx({ text = "hi", sessionState = null } = {}) {
       onActivity: (evt) => activities.push(evt),
       requestApproval: async () => "deny",
       persistSessionState: (state) => persisted.push(state),
+      ...(recompileForNewSession ? { recompileForNewSession } : {}),
       signal: controller.signal,
     },
     deltas,
@@ -345,18 +346,62 @@ test("first run without sessionState creates a session and persists it immediate
   assert.ok(!activities.some((a) => a.label === "session-reset"), "首建不是失效重建，不应上报 session-reset");
 });
 
+test("invalid non-null session state recompiles before creating and persisting a replacement", async () => {
+  let runnerPrompt = null;
+  stub.setRunHandler(async ({ sessionId, prompt }) => {
+    runnerPrompt = prompt;
+    stub.emit("message.part.delta", { sessionID: sessionId, field: "text", delta: "非法状态已恢复" });
+    stub.emit("session.idle", { sessionID: sessionId });
+    return {};
+  });
+  const order = [];
+  const { ctx, activities, persisted } = makeCtx({
+    text: "INVALID STATE PROMPT",
+    sessionState: { externalSessionId: 42 },
+    recompileForNewSession: async (reason) => {
+      order.push({ type: "recompile", reason });
+      return { text: "FRESH INVALID-STATE PROMPT" };
+    },
+  });
+  ctx.persistSessionState = (state) => { order.push({ type: "persist" }); persisted.push(state); };
+  const result = await adapter.run(ctx);
+  assert.deepEqual(order, [
+    { type: "recompile", reason: { reason: "invalid" } },
+    { type: "persist" },
+  ]);
+  assert.equal(runnerPrompt, "FRESH INVALID-STATE PROMPT");
+  assert.equal(result.sessionState.externalSessionId, persisted[0].externalSessionId);
+  assert.match(activities.find((item) => item.label === "session-reset")?.detail ?? "", /invalid/u);
+});
+
 test("stale session is rebuilt with a session-reset activity, not silently", async () => {
-  stub.setRunHandler(async ({ sessionId }) => {
+  let runnerPrompt = null;
+  stub.setRunHandler(async ({ sessionId, prompt }) => {
+    runnerPrompt = prompt;
     stub.emit("message.part.delta", { sessionID: sessionId, field: "text", delta: "重建后继续" });
     stub.emit("session.idle", { sessionID: sessionId });
     return {};
   });
 
+  const resetOrder = [];
   const { ctx, activities, persisted } = makeCtx({
+    text: "STALE PROMPT",
     sessionState: { externalSessionId: "ses_daemon_restarted_gone" },
+    recompileForNewSession: async (reason) => {
+      resetOrder.push({ type: "recompile", reason });
+      return { text: "FRESH OPENCODE PROMPT" };
+    },
   });
+  ctx.persistSessionState = (state) => {
+    resetOrder.push({ type: "persist" });
+    persisted.push(state);
+  };
   const result = await adapter.run(ctx);
 
+  assert.deepEqual(resetOrder, [
+    { type: "recompile", reason: { reason: "missing" } },
+    { type: "persist" },
+  ], "recall session must reset before the replacement provider session is persisted");
   assert.equal(persisted.length, 1);
   assert.notEqual(persisted[0].externalSessionId, "ses_daemon_restarted_gone");
   assert.equal(result.sessionState.externalSessionId, persisted[0].externalSessionId);
@@ -365,7 +410,26 @@ test("stale session is rebuilt with a session-reset activity, not silently", asy
   assert.ok(reset, "失效重建必须上报 session-reset activity");
   assert.equal(reset.phase, "error");
   assert.match(reset.detail, /ses_daemon_restarted_gone/);
+  assert.equal(runnerPrompt, "FRESH OPENCODE PROMPT");
   assert.equal(result.content, "重建后继续");
+});
+
+test("ordinary OpenCode provider errors do not recompile the Memory recall session", async () => {
+  stub.seedSession("ses_provider_error");
+  stub.setRunHandler(async ({ sessionId }) => {
+    stub.emit("session.error", { sessionID: sessionId, error: "ordinary provider failure" });
+    return {};
+  });
+  const reasons = [];
+  const { ctx } = makeCtx({
+    sessionState: { externalSessionId: "ses_provider_error" },
+    recompileForNewSession: async (reason) => {
+      reasons.push(reason);
+      return { text: "ordinary errors must not use this" };
+    },
+  });
+  await assert.rejects(() => adapter.run(ctx), (error) => error.code === "provider_error");
+  assert.deepEqual(reasons, []);
 });
 
 test("cancel: abort SIGTERMs the child, throws cancelled, and removes the abort listener", async () => {

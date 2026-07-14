@@ -20,7 +20,7 @@ function stripInternal({ _seq, ...rest }) {
   return rest;
 }
 
-export function registerSpaceRoutes(router, { store, hub, config, resolveAdapter, agentStates, memory, memoryDigestScheduler }) {
+export function registerSpaceRoutes(router, { store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler }) {
   router.get(
     "/api/spaces",
     asHandler(async ({ res, query }) => {
@@ -93,7 +93,7 @@ export function registerSpaceRoutes(router, { store, hub, config, resolveAdapter
         config,
         resolveAdapter,
         agentStates,
-        memory,
+        memoryRetrieval,
         memoryDigestScheduler,
         spaceId: params.id,
         body,

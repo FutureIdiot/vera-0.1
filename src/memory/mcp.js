@@ -10,7 +10,16 @@ const TOOL_SPECS = [
     status: { type: "string", enum: ["active", "archived"] },
     type: { type: "string" },
   }),
-  tool("memory_fetch_detail", "Read one authoritative Memory by known slug.", {
+  tool("memory_search", "Search the current Agent's Memory with a bounded semantic projection budget.", {
+    query: { type: "string" },
+    tokenBudget: { type: "integer" },
+  }, ["query"]),
+  tool("memory_fetch_more", "Continue one frozen Memory search snapshot in a returned direction.", {
+    cursor: { type: "string" },
+    direction: { type: "string" },
+    tokenBudget: { type: "integer" },
+  }, ["cursor", "direction"]),
+  tool("memory_fetch_detail", "Read one authoritative Memory and one-hop links. Never interpret, quote, or reason from stain hex values.", {
     slug: { type: "string" },
   }, ["slug"]),
   tool("memory_create", "Create one sourced Memory for the current Agent.", {
@@ -110,19 +119,32 @@ function toolResult(data) {
 
 function toolError(error) {
   const message = error instanceof ApiError ? error.message : "Memory MCP tool failed";
+  const code = error instanceof ApiError ? error.code : "memory_retrieval_unavailable";
   return {
     content: [{ type: "text", text: message }],
     isError: true,
+    structuredContent: { error: {
+      code,
+      message,
+      retryable: ["memory_cursor_expired", "memory_retrieval_unavailable"].includes(code),
+      details: {},
+    } },
   };
 }
 
-export function createMemoryMcpDispatcher({ memory, digestService = null }) {
+export function createMemoryMcpDispatcher({ memory, retrieval, digestService = null }) {
   if (!memory) throw new Error("createMemoryMcpDispatcher requires memory");
 
   async function callTool({ context, name, arguments: rawArguments }) {
     try {
       const args = validateArguments(name, rawArguments);
       const trusted = requireContext(context, { sources: name === "memory_create" });
+      if (["memory_search", "memory_fetch_more", "memory_fetch_detail"].includes(name)) {
+        if (typeof trusted.memorySessionId !== "string" || !trusted.memorySessionId) {
+          throw invalid(`${name} requires trusted memorySessionId`);
+        }
+        if (!retrieval) throw new ApiError("memory_retrieval_unavailable", "Memory retrieval is unavailable");
+      }
 
       if (name === "memory_list") {
         const result = await memory.listWithDiagnostics(trusted.agentId);
@@ -131,8 +153,24 @@ export function createMemoryMcpDispatcher({ memory, digestService = null }) {
           (args.type === undefined || item.type === args.type));
         return toolResult({ memories, errors: result.errors, index: result.index });
       }
+      if (name === "memory_search") {
+        return toolResult(await retrieval.search({
+          context: trusted,
+          query: args.query,
+          tokenBudget: args.tokenBudget,
+          kind: "search_returned",
+        }));
+      }
+      if (name === "memory_fetch_more") {
+        return toolResult(await retrieval.fetchMore({
+          context: trusted,
+          cursor: args.cursor,
+          direction: args.direction,
+          tokenBudget: args.tokenBudget,
+        }));
+      }
       if (name === "memory_fetch_detail") {
-        return toolResult({ memory: await memory.getMemory(trusted.agentId, args.slug) });
+        return toolResult(await retrieval.fetchDetail({ context: trusted, slug: args.slug }));
       }
       if (name === "memory_create") {
         const { slug, ...value } = args;

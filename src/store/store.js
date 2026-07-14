@@ -40,7 +40,7 @@ import {
 
 const COLLECTIONS = [
   "agents", "accounts", "spaces", "messages", "activities", "approvals", "runs", "themes",
-  "memoryDigestJobs",
+  "memoryDigestJobs", "memoryRecallSessions", "memorySignals",
 ];
 
 // 内存键 -> 目录内文件名

@@ -76,9 +76,8 @@ async function atomicReplace(path, content, { createOnly = false } = {}) {
   }
 }
 
-export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25, resolveSource, writeMemoryFile = atomicReplace } = {}) {
+export function createMemoryVault({ vaultPath, resolveSource, writeMemoryFile = atomicReplace } = {}) {
   let activeRoot = resolve(vaultPath);
-  let activeResidentIndexMaxLines = residentIndexMaxLines;
   let epoch = 0;
   const queue = createMemoryWriteQueue();
 
@@ -138,6 +137,7 @@ export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25, resol
     }
     const fingerprints = {};
     const entries = [];
+    const ownerMemories = [];
     const errors = [];
     const previousEntries = new Map((previous?.entries ?? []).map((entry) => [entry.slug, entry]));
     const previousErrors = new Map((previous?.errors ?? []).map((error) => [error.slug, error]));
@@ -164,7 +164,13 @@ export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25, resol
       if (!force && previous?.fingerprints?.[slug] === fingerprint) {
         const cached = previousEntries.get(slug);
         const cachedError = previousErrors.get(slug);
-        if (cached) entries.push(cached);
+        if (cached) {
+          entries.push(cached);
+          // The disposable index is deliberately stain-free. Owner-facing
+          // list reads recover stains from the authoritative markdown bytes.
+          const parsed = parseMemoryDocument(raw, { slug, agentId });
+          ownerMemories.push({ ...cached, stains: parsed.memory.stains ?? {} });
+        }
         else if (cachedError) errors.push(cachedError);
         else changed = true;
         continue;
@@ -183,17 +189,20 @@ export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25, resol
           memory = await readCanonical(root, agentId, slug);
         }
         await validateSourceRefs(memory.sources);
-        entries.push(toIndexEntry(memory));
+        const indexEntry = toIndexEntry(memory);
+        entries.push(indexEntry);
+        ownerMemories.push({ ...indexEntry, stains: memory.stains ?? {} });
       } catch (error) {
         errors.push(diagnostic(agentId, slug, error));
       }
     }
     entries.sort((a, b) => sortValue(b.updatedAt) - sortValue(a.updatedAt) || a.slug.localeCompare(b.slug));
+    ownerMemories.sort((a, b) => sortValue(b.updatedAt) - sortValue(a.updatedAt) || a.slug.localeCompare(b.slug));
     errors.sort((a, b) => String(a.slug ?? "").localeCompare(String(b.slug ?? "")));
     if (!changed && previous) return {
       agentId, scannedAt: new Date().toISOString(), created: [], updated: [], removed: [],
       unchangedCount: files.length, invalid: previous.errors.length,
-      memories: previous.entries, errors: previous.errors,
+      memories: ownerMemories, errors: previous.errors,
       index: { generation: previous.generation, builtAt: previous.builtAt, status: "current" },
     };
     const priorFingerprints = previous?.fingerprints ?? {};
@@ -218,7 +227,7 @@ export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25, resol
       agentId, scannedAt: new Date().toISOString(), created, updated, removed,
       unchangedCount: files.length - created.length - updated.length,
       invalid: errors.filter((error) => error.code === "invalid_memory_file").length,
-      memories: entries, errors,
+      memories: ownerMemories, errors,
       index: {
         generation: index.generation,
         builtAt: index.builtAt,
@@ -239,13 +248,6 @@ export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25, resol
     filePathFor, agentPathFor, readCanonical, scanAt, validateSourceRefs,
     atomicReplace: writeMemoryFile, syncDirectory, invalidMemoryFile,
   });
-
-  async function residentIndex(agentId) {
-    const active = (await listMemories(agentId)).filter((memory) => memory.status === "active");
-    if (active.length === 0) return null;
-    const lines = active.slice(0, activeResidentIndexMaxLines).map((memory) => `- [[${memory.slug}]] — ${memory.description}`);
-    return ["Vera 记忆库常驻索引：", "相关时调用 Vera Memory MCP 的 memory_fetch_detail 展开 [[slug]] 查看详情。", "", ...lines].join("\n");
-  }
 
   async function inspect() {
     let entries;
@@ -276,15 +278,10 @@ export function createMemoryVault({ vaultPath, residentIndexMaxLines = 25, resol
     epoch += 1;
     return activeRoot;
   }
-  function setResidentIndexMaxLines(value) {
-    if (!Number.isFinite(value) || value < 0) throw new Error("resident index max lines must be a non-negative number");
-    activeResidentIndexMaxLines = value;
-  }
-
   return {
     applyOperation, listMemories, listWithDiagnostics, rebuildIndex, saveMemory,
-    getMemory, updateMemory, deleteMemory, residentIndex, inspect, reopen,
+    getMemory, updateMemory, deleteMemory, inspect, reopen,
     drain: queue.drain, withExclusive: queue.withExclusive,
-    setResidentIndexMaxLines, getVaultPath: () => activeRoot,
+    getVaultPath: () => activeRoot,
   };
 }

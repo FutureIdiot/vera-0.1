@@ -16,6 +16,7 @@ import { registerAgentRoutes } from "./agents/routes.js";
 import { listSpaces } from "./spaces/spaces.js";
 import { registerSpaceRoutes } from "./spaces/routes.js";
 import { createMemoryVault } from "./memory/memory.js";
+import { createMemoryRetrievalService } from "./memory/memory-retrieval.js";
 import { registerMemoryRoutes } from "./memory/routes.js";
 import { createMemoryDigestService } from "./memory/memory-digest-service.js";
 import { createMemoryDigestScheduler } from "./memory/memory-digest-scheduler.js";
@@ -50,8 +51,15 @@ const hub = createEventHub({
 const agentStates = createAgentStateTracker({ hub });
 const memory = createMemoryVault({
   vaultPath: config.memory.vaultPath,
-  residentIndexMaxLines: config.memory.residentIndexMaxLines,
   resolveSource: ({ messageId }) => store.find("messages", messageId),
+});
+const memoryRetrieval = createMemoryRetrievalService({
+  store,
+  memory,
+  config: {
+    residentIndexMaxLines: config.memory.residentIndexMaxLines,
+    injectionTokenBudget: config.memory.retrievalTokenBudget,
+  },
 });
 
 // provider -> adapter：显式的普通map，不做注册表抽象
@@ -89,7 +97,7 @@ async function executeMemoryDigest({ job, chunks, facts, proposalSchema, signal 
 }
 
 const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
-applyRuntimeSettings({ settings: settingsStore.getAll(), config, memory });
+applyRuntimeSettings({ settings: settingsStore.getAll(), config, memoryRetrieval });
 const memoryDigestService = createMemoryDigestService({
   store,
   memory,
@@ -122,15 +130,15 @@ router.get("/api/events", ({ req, res }) => {
 
 registerAgentRoutes(router, { store, agentStates });
 registerSpaceRoutes(router, {
-  store, hub, config, resolveAdapter, agentStates, memory, memoryDigestScheduler,
+  store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
 });
-registerMemoryRoutes(router, { memory, store, digestService: memoryDigestService });
+registerMemoryRoutes(router, { memory, retrieval: memoryRetrieval, store, digestService: memoryDigestService });
 // 系统设置（Phase 4.5）：独立 settings.json 模块，不进 store.js（避免与 4.3+4.4 并行分支冲突）。
 // boot 顺序：store → hub/agentStates/memory → settingsStore → 路由注册。
 registerSettingsRoutes(router, {
   settingsStore,
   onSettingsChanged: (settings) => {
-    applyRuntimeSettings({ settings, config, memory });
+    applyRuntimeSettings({ settings, config, memoryRetrieval });
     memoryDigestScheduler.refreshSettings(settings);
   },
 });

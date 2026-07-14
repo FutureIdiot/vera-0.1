@@ -18,6 +18,7 @@ const GROUPS = [
       ["memory.digestSchedule", "定时表达式", "text"],
       ["memory.digestRealtimeThresholdChars", "实时整理字符阈值", "number", { min: 1, step: 1 }],
       ["memory.injectionBudgetResidentLines", "常驻索引行数", "number", { min: 0, step: 1 }],
+      ["memory.injectionBudgetRetrievalTokens", "每轮记忆检索 Token 预算", "number", { min: 0, max: 4096, step: 1 }],
     ],
   },
   {

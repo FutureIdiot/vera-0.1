@@ -51,6 +51,7 @@ const DEFAULTS = {
   memory: {
     vaultPath: "~/.vera/memory", // Obsidian 兼容 vault，仓库外（api-contract.md Memory 一节）
     residentIndexMaxLines: 25, // 常驻索引截断行数
+    retrievalTokenBudget: 384, // M3 当前消息尾部自动检索预算（vera-utf8-v1）
     digestRealtimeThresholdChars: 16000,
   },
   // Appearance 默认值（ground truth 4.3「F0确认默认值」/ api-contract.md Appearance 字段）。
@@ -169,6 +170,10 @@ export function loadConfig(env = process.env) {
     memory: {
       vaultPath: expandHome(env.VERA_MEMORY_VAULT_PATH || DEFAULTS.memory.vaultPath),
       residentIndexMaxLines: num(env.VERA_MEMORY_INDEX_MAX_LINES, DEFAULTS.memory.residentIndexMaxLines),
+      retrievalTokenBudget: num(
+        env.VERA_MEMORY_RETRIEVAL_TOKEN_BUDGET,
+        DEFAULTS.memory.retrievalTokenBudget,
+      ),
       digestRealtimeThresholdChars: positiveInt(
         env.VERA_MEMORY_DIGEST_REALTIME_THRESHOLD_CHARS,
         DEFAULTS.memory.digestRealtimeThresholdChars,

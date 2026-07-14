@@ -185,6 +185,10 @@ Vera是单用户、自部署的多agent协作空间。
 - 写入时的`type`分层是Memory的结构化元信息，用于后续聚类去重、粒度选择和软配额重排，并只作为语义簇兼容性的辅助信号；单轮置信仍只来自独立一级方向的并集。`type`不进入事实身份，不把召回切成互不相通的类型分区，也不是检索过滤门槛。新类型允许扩展，未配置类型进入默认软配额组，不得因未知类型丢弃Memory。
 - 所有程序写入（主Agent、subagent、CLI adapter、hook与dream）只能向gateway提交proposal/operation，由Memory单写者校验并原子落盘；不得直接写vault。用户通过Obsidian所做的外部编辑由gateway重扫、校验并刷新派生索引，不构成第二个程序写入通道
 - **Vera Memory 本身是 gateway 托管的第一方 per-Agent MCP 服务**：Agent runtime 的读取、写入提议、检索、横向扩展和正文展开只走 Vera Memory MCP tools，不使用 `fs.read/fs.write` 直接碰 vault。MCP工具参数不接受 `agentId`，gateway从可信Execution/agent token上下文绑定身份；切换Account不切换Memory。owner前端继续使用HTTP管理API，但HTTP与MCP必须调用同一Memory facade和单写队列，不得复制业务实现。
+- M3的三条渠道——新外部session的常驻索引、每轮Message尾部的自动检索注入、Agent主动`memory_search/fetch_more/fetch_detail`——共用同一retrieval facade。自动query只取当前`triggerMessage.content`，不包含群聊声告、Activity、历史prompt或adapter `sessionState`。
+- 同session去重由gateway独立sidecar管理：`memorySessionId`绑定`agentId + accountId + spaceId + external-session-epoch`，持久化已交付slug与有限cursor snapshot。provider session正常续轮与gateway重启不换代；首次新会话、adapter明确报告旧会话missing/invalid或owner显式重置时换代。该sidecar不得塞进adapter透明`sessionState`。
+- 用户置顶是retrieval signal，不进Memory frontmatter、不改Memory version，Agent MCP不得写。M3常驻索引先按`pinnedAt, slug`取置顶项，非置顶项因`derivedWeight=0`暂按slug稳定排序；M4只替换非置顶的长期派生权重。置顶、取消置顶和普通Memory编辑都不更换当前session的稳定前缀，只在下一个外部session批量换版。
+- owner HTTP可见stains；Agent侧`memory_search/fetch_more`、自动注入和MCP `memory_fetch_detail`均不返回`stains`字段或自然语言含义。`fetch_detail`仍可返回正文中本来存在的裸hex，但tool描述必须明确不解释、不引用、不作为判断依据。派生检索索引、cursor、使用事件和日志不得携带stain。
 
 **召回术语与纵横边界：**
 - **召回节点**：粗召回后最先交给Agent的、可独立理解的最小语义卡片；每个节点是某一条长期Memory的简略投影，至少包含足以判断“直接使用还是展开”的核心命题，而不是只有slug、关键词或分数的无语义目录项。

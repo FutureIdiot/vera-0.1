@@ -486,7 +486,10 @@ export function createOpencodeAdapter({ config }) {
   }
 
   async function run(ctx) {
-    const { agent, account, prompt, sessionState, workspacePath, onDelta, onActivity, persistSessionState, signal } = ctx;
+    const {
+      agent, account, prompt, sessionState, workspacePath, onDelta, onActivity,
+      persistSessionState, recompileForNewSession, signal,
+    } = ctx;
     assertAccount(account);
     if (signal?.aborted) throw new AdapterError("cancelled", "aborted before start");
 
@@ -504,20 +507,30 @@ export function createOpencodeAdapter({ config }) {
       await Promise.race([handle.pollerConnected, sleep(POLLER_CONNECT_WAIT_MS)]);
 
       // 会话：复用 -> 验证 -> 失效重建（必须上报，不得静默）
-      sessionId = sessionState?.externalSessionId ?? null;
+      let runPrompt = prompt;
+      const stateValid = sessionState == null ||
+        (typeof sessionState?.externalSessionId === "string" && sessionState.externalSessionId);
+      sessionId = stateValid ? sessionState?.externalSessionId ?? null : null;
       let staleSessionId = null;
+      let resetDetail = null;
+      if (!stateValid) {
+        runPrompt = await recompileForNewSession?.({ reason: "invalid" }) ?? runPrompt;
+        resetDetail = "OpenCode session state was invalid and has been reset";
+      }
       if (sessionId && !(await sessionExists(handle, sessionId))) {
         staleSessionId = sessionId;
         sessionId = null;
+        runPrompt = await recompileForNewSession?.({ reason: "missing" }) ?? runPrompt;
+        resetDetail = `opencode 会话 ${staleSessionId} 已失效（daemon 重启？），上下文已从头开始`;
       }
       if (!sessionId) {
         sessionId = await createSession(handle);
         persistSessionState?.({ externalSessionId: sessionId });
-        if (staleSessionId) {
+        if (resetDetail) {
           onActivity?.({
             phase: "error",
             label: "session-reset",
-            detail: `opencode 会话 ${staleSessionId} 已失效（daemon 重启？），已新建 ${sessionId} 继续，上下文从头开始`,
+            detail: resetDetail,
           });
         }
       }
@@ -569,7 +582,7 @@ export function createOpencodeAdapter({ config }) {
       });
 
       // 短命 runner 子进程驱动 LLM loop
-      const runnerArgs = buildRunnerArgs(handle, account, sessionId, prompt.text);
+      const runnerArgs = buildRunnerArgs(handle, account, sessionId, runPrompt.text);
       child = spawnProcess(handle.binary, runnerArgs, {
         cwd: workspacePath || process.cwd(),
         stdio: ["ignore", "pipe", "pipe"],

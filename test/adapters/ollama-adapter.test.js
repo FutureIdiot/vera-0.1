@@ -149,16 +149,26 @@ test("chat streams fragmented NDJSON and persists only stable user history", asy
   assert.deepEqual(first.persisted, [{ schemaVersion: 1, stablePrefix: "INDEX", history: [] }]);
 
   const second = makeCtx(stub.baseUrl, {
-    prompt: { text: "NEW GROUP\n\nsecond", turnText: "NEW GROUP\n\nsecond", historyUserText: "second", residentBlock: "NEW INDEX" },
+    prompt: {
+      text: "NEW GROUP\n\nsecond\n\nRETRIEVAL",
+      turnText: "NEW GROUP\n\nsecond\n\nRETRIEVAL",
+      historyUserText: "second",
+      historyEnvelopeText: "second\n\nRETRIEVAL",
+      residentBlock: "NEW INDEX",
+    },
     sessionState: firstResult.sessionState,
   });
-  await adapter.run(second.ctx);
+  const secondResult = await adapter.run(second.ctx);
   assert.deepEqual(stub.requests[1].body.messages.slice(0, 3), [
     { role: "system", content: "INDEX" },
     { role: "user", content: "question" },
     { role: "assistant", content: "你好，世界" },
   ]);
   assert.equal(JSON.stringify(stub.requests[1].body.messages).includes("GROUP\n\nquestion"), false);
+  assert.deepEqual(secondResult.sessionState.history.slice(-2), [
+    { role: "user", content: "second\n\nRETRIEVAL" },
+    { role: "assistant", content: "续轮" },
+  ]);
 });
 
 test("invalid state resets, history prunes oldest pairs, and oversized current turn never fetches", async (t) => {
@@ -167,13 +177,33 @@ test("invalid state resets, history prunes oldest pairs, and oversized current t
     res.end(`${JSON.stringify({ message: { content: "ok" }, done: false })}\n${JSON.stringify({ done: true, message: { content: "" } })}\n`);
   });
   const adapter = createOllamaAdapter({ config: { maxInputBytes: 18 } });
+  const resetReasons = [];
   const invalid = makeCtx(stub.baseUrl, {
-    prompt: { text: "new", turnText: "new", historyUserText: "new", residentBlock: "fresh" },
+    prompt: { text: "old", turnText: "old", historyUserText: "old", residentBlock: "OLD" },
     sessionState: { broken: true },
+    recompileForNewSession: async (input) => {
+      resetReasons.push(input);
+      return {
+        text: "F\n\nnew2",
+        turnText: "new2",
+        historyUserText: "legacy",
+        historyEnvelopeText: "env",
+        residentBlock: "F",
+      };
+    },
   });
-  await adapter.run(invalid.ctx);
+  const invalidResult = await adapter.run(invalid.ctx);
   assert.equal(invalid.activities[0].label, "session-reset");
-  assert.equal(stub.requests[0].body.messages[0].content, "fresh");
+  assert.deepEqual(resetReasons, [{ reason: "invalid" }]);
+  assert.deepEqual(stub.requests[0].body.messages, [
+    { role: "system", content: "F" },
+    { role: "user", content: "new2" },
+  ]);
+  assert.deepEqual(invalid.persisted, [{ schemaVersion: 1, stablePrefix: "F", history: [] }]);
+  assert.deepEqual(invalidResult.sessionState.history, [
+    { role: "user", content: "env" },
+    { role: "assistant", content: "ok" },
+  ]);
 
   const pruned = makeCtx(stub.baseUrl, {
     prompt: { text: "new", turnText: "new", historyUserText: "new", residentBlock: "ignored" },
@@ -195,6 +225,24 @@ test("invalid state resets, history prunes oldest pairs, and oversized current t
   });
   await assert.rejects(() => adapter.run(oversized.ctx), (error) => error.code === "provider_error");
   assert.equal(stub.requests.length, 2);
+});
+
+test("ordinary Ollama provider errors do not recompile the Memory recall session", async (t) => {
+  const stub = await startStub(t, async ({ res }) => {
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "ordinary failure" }));
+  });
+  const adapter = createOllamaAdapter({ config: {} });
+  const reasons = [];
+  const input = makeCtx(stub.baseUrl, {
+    sessionState: { schemaVersion: 1, stablePrefix: "INDEX", history: [] },
+    recompileForNewSession: async (reason) => {
+      reasons.push(reason);
+      return { text: "fresh", turnText: "fresh", historyEnvelopeText: "fresh", residentBlock: null };
+    },
+  });
+  await assert.rejects(() => adapter.run(input.ctx), (error) => error.code === "provider_error");
+  assert.deepEqual(reasons, []);
 });
 
 test("chat abort, timeout, provider errors and shutdown expose stable codes", async (t) => {

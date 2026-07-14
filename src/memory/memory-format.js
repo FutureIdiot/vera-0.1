@@ -239,7 +239,6 @@ export function toIndexEntry(memoryOrSlug, legacyFrontmatter) {
     type: memory.type,
     description: memory.description,
     status: memory.status,
-    stains: memory.stains ?? {},
     createdAt: memory.createdAt,
     updatedAt: memory.updatedAt,
     version: memory.version ?? null,

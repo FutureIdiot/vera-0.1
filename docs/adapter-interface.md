@@ -113,7 +113,9 @@ createProviderAdapter({ config }) -> {
 }
 ```
 
-`ctx.prompt`固定为`{text,turnText,historyUserText,residentBlock}`：`text`是CLI可直接投递的完整本轮输入；`turnText`不含常驻索引，只含本轮群聊声告+触发正文；`historyUserText`只在触发者为用户时等于未注入的原始触发正文，否则为`null`；`residentBlock`是当前可用的常驻索引稳定前缀，供API session首轮或非法state重置时保存。OpenCode等CLI adapter仍只消费`text`；API adapter使用`residentBlock + 稳定history + turnText`组帧，成功后只允许把`historyUserText + assistant`加入稳定history，不得持久化群聊声告或完整`text`。
+`ctx.prompt`固定为`{text,turnText,historyUserText,historyEnvelopeText,residentBlock,retrievalBlock}`：`text`是CLI可直接投递的完整本轮输入；`turnText`不含常驻索引，固定为本轮群聊声告+触发正文+本轮Memory检索尾块；`historyUserText`只在触发者为用户时等于未注入的原始触发正文，否则为`null`；`historyEnvelopeText`是原始触发正文+检索尾块，不含常驻索引或群聊声告；`residentBlock`是当前可用的常驻索引稳定前缀，`retrievalBlock`是本轮volatile检索块或`null`。OpenCode/Codex等CLI adapter只消费`text`；API adapter使用`residentBlock + 稳定history + turnText`组帧，成功后把`historyEnvelopeText + assistant`加入稳定history，不得持久化群聊声告或完整`text`。
+
+M3新增`ctx.recompileForNewSession({reason:"missing"|"invalid"}) -> Promise<ctx.prompt>`。adapter只能在已绑定当前Run且明确确认旧外部session无法续用时调用；普通provider/network错误不得调用。gateway对同一Run的第一次调用幂等地清空旧`(accountId,spaceId)` sessionState、换代独立Memory recall session、清空其已交付slug/cursor，再用同一条冻结trigger Message重编译当轮prompt；重复调用返回同一Promise/prompt，不再换代。callback不为adapter创建provider session，adapter随后仍经`persistSessionState`立即保存新session id/state。Codex只在非空state形状非法或明确missing thread时调用；OpenCode只在`sessionExists`明确返回false后、创建新session前调用；Ollama只在非空但形状非法的history state上调用。
 
 - `run(ctx)`沿附录A入参与返回形状。adapter必须按provider顺序把每段文本恰好一次交给`onDelta`；若产生delta，其拼接文本必须与最终`content`语义一致，无delta时才允许仅以`content`兜底。`sessionState`必须是可JSON序列化的provider私有值：CLI通常保存外部session id，API通常保存稳定history；新会话建立后立即`persistSessionState`，结束时在返回值再次给出。失效会话必须明确报告`session-reset`后重建，不得静默丢上下文。sessionState不得含secret、临时目录或无需持久化的宿主绝对路径。
 - adapter不得依赖provider静默截断当前`prompt.text`或digest payload。chat超限时只能按冻结规则确定性裁剪最旧history，不得丢当前prompt；即使清空history仍放不下时，必须在请求前明确失败，或使用已经真实smoke验证的provider容量配置（例如Ollama `num_ctx`）。digest payload是不可变输入，adapter不得自行丢chunks/facts/schema来适配容量；放不下就在provider请求前失败。
@@ -388,7 +390,7 @@ export function createOpencodeAdapter({ config }) {
 }
 ```
 
-`run(ctx)` 入参 `{ agent, account, prompt: { text, turnText, historyUserText, residentBlock }, sessionState, workspacePath, onDelta, onActivity, requestApproval, persistSessionState, signal }`。adapter 通过 `onDelta` / `onActivity` 回调上报，通过返回值 `{ content, sessionState }` 兜底。
+`run(ctx)` 入参 `{ agent, account, prompt: { text,turnText,historyUserText,historyEnvelopeText,residentBlock,retrievalBlock }, sessionState, workspacePath, onDelta, onActivity, requestApproval, persistSessionState, recompileForNewSession, signal }`。adapter 通过 `onDelta` / `onActivity` 回调上报，通过返回值 `{ content, sessionState }` 兜底。
 
 **Phase 5.5联邦形态如何逐项翻译**：
 

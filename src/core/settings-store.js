@@ -35,6 +35,7 @@ const ALLOWED_KEYS = {
   "memory.digestSchedule": { type: "string" },
   "memory.digestRealtimeThresholdChars": { type: "number", exclusiveMin: 0, integer: true },
   "memory.injectionBudgetResidentLines": { type: "number", min: 0 },
+  "memory.injectionBudgetRetrievalTokens": { type: "number", min: 0, max: 4096, integer: true },
   // 消息呈现（ground truth 4.1「消息呈现」：气泡切分规则）
   "presentation.bubbleBoundaryPattern": { type: "string" },
   "presentation.bubbleMinLength": { type: "number", min: 0 },
@@ -80,6 +81,7 @@ function deriveDefaults(config) {
     "memory.digestSchedule": "0 3 * * *",
     "memory.digestRealtimeThresholdChars": config.memory.digestRealtimeThresholdChars,
     "memory.injectionBudgetResidentLines": config.memory.residentIndexMaxLines,
+    "memory.injectionBudgetRetrievalTokens": config.memory.retrievalTokenBudget,
     "presentation.bubbleBoundaryPattern": config.bubbles.boundaryPattern,
     "presentation.bubbleMinLength": config.bubbles.minLength,
     "presentation.bubbleMaxLength": config.bubbles.maxLength,
@@ -196,6 +198,9 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
         }
         if (spec.exclusiveMin !== undefined && value <= spec.exclusiveMin) {
           throw new ApiError("invalid_request", `${key} must be > ${spec.exclusiveMin}`);
+        }
+        if (spec.max !== undefined && value > spec.max) {
+          throw new ApiError("invalid_request", `${key} must be <= ${spec.max}`);
         }
         if (spec.integer && !Number.isInteger(value)) {
           throw new ApiError("invalid_request", `${key} must be an integer`);

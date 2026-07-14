@@ -5,24 +5,33 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMemoryMcpDispatcher } from "../../src/memory/mcp.js";
 import { createMemoryVault } from "../../src/memory/memory.js";
+import { createMemoryRetrievalService } from "../../src/memory/memory-retrieval.js";
+import { createStore } from "../../src/store/store.js";
 
 async function withMcp(fn) {
   const dir = await mkdtemp(join(tmpdir(), "vera-memory-mcp-test-"));
   const message = { id: "msg_source01", spaceId: "spc_alpha" };
+  const store = await createStore({ dataPath: join(dir, "data"), debounceMs: 5 });
   const memory = createMemoryVault({
     vaultPath: join(dir, "vault"),
     resolveSource: ({ messageId }) => messageId === message.id ? message : null,
   });
+  const retrieval = createMemoryRetrievalService({ store, memory });
+  const recall = await retrieval.ensureSession({ agentId: "agt_alpha", accountId: "acc_alpha", spaceId: message.spaceId });
   try {
     await fn({
       memory,
-      mcp: createMemoryMcpDispatcher({ memory }),
+      retrieval,
+      mcp: createMemoryMcpDispatcher({ memory, retrieval }),
       context: {
         agentId: "agt_alpha",
+        memorySessionId: recall.id,
+        spaceId: message.spaceId,
         sourceRefs: [{ kind: "message", spaceId: message.spaceId, messageId: message.id }],
       },
     });
   } finally {
+    await store.close();
     await rm(dir, { recursive: true, force: true });
   }
 }
@@ -31,11 +40,12 @@ test("Memory MCP schemas never let tool arguments select identity or sources", a
   await withMcp(async ({ mcp }) => {
     const tools = mcp.listTools();
     assert.deepEqual(tools.map((item) => item.name), [
-      "memory_list", "memory_fetch_detail", "memory_create", "memory_update", "memory_archive", "memory_digest",
+      "memory_list", "memory_search", "memory_fetch_more", "memory_fetch_detail",
+      "memory_create", "memory_update", "memory_archive", "memory_digest",
     ]);
     for (const spec of tools) {
       const properties = spec.inputSchema.properties;
-      for (const forbidden of ["agentId", "scope", "origin", "sources", "sourceRefs"]) {
+      for (const forbidden of ["agentId", "memorySessionId", "scope", "origin", "sources", "sourceRefs"]) {
         assert.equal(forbidden in properties, false, `${spec.name} must not expose ${forbidden}`);
       }
       assert.equal(spec.inputSchema.additionalProperties, false);
@@ -53,6 +63,7 @@ test("trusted Agent context drives MCP create/list/fetch_detail/update/archive t
         type: "decision",
         description: "created through MCP",
         content: "authoritative body",
+        stains: { agt_beta: "#AABBCC" },
       },
     });
     assert.equal(created.isError, undefined);
@@ -61,9 +72,13 @@ test("trusted Agent context drives MCP create/list/fetch_detail/update/archive t
     const listed = await mcp.callTool({ context, name: "memory_list", arguments: { status: "active" } });
     assert.deepEqual(listed.structuredContent.memories.map((item) => item.slug), ["mcp-created"]);
 
+    const searched = await mcp.callTool({ context, name: "memory_search", arguments: { query: "authoritative body" } });
+    assert.deepEqual(searched.structuredContent.nodes.map((item) => item.slug), ["mcp-created"]);
+
     const full = await mcp.callTool({ context, name: "memory_fetch_detail", arguments: { slug: "mcp-created" } });
     assert.equal(full.structuredContent.memory.content, "authoritative body");
     assert.deepEqual(full.structuredContent.memory.sources, context.sourceRefs);
+    assert.doesNotMatch(JSON.stringify(full), /stains|#AABBCC/u);
 
     const updated = await mcp.callTool({
       context,
@@ -133,7 +148,7 @@ test("JSON-RPC dispatcher exposes standard MCP tool results without network iden
     assert.equal(initialized.result.serverInfo.name, "vera-memory");
 
     const tools = await mcp.handleRpc({ context, request: { jsonrpc: "2.0", id: 2, method: "tools/list" } });
-    assert.equal(tools.result.tools.length, 6);
+    assert.equal(tools.result.tools.length, 8);
 
     const failed = await mcp.handleRpc({
       context: null,

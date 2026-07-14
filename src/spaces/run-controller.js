@@ -36,7 +36,7 @@ export function cancelRun(runId) {
 }
 
 export function executeRun({
-  store, hub, config, agent, account, space, triggerMessage, adapter, agentStates, memory,
+  store, hub, config, agent, account, space, triggerMessage, adapter, agentStates, memoryRetrieval,
   memoryDigestScheduler,
 }) {
   const spaceId = space.id;
@@ -61,9 +61,10 @@ export function executeRun({
   const queueKey = `${account.id}:${spaceId}`;
   const tail = (runQueues.get(queueKey) ?? Promise.resolve()).then(runAsync);
   runQueues.set(queueKey, tail);
-  void tail.finally(() => {
+  const releaseQueue = () => {
     if (runQueues.get(queueKey) === tail) runQueues.delete(queueKey);
-  });
+  };
+  void tail.then(releaseQueue, releaseQueue);
 
   async function runAsync() {
     // 常驻索引只在该 (account, Space) 尚无已持久化 sessionState 时前置注入
@@ -71,9 +72,56 @@ export function executeRun({
     // 换代，不逐条消息刷新。已有 sessionState 的后续消息不重复注入。
     // 群聊声告段（ground truth 2.3）也在编译层一起拼好——编译层无状态，每轮
     // 临时查 messages 派生 delta。
-    const { text: promptText, turnText, historyUserText, residentBlock, sessionState: priorSessionState } = await compilePrompt({
-      store, space, agent, account, triggerMessage, memory, config,
-    });
+    let priorSessionState;
+    const memorySessionIdentity = { agentId: agent.id, accountId: account.id, spaceId };
+    let compileForSession;
+    let initialPrompt;
+    try {
+      priorSessionState = store.getSessionState(account.id, space.id);
+      const memorySession = await memoryRetrieval?.ensureSession({
+        ...memorySessionIdentity,
+        reset: priorSessionState === null,
+      }) ?? null;
+      compileForSession = (session, sessionState) => compilePrompt({
+        store, space, agent, account, triggerMessage, memoryRetrieval,
+        memorySessionId: session?.id ?? null,
+        priorSessionState: sessionState,
+        runId: storedRun.id,
+        config,
+      });
+      initialPrompt = await compileForSession(memorySession, priorSessionState);
+    } catch (error) {
+      abortControllers.delete(storedRun.id);
+      expirePendingApprovalsForRun(store, hub, storedRun.id);
+      agentStates?.setIdle(agent.id);
+      const failed = store.update("runs", storedRun.id, {
+        status: "failed",
+        endedAt: new Date().toISOString(),
+        replyMessageIds: [],
+        error: error instanceof AdapterError
+          ? { code: error.code, message: error.message }
+          : { code: "internal", message: "prompt compilation failed" },
+      });
+      hub.publish("run.ended", { run: stripInternal(failed) });
+      return;
+    }
+    let recompilePromise = null;
+
+    // Provider明确判定旧外部session无法续用时，同一Run只换代一次Memory
+    // recall session。普通adapter错误不会调用此回调；重复调用返回同一Promise。
+    function recompileForNewSession() {
+      if (recompilePromise) return recompilePromise;
+      recompilePromise = (async () => {
+        store.setSessionState(account.id, spaceId, null);
+        let freshMemorySession = null;
+        if (memoryRetrieval) {
+          await memoryRetrieval.resetSession(memorySessionIdentity);
+          freshMemorySession = await memoryRetrieval.ensureSession({ ...memorySessionIdentity, reset: false });
+        }
+        return compileForSession(freshMemorySession, null);
+      })();
+      return recompilePromise;
+    }
 
     const bubbles = createBubbleStream({ store, hub, config, spaceId, runId: storedRun.id, agentId: agent.id });
     const activityIndex = new Map(); // callId -> activity id
@@ -117,7 +165,7 @@ export function executeRun({
     const ctx = {
       agent,
       account,
-      prompt: { text: promptText, turnText, historyUserText, residentBlock },
+      prompt: initialPrompt,
       sessionState: priorSessionState,
       workspacePath: process.cwd(),
       onDelta: (text) => bubbles.delta(text),
@@ -126,6 +174,7 @@ export function executeRun({
       // 可选回调（adapter-interface.md）：外部会话一建立就立即持久化，
       // 不等 run 结束，防止 run 中途崩溃丢会话 id 导致重复建会话。
       persistSessionState: (state) => store.setSessionState(account.id, spaceId, state),
+      recompileForNewSession,
       signal: controller.signal,
     };
 

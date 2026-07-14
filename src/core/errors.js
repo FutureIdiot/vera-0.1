@@ -5,6 +5,9 @@ export const STATUS_BY_CODE = {
   invalid_memory_file: 422,
   not_found: 404,
   conflict: 409,
+  memory_cursor_invalid: 400,
+  memory_cursor_expired: 410,
+  memory_retrieval_unavailable: 503,
   adapter_unavailable: 502,
   internal: 500,
 };

@@ -206,15 +206,17 @@ export function createOllamaAdapter({ config }) {
     assertOpen("unavailable");
     const { baseUrl, model } = resolveAccount(ctx.account);
     if (ctx.signal?.aborted) throw new AdapterError("cancelled", "Ollama run cancelled");
-    const turnText = String(ctx.prompt?.turnText ?? ctx.prompt?.text ?? "");
+    let prompt = ctx.prompt;
     const stateValid = ctx.sessionState == null || validSessionState(ctx.sessionState);
-    const stablePrefix = stateValid && ctx.sessionState
-      ? ctx.sessionState.stablePrefix
-      : (typeof ctx.prompt?.residentBlock === "string" ? ctx.prompt.residentBlock : null);
-    let history = stateValid && ctx.sessionState ? ctx.sessionState.history : [];
     if (!stateValid) {
       ctx.onActivity?.({ phase: "error", label: "session-reset", detail: "Ollama history state was invalid and has been reset" });
+      prompt = await ctx.recompileForNewSession?.({ reason: "invalid" }) ?? prompt;
     }
+    const turnText = String(prompt?.turnText ?? prompt?.text ?? "");
+    const stablePrefix = stateValid && ctx.sessionState
+      ? ctx.sessionState.stablePrefix
+      : (typeof prompt?.residentBlock === "string" ? prompt.residentBlock : null);
+    let history = stateValid && ctx.sessionState ? ctx.sessionState.history : [];
     history = trimHistory(history, stablePrefix, turnText, maxInputBytes);
     const persistedBeforeRun = { schemaVersion: 1, stablePrefix, history };
     await ctx.persistSessionState?.(persistedBeforeRun);
@@ -267,14 +269,14 @@ export function createOllamaAdapter({ config }) {
       buffer += decoder.decode();
       consume(buffer);
       if (!done || !content) throw new Error("incomplete_stream");
-      const historyUserText = typeof ctx.prompt?.historyUserText === "string" && ctx.prompt.historyUserText
-        ? ctx.prompt.historyUserText
-        : null;
+      const historyEnvelopeText = typeof prompt?.historyEnvelopeText === "string"
+        ? prompt.historyEnvelopeText
+        : (typeof prompt?.historyUserText === "string" ? prompt.historyUserText : null);
       const sessionState = {
         schemaVersion: 1,
         stablePrefix,
-        history: historyUserText
-          ? [...history, { role: "user", content: historyUserText }, { role: "assistant", content }]
+        history: historyEnvelopeText
+          ? [...history, { role: "user", content: historyEnvelopeText }, { role: "assistant", content }]
           : history,
       };
       return { content, sessionState };

@@ -253,13 +253,15 @@
 
 ### P5-M3 — 三渠道检索、注入预算、横向扩展与正文展开
 
-- [ ] **M3契约先行**：补齐retrieve/fetch_more/fetch_detail、游标、token预算、同session program-owned去重状态、使用统计、置顶、错误与必要SSE形状；冻结召回节点字段、查询相关性/图接近度/长期派生权重/单轮交汇置信度/类型适配五项归一化与权重、距离衰减、两阶段去重、粒度选择、query自适应type软配额、稳定tie-break和游标延续方式；不得污染adapter透明`sessionState`。
-- [ ] 常驻索引按 R3 批量换版，只在新外部 session 建立稳定前缀；用户置顶 + 按派生权重选出的top条目合计受 `memory.injectionBudgetResidentLines` 限制，普通编辑不逐条打穿 prompt cache。
-- [ ] 顺序固定为scope/status/session过滤 → 关键词/向量等宽召回取得出发节点 → 跨type开放图扩散并记录方向/路径/hop距离 → 按稳定slug归并命中以汇总路径与置信证据 → 五项加权基础分 → 按事实身份/语义簇做结果去重、合并独立方向置信并选择代表粒度 → query自适应、可借用的type软配额边际重排 → 尽量缩短为仍可独立理解的节点投影 → 按全局token预算截断。M4前长期派生权重贡献统一为不改变相对顺序的加法中性值0；结果在当前消息信封尾部追加，未装入项进入稳定cursor。索引/检索/日志都不携带 stain 或其自然语言含义。
-- [ ] 落地冻结后的 MCP `memory_search` / `memory_fetch_more`，并增强既有 `memory_fetch_detail`：search内部按冻结的最大hop、逐跳衰减和候选上限做有界图扩散，广度分页游标稳定、方向可复现；fetch_detail显式关联仍只返回一跳，深度按slug取权威文件并记录使用统计。所有adapter只消费同一MCP surface，不直接碰store/vault。
-- [ ] 明确物理顺序并做快照测试：adapter 的稳定 system/history 在 `promptText` 之外；本轮 `promptText` 为常驻索引稳定前缀 → 群聊 Message 声告 → 当前触发正文 → 本轮检索块（消息信封尾部）。Activity 永不因 Memory 接入而回流 prompt。
+- [x] **M3契约先行**：已补齐retrieve/fetch_more/fetch_detail、分支游标、token预算、同session program-owned去重sidecar、使用统计、置顶、安全错误与“M3不新增SSE”边界；冻结`m3-r1`的BM25 + char-trigram TF-IDF等宽召回、2-hop图扩散、五项精确权重、交汇函数、两阶段去重、两级投影、可借用软配额、稳定tie-break、`vera-utf8-v1`预算和服务端snapshot游标。透明adapter `sessionState`不携带去重/cursor/usage；provider会话失效经`recompileForNewSession`幂等换代。
+- [x] 常驻索引按 R3 批量换版，只在新外部 session 建立稳定前缀；用户置顶 + 按派生权重选出的top条目合计受 `memory.injectionBudgetResidentLines` 限制，普通编辑不逐条打穿 prompt cache。
+- [x] 顺序固定为scope/status/session过滤 → 关键词/向量等宽召回取得出发节点 → 跨type开放图扩散并记录方向/路径/hop距离 → 按稳定slug归并命中以汇总路径与置信证据 → 五项加权基础分 → 按事实身份/语义簇做结果去重、合并独立方向置信并选择代表粒度 → query自适应、可借用的type软配额边际重排 → 尽量缩短为仍可独立理解的节点投影 → 按全局token预算截断。M4前长期派生权重贡献统一为不改变相对顺序的加法中性值0；结果在当前消息信封尾部追加，未装入项进入稳定cursor。索引/检索/日志都不携带 stain 或其自然语言含义。
+- [x] 落地冻结后的 MCP `memory_search` / `memory_fetch_more`，并增强既有 `memory_fetch_detail`：search内部按冻结的最大hop、逐跳衰减和候选上限做有界图扩散，广度分页游标稳定、方向可复现；fetch_detail显式关联仍只返回一跳，深度按slug取权威文件并记录使用统计。所有adapter只消费同一MCP surface，不直接碰store/vault。
+- [x] 明确物理顺序并做快照测试：adapter 的稳定 system/history 在 `promptText` 之外；本轮 `promptText` 为常驻索引稳定前缀 → 群聊 Message 声告 → 当前触发正文 → 本轮检索块（消息信封尾部）。Activity 永不因 Memory 接入而回流 prompt。
 
 **M3 验收**：跨 Space 命中符合 D0 scope 决定，图扩散可跨type且直接语义命中不因无图路径被排除；同一节点由多个独立一级方向命中时只返回/计费一次、保留方向证据并获得有界交汇增益，同一方向的重复路径不刷分，跨slug近重复在基础评分后聚类且只合并独立方向，fetch_detail与SourceRef溯源不增加交汇；同 session 不重复注入。专门固定“当前需要5条彼此独立的规则类Memory、该类软目标为3”的夹具：总token预算容纳且其边际收益领先时必须返回5条，不能按type硬截；未知type取中性适配并进入默认软配额组。预算不足时先选更短但可独立理解的节点投影，再确定性截断并把剩余项放入稳定cursor；stain 在push、排序、日志和最终回复中均不可见，fetch_detail深读即使返回裸hex也不得解释/引用/参与判断；fetch_more游标不重不漏、fetch_detail返回权威正文；逐帧SSE仍正常且prompt cache稳定前缀不因单条记忆编辑变化。
+
+**M3当前验收（2026-07-14）**：三渠道retrieval facade、`m3-r1`排序、R3常驻索引、program-owned recall sidecar、24小时冻结cursor、usage/pin、MCP三工具、四段prompt顺序与三种provider失效换代均已接入。固定夹具已覆盖同Agent跨Space黑盒场景、跨type图扩散、超过32条一跳链接的cursor续页、并发跨渠道去重，以及普通编辑只在新外部session批量更新常驻前缀。普通`npm test`为198通过、2个真实provider smoke默认skip；`npm run analyze:web`通过，默认chat gzip 19432/204800。`verify.mjs`已新增3项M3临时gateway/SSE黑盒，当前执行在沙箱内被loopback权限拒绝，申请沙箱外执行又被Codex账户usage limit拒绝；因此代码与验收项已落盘，但本次不能把这3项登记为已实际跑过，待额度恢复后必须原命令补跑，不得以普通单测冒充黑盒通过。
 
 ### P5-M4 — 派生权重与 dream 维护
 

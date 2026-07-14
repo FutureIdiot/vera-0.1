@@ -108,21 +108,56 @@ test("chat uses non-interactive exec, persists thread id, resumes, and maps tool
 test("invalid state and explicit missing thread reset, while ordinary provider errors do not", async (t) => {
   const fake = await createFakeCodex(t);
   const adapter = createCodexAdapter({ config: { binary: fake.binary } });
-  const invalid = makeCtx(fake.binary, { sessionState: { broken: true } });
+  const invalidResetReasons = [];
+  const invalid = makeCtx(fake.binary, {
+    sessionState: { broken: true },
+    recompileForNewSession: async (reason) => {
+      invalidResetReasons.push(reason);
+      return { text: "FRESH INVALID CODEX PROMPT" };
+    },
+  });
   await adapter.run(invalid.ctx);
   assert.equal(invalid.activities[0].label, "session-reset");
+  assert.deepEqual(invalidResetReasons, [{ reason: "invalid" }]);
+  assert.equal((await fake.readInvocations())[0].input, "FRESH INVALID CODEX PROMPT");
 
-  const stale = makeCtx(fake.binary, { sessionState: { threadId: "stale-thread" } });
+  const resetOrder = [];
+  const stale = makeCtx(fake.binary, {
+    sessionState: { threadId: "stale-thread" },
+    recompileForNewSession: async (reason) => {
+      resetOrder.push({ type: "recompile", reason });
+      return { text: "FRESH CODEX PROMPT" };
+    },
+  });
+  stale.ctx.onActivity = (activity) => {
+    stale.activities.push(activity);
+    resetOrder.push({ type: "activity", label: activity.label });
+  };
   const result = await adapter.run(stale.ctx);
   assert.equal(result.content, "CODEX_CHAT_OK");
   assert.equal(stale.activities[0].label, "session-reset");
+  assert.deepEqual(resetOrder, [
+    { type: "activity", label: "session-reset" },
+    { type: "recompile", reason: { reason: "missing" } },
+  ]);
 
+  const callsAfterReset = await fake.readInvocations();
+  assert.ok(callsAfterReset[1].args.includes("resume"), "first stale attempt must resume the old thread");
+  assert.equal(callsAfterReset[2].args.includes("resume"), false, "fresh retry must not resume");
+  assert.equal(callsAfterReset[2].input, "FRESH CODEX PROMPT");
+
+  const ordinaryResetReasons = [];
   const failed = makeCtx(fake.binary, {
     account: account(fake.binary, { model: "fake-provider-error" }),
     sessionState: { threadId: "healthy-thread" },
+    recompileForNewSession: async (reason) => {
+      ordinaryResetReasons.push(reason);
+      return { text: "ordinary errors must not use this" };
+    },
   });
   await assert.rejects(() => adapter.run(failed.ctx), (error) => error.code === "provider_error" && !error.message.includes("secret"));
   assert.equal(failed.activities.length, 0);
+  assert.deepEqual(ordinaryResetReasons, []);
 });
 
 test("chat parses fragmented JSONL and uses output-file fallback without fake deltas", async (t) => {

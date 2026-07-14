@@ -37,6 +37,7 @@ export async function run(ctx) {
       "memory.digestSchedule",
       "memory.digestRealtimeThresholdChars",
       "memory.injectionBudgetResidentLines",
+      "memory.injectionBudgetRetrievalTokens",
       "presentation.bubbleBoundaryPattern",
       "presentation.bubbleMinLength",
       "presentation.bubbleMaxLength",
@@ -51,6 +52,7 @@ export async function run(ctx) {
     assertEqual(s["memory.digestSchedule"], "0 3 * * *");
     assertEqual(s["memory.digestRealtimeThresholdChars"], 16000);
     assertEqual(s["memory.injectionBudgetResidentLines"], 25);
+    assertEqual(s["memory.injectionBudgetRetrievalTokens"], 384);
     assertEqual(s["presentation.bubbleBoundaryPattern"], "\\n\\s*\\n");
     assertEqual(s["presentation.bubbleMinLength"], 1);
     assertEqual(s["presentation.bubbleMaxLength"], 800);
@@ -104,6 +106,12 @@ export async function run(ctx) {
     });
     assertEqual(fractionalThreshold.status, 400);
     assertEqual(fractionalThreshold.json.error.code, "invalid_request");
+
+    const oversizedRetrievalBudget = await httpRequest("PATCH", "/api/settings", {
+      settings: { "memory.injectionBudgetRetrievalTokens": 4097 },
+    });
+    assertEqual(oversizedRetrievalBudget.status, 400);
+    assertEqual(oversizedRetrievalBudget.json.error.code, "invalid_request");
 
     const badCron = await httpRequest("PATCH", "/api/settings", {
       settings: { "memory.digestSchedule": "61 3 * * *" },
