@@ -8,6 +8,10 @@ export const STATUS_BY_CODE = {
   memory_cursor_invalid: 400,
   memory_cursor_expired: 410,
   memory_retrieval_unavailable: 503,
+  memory_job_active: 409,
+  memory_task_unavailable: 409,
+  memory_provider_unsupported: 422,
+  memory_provider_unavailable: 503,
   adapter_unavailable: 502,
   internal: 500,
 };

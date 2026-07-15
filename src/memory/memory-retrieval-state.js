@@ -127,9 +127,15 @@ export function createMemoryRetrievalState({ store, now }) {
     const value = { id, agentId, slug, pinned, pinnedAt: pinned ? now() : null, updatedAt: now() };
     return stripInternal(existing ? store.update(SIGNAL_COLLECTION, id, value) : store.insert(SIGNAL_COLLECTION, value));
   }
+  function recordUserEdit(agentId, slug) {
+    const id = `edit:${agentId}:${slug}`;
+    const existing = store.find(SIGNAL_COLLECTION, id);
+    const value = { id, agentId, slug, kind: "user_edited", createdAt: now() };
+    return stripInternal(existing ? store.update(SIGNAL_COLLECTION, id, value) : store.insert(SIGNAL_COLLECTION, value));
+  }
   return {
     ensureSession, resetSession, findSession, saveCursor, cacheCursor, selectCursor,
-    addUsage, addDelivered, hasUsage, getPin, setPinned,
+    addUsage, addDelivered, hasUsage, getPin, setPinned, recordUserEdit,
     withCursorLock: (cursorId, task) => withLock(`cursor:${cursorId}`, task),
     withSessionLock: (sessionId, task) => withLock(`session:${sessionId}`, task),
     listSignals: () => store.list(SIGNAL_COLLECTION).map(stripInternal),

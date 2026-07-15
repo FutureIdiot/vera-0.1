@@ -3,8 +3,9 @@
 import { asHandler, readJsonBody, sendJson, sendNoContent } from "../api/http.js";
 import { listAgents, createAgent, updateAgent, deleteAgent } from "./agents.js";
 import { listAccounts, createAccount, updateAccount, deleteAccount } from "./accounts.js";
+import { listUnitBindings, updateUnitBinding } from "./unit-bindings.js";
 
-export function registerAgentRoutes(router, { store, agentStates }) {
+export function registerAgentRoutes(router, { store, agentStates, memoryConfigService = null }) {
   router.get(
     "/api/agents",
     asHandler(async ({ res }) => {
@@ -18,7 +19,24 @@ export function registerAgentRoutes(router, { store, agentStates }) {
       const body = await readJsonBody(req);
       const { agent, account } = createAgent(store, body);
       agentStates.ensure(agent.id);
+      memoryConfigService?.ensureAgentConfig(agent.id);
       sendJson(res, 201, { agent, account });
+    }),
+  );
+
+  router.get(
+    "/api/agents/:id/unit-bindings",
+    asHandler(async ({ res, params, query }) => {
+      sendJson(res, 200, { bindings: listUnitBindings(store, params.id, { kind: query.get("kind") }) });
+    }),
+  );
+
+  router.patch(
+    "/api/agents/:id/unit-bindings/:unitId",
+    asHandler(async ({ req, res, params }) => {
+      const body = await readJsonBody(req);
+      const binding = updateUnitBinding(store, params.id, params.unitId, body);
+      sendJson(res, 200, { binding });
     }),
   );
 

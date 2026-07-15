@@ -5,9 +5,10 @@ import { randomUUID } from "node:crypto";
 import { ApiError } from "../core/errors.js";
 import {
   estimateMemoryTokens,
-  M3_PIPELINE_VERSION,
+  MEMORY_PIPELINE_VERSION,
   rankMemoryCandidates,
 } from "./memory-retrieval-ranking.js";
+import { calculateMemoryDerivedWeights } from "./memory-derived-weight.js";
 import { extractMemoryLinks } from "./memory-retrieval-text.js";
 import { createMemoryRetrievalState } from "./memory-retrieval-state.js";
 
@@ -59,15 +60,16 @@ function validQuery(query) {
 }
 
 export function createMemoryRetrievalService({
-  store, memory, config = {}, now = () => new Date().toISOString(),
+  store, memory, config = {}, isRecallEnabled = () => true, now = () => new Date().toISOString(),
 } = {}) {
   if (!store || !memory) throw new Error("createMemoryRetrievalService requires store and memory");
   let residentIndexMaxLines = config.residentIndexMaxLines ?? 25;
   let injectionTokenBudget = config.injectionTokenBudget ?? config.retrievalTokenBudget ?? 384;
+  const derivedWeightSeed = config.derivedWeightSeed ?? "vera-m4-v1";
   const state = createMemoryRetrievalState({ store, now });
   const {
     ensureSession, resetSession, findSession, saveCursor, cacheCursor, selectCursor,
-    addUsage, addDelivered, hasUsage, getPin, setPinned,
+    addUsage, addDelivered, hasUsage, getPin, setPinned, recordUserEdit,
   } = state;
   function factIds(agentId) {
     const result = {};
@@ -98,19 +100,26 @@ export function createMemoryRetrievalService({
     }
     return { nodes, usedTokens, remaining: items.slice(nodes.length) };
   }
-  async function searchLocked({ context, query, tokenBudget, kind = "search_returned", reservedTokens = 0, maximumBudget = MAX_PAGE_BUDGET }) {
+  async function searchLocked({ context, query, tokenBudget, kind = "search_returned", reservedTokens = 0, maximumBudget = MAX_PAGE_BUDGET, explorationSeed = undefined }) {
     const session = findSession(context);
     validQuery(query);
     const budget = pageBudget(tokenBudget, MCP_DEFAULT_BUDGET, maximumBudget);
     const { memories, generation } = await activeMemories(context.agentId);
     const delivered = new Set(session.deliveredSlugs ?? []);
     const eligible = memories.filter((item) => !delivered.has(item.slug));
-    const ranked = rankMemoryCandidates({ query, memories: eligible, factIdsBySlug: factIds(context.agentId), tokenBudget: MAX_PAGE_BUDGET });
+    const derivedWeightsBySlug = calculateMemoryDerivedWeights({
+      agentId: context.agentId, memories, signals: state.listSignals(), now: now(),
+    });
+    const ranked = rankMemoryCandidates({
+      query, memories: eligible, factIdsBySlug: factIds(context.agentId), derivedWeightsBySlug,
+      explorationSeed: explorationSeed ?? derivedWeightSeed,
+      tokenBudget: MAX_PAGE_BUDGET,
+    });
     const frozen = ranked.orderedCandidates.map(frozenNode);
     const page = pack(frozen, Math.max(0, budget - reservedTokens));
     const retrievalId = opaque("mrt");
     const cursor = page.remaining.length ? saveCursor(session, {
-      retrievalId, pipelineVersion: M3_PIPELINE_VERSION, indexGeneration: generation,
+      retrievalId, pipelineVersion: MEMORY_PIPELINE_VERSION, indexGeneration: generation,
       direction: null, items: page.remaining, directions: ranked.directions, cached: null,
     }) : null;
     const response = {
@@ -128,6 +137,9 @@ export function createMemoryRetrievalService({
     return state.withSessionLock(session.id, () => searchLocked(args));
   }
   async function searchForInjectionLocked({ context, query }) {
+    if (!isRecallEnabled(context.agentId)) {
+      return { block: null, response: { retrievalId: null, nodes: [], cursor: null, directions: [], budget: { estimator: "vera-utf8-v1", limitTokens: 0, usedTokens: 0, omittedCount: 0, minimumNextNodeTokens: 0 }, degradedChannels: [] } };
+    }
     if (!Number.isInteger(injectionTokenBudget) || injectionTokenBudget < MIN_PAGE_BUDGET) {
       return { block: null, response: { retrievalId: null, nodes: [], cursor: null, directions: [], budget: { estimator: "vera-utf8-v1", limitTokens: Math.max(0, injectionTokenBudget), usedTokens: 0, omittedCount: 0, minimumNextNodeTokens: 0 }, degradedChannels: [] } };
     }
@@ -220,7 +232,7 @@ export function createMemoryRetrievalService({
       });
     });
     const linksCursor = remaining.length ? saveCursor(session, {
-      retrievalId: opaque("mrt"), pipelineVersion: M3_PIPELINE_VERSION,
+      retrievalId: opaque("mrt"), pipelineVersion: MEMORY_PIPELINE_VERSION,
       indexGeneration: null, direction: "all", items: remaining, directions: [], cached: null,
     }) : null;
     const prior = hasUsage(context.memorySessionId, slug, "detail_opened");
@@ -234,15 +246,23 @@ export function createMemoryRetrievalService({
     return state.withSessionLock(session.id, () => fetchDetailLocked(args));
   }
   async function residentItems(agentId) {
-    const result = await memory.listWithDiagnostics(agentId);
-    const active = result.memories.filter((item) => item.status === "active");
+    const { memories: active } = await activeMemories(agentId);
     const pins = new Map(active.map((item) => [item.slug, getPin(agentId, item.slug)]));
-    active.sort((a, b) => Number(pins.get(b.slug).pinned) - Number(pins.get(a.slug).pinned) ||
-      (pins.get(a.slug).pinned ? String(pins.get(a.slug).pinnedAt).localeCompare(String(pins.get(b.slug).pinnedAt)) : 0) ||
-      a.slug.localeCompare(b.slug));
+    const derivedWeights = calculateMemoryDerivedWeights({
+      agentId, memories: active, signals: state.listSignals(), now: now(),
+    });
+    active.sort((a, b) => {
+      const aPin = pins.get(a.slug), bPin = pins.get(b.slug);
+      if (aPin.pinned !== bPin.pinned) return Number(bPin.pinned) - Number(aPin.pinned);
+      if (aPin.pinned) {
+        return String(aPin.pinnedAt).localeCompare(String(bPin.pinnedAt)) || a.slug.localeCompare(b.slug);
+      }
+      return (derivedWeights.get(b.slug) ?? 0) - (derivedWeights.get(a.slug) ?? 0) || a.slug.localeCompare(b.slug);
+    });
     return active.slice(0, Math.max(0, residentIndexMaxLines));
   }
   async function residentIndex(agentId) {
+    if (!isRecallEnabled(agentId)) return null;
     const selected = await residentItems(agentId);
     if (!selected.length) return null;
     return ["Vera 记忆库常驻索引：", "相关时调用 Vera Memory MCP 的 memory_fetch_detail 展开 [[slug]] 查看详情。",
@@ -250,7 +270,7 @@ export function createMemoryRetrievalService({
   }
   return {
     ensureSession, resetSession, residentIndex, search, searchForInjection, fetchMore, fetchDetail,
-    getPin, setPinned, listSignals: state.listSignals,
+    getPin, setPinned, recordUserEdit, listSignals: state.listSignals,
     setResidentIndexMaxLines: (value) => { residentIndexMaxLines = value; },
     setInjectionTokenBudget: (value) => { injectionTokenBudget = value; },
   };

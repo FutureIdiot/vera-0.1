@@ -33,9 +33,6 @@ export async function run(ctx) {
       "isolation.memory",
       "isolation.files",
       "isolation.agentState",
-      "memory.digestTrigger",
-      "memory.digestSchedule",
-      "memory.digestRealtimeThresholdChars",
       "memory.injectionBudgetResidentLines",
       "memory.injectionBudgetRetrievalTokens",
       "presentation.bubbleBoundaryPattern",
@@ -48,9 +45,9 @@ export async function run(ctx) {
     assertEqual(s["isolation.memory"], "isolated");
     assertEqual(s["isolation.files"], "isolated");
     assertEqual(s["isolation.agentState"], "globalVisible");
-    assertEqual(s["memory.digestTrigger"], "scheduled");
-    assertEqual(s["memory.digestSchedule"], "0 3 * * *");
-    assertEqual(s["memory.digestRealtimeThresholdChars"], 16000);
+    for (const retired of ["memory.digestTrigger", "memory.digestSchedule", "memory.digestRealtimeThresholdChars"]) {
+      assert(!Object.prototype.hasOwnProperty.call(s, retired), `${retired} must move to per-Agent Memory config`);
+    }
     assertEqual(s["memory.injectionBudgetResidentLines"], 25);
     assertEqual(s["memory.injectionBudgetRetrievalTokens"], 384);
     assertEqual(s["presentation.bubbleBoundaryPattern"], "\\n\\s*\\n");
@@ -129,7 +126,7 @@ export async function run(ctx) {
     assertEqual(get.json.settings["isolation.memory"], "isolated");
   });
 
-  await check("n.4 旧 isolation.memory override 迁移为固定 isolated，重启幂等", async () => {
+  await check("n.4 旧 isolation.memory 与全局 Digest override 被移除，重启幂等", async () => {
     const migDir = await mkdtemp(join(tmpdir(), "vera-settings-persist-"));
     const settingsPath = join(migDir, "settings.json");
     await writeFile(settingsPath, JSON.stringify({
@@ -158,22 +155,22 @@ export async function run(ctx) {
       const migrated = await httpRequest("GET", "/api/settings", undefined, migPort1);
       assertEqual(migrated.status, 200);
       assertEqual(migrated.json.settings["isolation.memory"], "isolated");
-      assertEqual(migrated.json.settings["memory.digestTrigger"], "realtime");
+      assertEqual(migrated.json.settings["memory.digestTrigger"], undefined);
 
       const patchResp = await httpRequest(
         "PATCH",
         "/api/settings",
-        { settings: { "memory.digestTrigger": "manual", "presentation.bubbleMaxLength": 1200 } },
+        { settings: { "presentation.bubbleMaxLength": 1200 } },
         migPort1,
       );
       assertEqual(patchResp.status, 200);
-      assertEqual(patchResp.json.settings["memory.digestTrigger"], "manual");
+      assertEqual(patchResp.json.settings["memory.digestTrigger"], undefined);
       assertEqual(patchResp.json.settings["presentation.bubbleMaxLength"], 1200);
 
       await killChild(child1);
       const afterFirstStart = JSON.parse(await readFile(settingsPath, "utf8"));
       assert(!Object.prototype.hasOwnProperty.call(afterFirstStart, "isolation.memory"), "legacy memory isolation override should be removed");
-      assertEqual(afterFirstStart["memory.digestTrigger"], "manual");
+      assert(!Object.prototype.hasOwnProperty.call(afterFirstStart, "memory.digestTrigger"), "legacy global Digest override should be removed");
 
       const migPort2 = await getFreePort();
       const child2 = spawn(process.execPath, [join(repoRoot, "src/server.js")], {
@@ -196,7 +193,7 @@ export async function run(ctx) {
 
         const get = await httpRequest("GET", "/api/settings", undefined, migPort2);
         assertEqual(get.status, 200);
-        assertEqual(get.json.settings["memory.digestTrigger"], "manual");
+        assertEqual(get.json.settings["memory.digestTrigger"], undefined);
         assertEqual(get.json.settings["presentation.bubbleMaxLength"], 1200);
         assertEqual(get.json.settings["isolation.memory"], "isolated");
       } finally {
@@ -204,7 +201,7 @@ export async function run(ctx) {
       }
       const afterSecondStart = JSON.parse(await readFile(settingsPath, "utf8"));
       assert(!Object.prototype.hasOwnProperty.call(afterSecondStart, "isolation.memory"), "restart must not recreate memory isolation override");
-      assertEqual(afterSecondStart["memory.digestTrigger"], "manual");
+      assert(!Object.prototype.hasOwnProperty.call(afterSecondStart, "memory.digestTrigger"), "restart must not recreate global Digest override");
     } finally {
       await rm(migDir, { recursive: true, force: true });
     }

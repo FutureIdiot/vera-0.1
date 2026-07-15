@@ -14,12 +14,15 @@ import {
   MEMORY_DIGEST_SYSTEM_PROMPT,
   parseMemoryDigestEnvelope,
 } from "../memory/memory-digest-prompt.js";
+import { buildMemoryDreamPrompt, MEMORY_DREAM_SYSTEM_PROMPT } from "../memory/memory-dream-prompt.js";
 
 const ACTION_FALLBACK = ["create", "update", "archive", "supersede", "skip"];
 const SKIP_FALLBACK = ["no_reusable_fact", "unsupported_inference", "ambiguous_match", "duplicate_in_job"];
 const OLLAMA_DIGEST_SYSTEM_PROMPT = `${MEMORY_DIGEST_SYSTEM_PROMPT}
 Ollama's compatible transport schema uses one flat shape for every action. Fill action-irrelevant string fields with an empty string; they are removed deterministically before Vera's full proposal validator runs.
 For update, supersede, or archive, choose exactly one transport target. If the matching catalog entry has a non-empty factId, copy it to targetFactId and set targetMemorySlug to an empty string. Only when the matching catalog entry is unmapped with factId=null may you copy its slug to targetMemorySlug and set targetFactId to an empty string. Never fill both target fields.`;
+const OLLAMA_DREAM_SYSTEM_PROMPT = `${MEMORY_DREAM_SYSTEM_PROMPT}
+Ollama's compatible transport schema uses one flat shape for every action. Fill action-irrelevant strings, arrays, and objects with empty values; the adapter removes only those empty placeholders before Vera's authoritative validator runs.`;
 
 function inputByteLength(value) {
   return Buffer.byteLength(String(value ?? ""), "utf8");
@@ -116,11 +119,11 @@ function normalizeOllamaDigestProposals(proposals) {
   });
 }
 
-function resolveAccount(account) {
+function resolveAccount(account, taskModel = null) {
   if (account?.kind !== "api" || account?.provider !== "ollama") {
     throw new AdapterError("unavailable", "Ollama adapter Account kind/provider mismatch");
   }
-  const model = String(account.model ?? "").trim();
+  const model = String(taskModel ?? account.model ?? "").trim();
   if (!model) throw new AdapterError("unavailable", "Ollama Account model is unavailable");
   if (account.connection?.secretRef != null) {
     throw new AdapterError("unavailable", "Ollama Account secret resolution is unavailable");
@@ -193,6 +196,7 @@ export function createOllamaAdapter({ config }) {
   const {
     watchdogMs = 30 * 60 * 1000,
     digestTimeoutMs = 5 * 60 * 1000,
+    dreamTimeoutMs = 10 * 60 * 1000,
     numCtx = 16384,
     maxInputBytes = 12000,
   } = config ?? {};
@@ -291,10 +295,10 @@ export function createOllamaAdapter({ config }) {
     }
   }
 
-  async function digestMemory({ account, payload, signal }) {
+  async function digestMemory({ account, taskModel, payload, signal }) {
     assertOpen("executor_unavailable");
     let resolved;
-    try { resolved = resolveAccount(account); } catch { throw new AdapterError("executor_unavailable", "Ollama memory digest executor is unavailable"); }
+    try { resolved = resolveAccount(account, taskModel); } catch { throw new AdapterError("executor_unavailable", "Ollama memory digest executor is unavailable"); }
     if (signal?.aborted) throw new AdapterError("cancelled", "Ollama memory digest cancelled");
     const prompt = buildMemoryDigestPrompt(payload);
     if (inputByteLength(OLLAMA_DIGEST_SYSTEM_PROMPT) + inputByteLength(prompt) > maxInputBytes) {
@@ -346,9 +350,72 @@ export function createOllamaAdapter({ config }) {
     }
   }
 
+  function projectOllamaDreamSchema(source) {
+    if (!source || source.type !== "object" || !source.properties?.proposals) throw new AdapterError("executor_unavailable", "Ollama memory Dream schema is unavailable");
+    return {
+      type: "object", additionalProperties: false, required: ["proposals"],
+      properties: { proposals: { type: "array", maxItems: 64, items: {
+        type: "object", additionalProperties: false,
+        required: ["action", "targetSlug", "targetVersion", "sourceSlugs", "sourceVersions", "type", "description", "content", "replacementSlug"],
+        properties: {
+          action: { type: "string", enum: ["keep", "update", "merge", "archive"] },
+          targetSlug: { type: "string" }, targetVersion: { type: "string" },
+          sourceSlugs: { type: "array", items: { type: "string" } },
+          sourceVersions: { type: "object" }, type: { type: "string" },
+          description: { type: "string" }, content: { type: "string" }, replacementSlug: { type: "string" },
+        },
+      } } },
+    };
+  }
+
+  function normalizeOllamaDreamProposals(proposals) {
+    if (!Array.isArray(proposals)) return proposals;
+    return proposals.map((proposal) => {
+      const base = { action: proposal?.action, targetSlug: proposal?.targetSlug, targetVersion: proposal?.targetVersion };
+      if (proposal?.action === "keep") return base;
+      if (proposal?.action === "archive") return { ...base, ...(proposal.replacementSlug ? { replacementSlug: proposal.replacementSlug } : {}) };
+      if (proposal?.action === "merge") return { ...base, sourceSlugs: proposal.sourceSlugs, sourceVersions: proposal.sourceVersions, type: proposal.type, description: proposal.description, content: proposal.content };
+      return { ...base, ...(proposal?.type ? { type: proposal.type } : {}), ...(proposal?.description ? { description: proposal.description } : {}), ...(proposal?.content ? { content: proposal.content } : {}) };
+    });
+  }
+
+  async function dreamMemory({ account, taskModel, payload, signal }) {
+    assertOpen("executor_unavailable");
+    let resolved;
+    try { resolved = resolveAccount(account, taskModel); } catch { throw new AdapterError("executor_unavailable", "Ollama memory Dream executor is unavailable"); }
+    if (signal?.aborted) throw new AdapterError("cancelled", "Ollama memory Dream cancelled");
+    const prompt = buildMemoryDreamPrompt(payload);
+    if (inputByteLength(OLLAMA_DREAM_SYSTEM_PROMPT) + inputByteLength(prompt) > maxInputBytes) throw new AdapterError("executor_failed", "Ollama memory Dream input exceeds the configured capacity");
+    const control = requestControl(signal, dreamTimeoutMs, shutdownController.signal);
+    let response;
+    try {
+      response = await fetch(`${resolved.baseUrl}/api/chat`, {
+        method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          model: resolved.model, stream: false, think: false,
+          messages: [{ role: "system", content: OLLAMA_DREAM_SYSTEM_PROMPT }, { role: "user", content: prompt }],
+          format: projectOllamaDreamSchema(payload?.proposalSchema),
+          options: { num_ctx: numCtx, temperature: 0 },
+        }),
+        signal: control.signal,
+      });
+      if (!response.ok) throw new Error("provider_error");
+      const body = await parseJsonResponse(response);
+      if (Array.isArray(body?.message?.tool_calls) && body.message.tool_calls.length) throw new Error("provider_error");
+      const envelope = parseMemoryDigestEnvelope(body?.message?.content);
+      return { proposals: normalizeOllamaDreamProposals(envelope.proposals), execution: { adapter: "ollama", primaryModel: resolved.model, effectiveModel: resolved.model, fallbackUsed: false, fallbackReason: null, attempts: 1 } };
+    } catch (error) {
+      if (signal?.aborted) throw new AdapterError("cancelled", "Ollama memory Dream cancelled");
+      if (control.timedOut()) throw new AdapterError("timed_out", "Ollama memory Dream timed out");
+      if (shutdownController.signal.aborted) throw new AdapterError("cancelled", "Ollama memory Dream cancelled during shutdown");
+      if (!response) throw new AdapterError("executor_unavailable", "Ollama memory Dream executor is unavailable");
+      throw new AdapterError("executor_failed", "Ollama memory Dream executor failed");
+    } finally { control.clear(); }
+  }
+
   async function shutdown() {
     if (!shutdownController.signal.aborted) shutdownController.abort();
   }
 
-  return { run, digestMemory, shutdown };
+  return { run, digestMemory, dreamMemory, shutdown };
 }

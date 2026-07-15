@@ -67,7 +67,7 @@ function makeCtx(baseUrl, overrides = {}) {
 }
 
 function digestInput(baseUrl, overrides = {}) {
-  return {
+  const input = {
     account: account(baseUrl),
     payload: {
       agent: { id: "agt_ollama", name: "Gemma" },
@@ -78,6 +78,8 @@ function digestInput(baseUrl, overrides = {}) {
     signal: new AbortController().signal,
     ...overrides,
   };
+  if (!Object.hasOwn(overrides, "taskModel")) input.taskModel = input.account.model;
+  return input;
 }
 
 function schemaHasKey(value, forbidden) {

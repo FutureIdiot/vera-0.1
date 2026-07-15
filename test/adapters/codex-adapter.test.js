@@ -36,7 +36,7 @@ function makeCtx(command, overrides = {}) {
 }
 
 function digestInput(command, overrides = {}) {
-  return {
+  const input = {
     account: account(command, { model: "fake-proposal" }),
     payload: {
       agent: { id: "agt_codex", name: "Codex" },
@@ -46,6 +46,8 @@ function digestInput(command, overrides = {}) {
     signal: new AbortController().signal,
     ...overrides,
   };
+  if (!Object.hasOwn(overrides, "taskModel")) input.taskModel = input.account.model;
+  return input;
 }
 
 function hasForbiddenSchemaKey(value) {

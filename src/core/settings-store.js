@@ -30,10 +30,7 @@ const ALLOWED_KEYS = {
   "isolation.memory": { type: "enum", values: ["isolated"] },
   "isolation.files": { type: "enum", values: ["isolated", "specifiedShared", "globalReadable"] },
   "isolation.agentState": { type: "enum", values: ["isolated", "globalVisible"] },
-  // 记忆整理（ground truth 4.1「记忆整理」：触发时机 + 注入预算）
-  "memory.digestTrigger": { type: "enum", values: ["scheduled", "realtime", "manual"] },
-  "memory.digestSchedule": { type: "string" },
-  "memory.digestRealtimeThresholdChars": { type: "number", exclusiveMin: 0, integer: true },
+  // Memory注入预算仍是gateway全局配置；Digest触发已迁移为per-Agent配置。
   "memory.injectionBudgetResidentLines": { type: "number", min: 0 },
   "memory.injectionBudgetRetrievalTokens": { type: "number", min: 0, max: 4096, integer: true },
   // 消息呈现（ground truth 4.1「消息呈现」：气泡切分规则）
@@ -77,9 +74,6 @@ function deriveDefaults(config) {
     "isolation.memory": "isolated",
     "isolation.files": "isolated",
     "isolation.agentState": "globalVisible",
-    "memory.digestTrigger": "scheduled",
-    "memory.digestSchedule": "0 3 * * *",
-    "memory.digestRealtimeThresholdChars": config.memory.digestRealtimeThresholdChars,
     "memory.injectionBudgetResidentLines": config.memory.residentIndexMaxLines,
     "memory.injectionBudgetRetrievalTokens": config.memory.retrievalTokenBudget,
     "presentation.bubbleBoundaryPattern": config.bubbles.boundaryPattern,
@@ -113,7 +107,13 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
 
   const filePath = join(dataPath, "settings.json");
   const defaults = deriveDefaults(config);
+  const legacyDefaults = {
+    digestTrigger: "scheduled",
+    digestSchedule: "0 3 * * *",
+    digestRealtimeThresholdChars: config.memory.digestRealtimeThresholdChars,
+  };
   let overrides = {};
+  let legacyDigestTemplate = { ...legacyDefaults };
   let writeTimer = null;
   let dirty = false;
   let flushing = null;
@@ -137,6 +137,20 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
 
   async function load() {
     const parsed = await readFromDisk();
+    dirty = false;
+    legacyDigestTemplate = { ...legacyDefaults };
+    if (["scheduled", "realtime", "manual"].includes(parsed["memory.digestTrigger"])) {
+      legacyDigestTemplate.digestTrigger = parsed["memory.digestTrigger"];
+    }
+    if (typeof parsed["memory.digestSchedule"] === "string") {
+      try {
+        parseFiveFieldCron(parsed["memory.digestSchedule"]);
+        legacyDigestTemplate.digestSchedule = parsed["memory.digestSchedule"];
+      } catch {}
+    }
+    if (Number.isInteger(parsed["memory.digestRealtimeThresholdChars"]) && parsed["memory.digestRealtimeThresholdChars"] > 0) {
+      legacyDigestTemplate.digestRealtimeThresholdChars = parsed["memory.digestRealtimeThresholdChars"];
+    }
     // 只认白名单 key，磁盘被人塞脏数据不进内存
     overrides = {};
     for (const key of Object.keys(ALLOWED_KEYS)) {
@@ -171,6 +185,18 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
       merged[key] = Object.prototype.hasOwnProperty.call(overrides, key) ? overrides[key] : defaults[key];
     }
     return merged;
+  }
+
+  function getLegacyMemoryDigestTemplate() {
+    return structuredClone(legacyDigestTemplate);
+  }
+
+  async function clearLegacyMemoryDigestSettings() {
+    // Rewriting the current override whitelist removes the three retired keys
+    // and any other unknown disk fields. The in-memory template remains
+    // available for diagnostics during this process lifetime only.
+    dirty = true;
+    await flush();
   }
 
   function validatePatch(patch) {
@@ -208,12 +234,6 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
       } else if (spec.type === "string") {
         if (typeof value !== "string") {
           throw new ApiError("invalid_request", `${key} must be a string`);
-        }
-        if (key === "memory.digestSchedule") {
-          try { parseFiveFieldCron(value); }
-          catch {
-            throw new ApiError("invalid_request", "memory.digestSchedule must be a valid five-field cron expression");
-          }
         }
       }
     }
@@ -286,5 +306,9 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
 
   await load();
 
-  return { load, get, getAll, setAll, flush, close };
+  return {
+    load, get, getAll, setAll, flush, close,
+    getLegacyMemoryDigestTemplate,
+    clearLegacyMemoryDigestSettings,
+  };
 }

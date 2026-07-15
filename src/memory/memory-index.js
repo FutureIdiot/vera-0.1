@@ -11,6 +11,32 @@ function indexPath(root, agentId) {
   return join(root, ".vera-index", `${agentId}.json`);
 }
 
+function batchPath(root, agentId) {
+  return join(root, ".vera-index", `${agentId}.batch.json`);
+}
+
+export async function hasMemoryBatchMarker(root, agentId) {
+  try { await readFile(batchPath(root, agentId), "utf8"); return true; }
+  catch (error) { if (error.code === "ENOENT") return false; throw error; }
+}
+
+export async function writeMemoryBatchMarker(root, agentId) {
+  const target = batchPath(root, agentId);
+  await mkdir(dirname(target), { recursive: true });
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  await open(temporary, "wx", 0o600).then(async (handle) => {
+    try { await handle.writeFile(`${JSON.stringify({ agentId, state: "applying" })}\n`, "utf8"); await handle.sync(); }
+    finally { await handle.close(); }
+  });
+  await rename(temporary, target);
+  await syncDirectory(dirname(target));
+}
+
+export async function removeMemoryBatchMarker(root, agentId) {
+  try { await unlink(batchPath(root, agentId)); await syncDirectory(join(root, ".vera-index")); }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
+}
+
 export async function readMemoryIndex(root, agentId) {
   try {
     const parsed = JSON.parse(await readFile(indexPath(root, agentId), "utf8"));

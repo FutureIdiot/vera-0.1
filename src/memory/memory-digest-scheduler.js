@@ -1,43 +1,29 @@
-// M2 automatic digest trigger coordinator. It owns only trigger timing and the
-// realtime Unicode-character watermark calculation; digestService remains the
-// single job creation/pipeline facade. Manual submissions bypass this module.
+// Per-Agent M4 Write Hook coordinator. Automatic timing reads only the
+// per-Agent Data -> Memory config; manual Digest bypasses this module.
 
 import { cronMatches, parseFiveFieldCron } from "../core/cron.js";
+import { dreamScheduleMatches, nextDreamRunAt } from "./memory-dream-scheduler.js";
 
 export { cronMatches, parseFiveFieldCron } from "../core/cron.js";
 
 const MINUTE_MS = 60_000;
-
-function readSettings(settingsStore, supplied) {
-  return supplied ?? settingsStore?.getAll?.() ?? {};
-}
-
-function unicodeLength(value) {
-  return typeof value === "string" ? Array.from(value).length : 0;
-}
-
-function pairKey(agentId, spaceId) {
-  return `${agentId}\u0000${spaceId}`;
-}
+const unicodeLength = (value) => typeof value === "string" ? Array.from(value).length : 0;
+const pairKey = (agentId, spaceId) => `${agentId}\0${spaceId}`;
 
 function completedMessages(store, spaceId) {
-  return store.list("messages")
-    .filter((message) => message.spaceId === spaceId && message.status === "completed")
-    .sort((a, b) => a._seq - b._seq);
+  return store.list("messages").filter((message) => message.spaceId === spaceId && message.status === "completed").sort((a, b) => a._seq - b._seq);
 }
-
-function automaticPairs(store, onlySpaceId) {
+function automaticPairs(store, onlySpaceId, onlyAgentId) {
   const pairs = new Map();
   for (const space of store.list("spaces")) {
     if (onlySpaceId && space.id !== onlySpaceId) continue;
     for (const seat of space.seats ?? []) {
-      if (!seat?.agentId) continue;
+      if (!seat?.agentId || (onlyAgentId && seat.agentId !== onlyAgentId)) continue;
       pairs.set(pairKey(seat.agentId, space.id), { agentId: seat.agentId, spaceId: space.id });
     }
   }
   return [...pairs.values()];
 }
-
 function lastSuccessfulWatermarkSeq(store, agentId, spaceId) {
   let watermark = -Infinity;
   for (const job of store.list("memoryDigestJobs")) {
@@ -50,36 +36,27 @@ function lastSuccessfulWatermarkSeq(store, agentId, spaceId) {
 }
 
 export function createMemoryDigestScheduler({
-  store,
-  digestService,
-  settingsStore,
-  clock = { now: () => new Date() },
-  setTimeoutFn = setTimeout,
-  clearTimeoutFn = clearTimeout,
+  store, digestService, configService = null, settingsStore = null,
+  isWriteEnabled = () => true,
+  clock = { now: () => new Date() }, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout,
   logger = console,
 } = {}) {
-  if (!store || !digestService?.enqueueIncremental) {
-    throw new Error("createMemoryDigestScheduler requires store and digestService.enqueueIncremental");
-  }
-
-  let settings = {};
-  let cron = null;
+  if (!store || !digestService?.enqueueIncremental) throw new Error("createMemoryDigestScheduler requires store and digestService.enqueueIncremental");
+  let legacySettings = settingsStore?.getAll?.() ?? {};
   let timer = null;
   let started = false;
   let closed = false;
   let lastTickMinute = null;
 
-  function report(error) {
-    logger?.error?.("memory digest automatic trigger failed", {
-      code: typeof error?.code === "string" ? error.code : "internal",
-    });
+  function triggerFor(agentId) {
+    if (configService) return configService.getConfig(agentId).config.digest.trigger;
+    const mode = legacySettings["memory.digestTrigger"] ?? "manual";
+    if (mode === "realtime") return { mode, thresholdChars: legacySettings["memory.digestRealtimeThresholdChars"] };
+    if (mode === "scheduled") return { mode, cron: legacySettings["memory.digestSchedule"], timezone: "UTC" };
+    return { mode: "manual" };
   }
-
-  function enqueue(input) {
-    Promise.resolve()
-      .then(() => digestService.enqueueIncremental(input))
-      .catch(report);
-  }
+  function report(error) { logger?.error?.("memory digest automatic trigger failed", { code: typeof error?.code === "string" ? error.code : "internal" }); }
+  function enqueue(input) { Promise.resolve().then(() => digestService.enqueueIncremental(input)).catch(report); }
 
   function pendingWindow(agentId, spaceId) {
     if (typeof digestService.getIncrementalWindow === "function") {
@@ -89,89 +66,84 @@ export function createMemoryDigestScheduler({
     }
     const watermark = lastSuccessfulWatermarkSeq(store, agentId, spaceId);
     const messages = completedMessages(store, spaceId).filter((message) => message._seq > watermark);
-    return {
-      messages,
-      charCount: messages.reduce((sum, message) => sum + unicodeLength(message.content), 0),
-    };
+    return { messages, charCount: messages.reduce((sum, message) => sum + unicodeLength(message.content), 0) };
   }
-
-  function enqueueScheduledCatchUp() {
-    for (const pair of automaticPairs(store)) {
+  function getPendingContext(agentId) {
+    const spaces = automaticPairs(store, null, agentId).map(({ spaceId }) => {
+      const window = pendingWindow(agentId, spaceId);
+      return { spaceId, messageCount: window.messages.length, charCount: window.charCount };
+    }).filter((item) => item.messageCount > 0);
+    return { messageCount: spaces.reduce((sum, item) => sum + item.messageCount, 0), charCount: spaces.reduce((sum, item) => sum + item.charCount, 0), spaces };
+  }
+  function enqueueCatchUp(agentId = null) {
+    for (const pair of automaticPairs(store, null, agentId)) {
+      const trigger = triggerFor(pair.agentId);
+      if (trigger.mode !== "scheduled" || !isWriteEnabled(pair.agentId)) continue;
       const { messages } = pendingWindow(pair.agentId, pair.spaceId);
-      if (messages.length === 0) continue;
-      enqueue({ ...pair, trigger: "scheduled", toMessageId: messages.at(-1).id });
+      if (messages.length) enqueue({ ...pair, trigger: "scheduled", toMessageId: messages.at(-1).id });
     }
   }
-
-  function scheduleNextTick() {
-    if (!started || closed || settings["memory.digestTrigger"] !== "scheduled" || !cron) return;
+  function scheduledMatches(trigger, date) {
+    try {
+      if (!configService) return cronMatches(parseFiveFieldCron(trigger.cron), date);
+      return dreamScheduleMatches({ mode: "custom", cron: trigger.cron, timezone: trigger.timezone }, date);
+    } catch { return false; }
+  }
+  function tick() {
+    const current = Math.floor(clock.now().getTime() / MINUTE_MS) * MINUTE_MS;
+    const first = lastTickMinute === null ? current : lastTickMinute + MINUTE_MS;
+    for (const pair of automaticPairs(store)) {
+      const trigger = triggerFor(pair.agentId);
+      if (trigger.mode !== "scheduled" || !isWriteEnabled(pair.agentId)) continue;
+      let matched = false;
+      for (let minute = first; minute <= current; minute += MINUTE_MS) if (scheduledMatches(trigger, new Date(minute))) { matched = true; break; }
+      if (!matched) continue;
+      const { messages } = pendingWindow(pair.agentId, pair.spaceId);
+      if (messages.length) enqueue({ ...pair, trigger: "scheduled", toMessageId: messages.at(-1).id });
+    }
+    lastTickMinute = current;
+  }
+  function scheduleNext() {
+    if (!started || closed) return;
     const nowMs = clock.now().getTime();
     const nextMinute = Math.floor(nowMs / MINUTE_MS) * MINUTE_MS + MINUTE_MS;
     timer = setTimeoutFn(onTimer, Math.max(1, nextMinute - nowMs));
     timer?.unref?.();
   }
-
-  function onTimer() {
-    timer = null;
-    if (!started || closed || settings["memory.digestTrigger"] !== "scheduled" || !cron) return;
-    const now = clock.now();
-    const currentMinute = Math.floor(now.getTime() / MINUTE_MS) * MINUTE_MS;
-    const firstMinute = lastTickMinute === null ? currentMinute : lastTickMinute + MINUTE_MS;
-    let matched = false;
-    for (let minute = firstMinute; minute <= currentMinute; minute += MINUTE_MS) {
-      if (cronMatches(cron, new Date(minute))) {
-        matched = true;
-        break;
-      }
-    }
-    lastTickMinute = currentMinute;
-    if (matched) enqueueScheduledCatchUp();
-    scheduleNextTick();
-  }
-
-  function stopTimer() {
-    if (timer !== null) clearTimeoutFn(timer);
-    timer = null;
-  }
+  function onTimer() { timer = null; if (!started || closed) return; tick(); scheduleNext(); }
+  function stopTimer() { if (timer !== null) clearTimeoutFn(timer); timer = null; }
 
   function refreshSettings(nextSettings) {
-    const previous = settings;
-    settings = readSettings(settingsStore, nextSettings);
-    const enteredScheduled = previous["memory.digestTrigger"] !== "scheduled";
-    const scheduleChanged = previous["memory.digestSchedule"] !== settings["memory.digestSchedule"];
-    stopTimer();
-    cron = settings["memory.digestTrigger"] === "scheduled"
-      ? parseFiveFieldCron(settings["memory.digestSchedule"])
-      : null;
-    if (started && !closed && cron) {
-      lastTickMinute = Math.floor(clock.now().getTime() / MINUTE_MS) * MINUTE_MS;
-      if (enteredScheduled || scheduleChanged) enqueueScheduledCatchUp();
-      scheduleNextTick();
-    }
+    legacySettings = nextSettings ?? settingsStore?.getAll?.() ?? legacySettings;
+    if (!configService && started && !closed) { stopTimer(); lastTickMinute = Math.floor(clock.now().getTime() / MINUTE_MS) * MINUTE_MS; scheduleNext(); }
   }
-
+  function refreshAgent(agentId) {
+    if (!started || closed) return;
+    if (triggerFor(agentId).mode === "scheduled") enqueueCatchUp(agentId);
+  }
   function onMessageCommitted(message) {
-    if (closed || settings["memory.digestTrigger"] !== "realtime" || message?.status !== "completed") return;
-    const threshold = Number(settings["memory.digestRealtimeThresholdChars"]);
-    if (!Number.isInteger(threshold) || threshold < 1) return;
+    if (closed || message?.status !== "completed") return;
     for (const pair of automaticPairs(store, message.spaceId)) {
+      const trigger = triggerFor(pair.agentId);
+      if (trigger.mode !== "realtime" || !isWriteEnabled(pair.agentId)) continue;
       const window = pendingWindow(pair.agentId, pair.spaceId);
-      if (window.charCount < threshold || window.messages.length === 0) continue;
+      if (!Number.isInteger(trigger.thresholdChars) || window.charCount < trigger.thresholdChars || !window.messages.length) continue;
       enqueue({ ...pair, trigger: "realtime", toMessageId: window.messages.at(-1).id });
     }
   }
-
   function start() {
     if (started || closed) return;
     started = true;
-    refreshSettings();
+    lastTickMinute = Math.floor(clock.now().getTime() / MINUTE_MS) * MINUTE_MS;
+    enqueueCatchUp();
+    scheduleNext();
   }
-
-  function close() {
-    if (closed) return;
-    closed = true;
-    stopTimer();
+  function close() { closed = true; stopTimer(); }
+  function nextRunAt(agentId) {
+    const trigger = triggerFor(agentId);
+    return trigger.mode === "scheduled"
+      ? nextDreamRunAt({ mode: "custom", cron: trigger.cron, timezone: trigger.timezone }, clock.now())
+      : null;
   }
-
-  return { onMessageCommitted, refreshSettings, start, close };
+  return { onMessageCommitted, getPendingContext, refreshSettings, refreshAgent, nextRunAt, start, close };
 }

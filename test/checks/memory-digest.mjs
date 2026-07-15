@@ -30,7 +30,7 @@ export async function run(ctx) {
         && event.data.job.status === "failed",
       5000,
     );
-    assertEqual(failedEvent.data.job.error.code, "executor_unavailable");
+    assertEqual(failedEvent.data.job.error.code, "memory_task_unavailable");
     assertEqual(JSON.stringify(failedEvent.data).includes(message.content), false);
   });
 
@@ -41,7 +41,7 @@ export async function run(ctx) {
     const detail = await httpRequest("GET", `/api/agents/${agent.id}/memory/_digest-jobs/${jobId}`);
     assertEqual(detail.status, 200);
     assertEqual(detail.json.job.status, "failed");
-    assertEqual(detail.json.job.error.message, "Memory digest executor is unavailable.");
+    assertEqual(detail.json.job.error.message, "Memory digest task is unavailable.");
     assertEqual("proposals" in detail.json.job, false);
     const unknown = await httpRequest("POST", `/api/agents/${agent.id}/memory/_digest`, {
       ...requestBody,
@@ -63,6 +63,6 @@ export async function run(ctx) {
         && event.data.job.attempt === 2,
       5000,
     );
-    assertEqual(failed.data.job.error.code, "executor_unavailable");
+    assertEqual(failed.data.job.error.code, "memory_task_unavailable");
   });
 }

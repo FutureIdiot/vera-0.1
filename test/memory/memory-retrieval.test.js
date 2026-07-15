@@ -64,6 +64,44 @@ test("resident index is Agent-scoped, pin-first, active-only, and hot-budgeted",
   });
 });
 
+test("resident index orders non-pinned Memory by derived weight before slug", async () => {
+  await withFixture(async ({ store, memory, retrieval }) => {
+    await save(memory, "agt_alpha1", "alpha-cold");
+    await save(memory, "agt_alpha1", "zeta-hot");
+    store.insert("memorySignals", {
+      id: "signal-hot", agentId: "agt_alpha1", memorySessionId: "mrs_old",
+      slug: "zeta-hot", kind: "detail_opened", createdAt: new Date().toISOString(),
+    });
+    retrieval.setResidentIndexMaxLines(1);
+    assert.match(await retrieval.residentIndex("agt_alpha1"), /zeta-hot/u);
+    retrieval.setPinned("agt_alpha1", "alpha-cold", true);
+    assert.match(await retrieval.residentIndex("agt_alpha1"), /alpha-cold/u);
+  });
+});
+
+test("default exploration seed stays stable across runs and recall sessions", async () => {
+  await withFixture(async ({ memory, retrieval }) => {
+    const fixtures = [
+      ["alpha", "project_rule"], ["bravo", "architecture"], ["charlie", "workflow"],
+      ["delta", "preference"], ["echo", "correction"],
+    ];
+    for (const [slug, type] of fixtures) await save(memory, "agt_alpha1", slug, {
+      type, description: "orion shared constraint", content: `${slug} unique body`,
+    });
+    const firstSession = await retrieval.ensureSession({ agentId: "agt_alpha1", accountId: "acc_alpha1", spaceId: "spc_seed_a" });
+    const secondSession = await retrieval.ensureSession({ agentId: "agt_alpha1", accountId: "acc_alpha1", spaceId: "spc_seed_b" });
+    const first = await retrieval.search({
+      context: { agentId: "agt_alpha1", memorySessionId: firstSession.id, runId: "run_one" },
+      query: "orion shared constraint",
+    });
+    const second = await retrieval.search({
+      context: { agentId: "agt_alpha1", memorySessionId: secondSession.id, runId: "run_two" },
+      query: "orion shared constraint",
+    });
+    assert.deepEqual(first.nodes.map((item) => item.slug), second.nodes.map((item) => item.slug));
+  });
+});
+
 test("automatic retrieval obeys its total token budget and never reinjects a delivered slug", async () => {
   await withFixture(async ({ memory, retrieval }) => {
     for (let index = 0; index < 7; index += 1) await save(memory, "agt_alpha1", `rule-${index}`);
@@ -109,6 +147,7 @@ test("frozen cursors paginate idempotently without leaking unsafe state", async 
     const result = await retrieval.search({ context, query: "规则 检索 稳定", tokenBudget: 64 });
     assert.ok(result.cursor);
     const storedSession = store.find("memoryRecallSessions", recall.id);
+    assert.equal(storedSession.cursors.find((item) => item.id === result.cursor).pipelineVersion, "m4-r1");
     const frozenSlug = storedSession.cursors.find((item) => item.id === result.cursor).items[0].slug;
     const authority = await memory.getMemory("agt_alpha1", frozenSlug);
     await memory.deleteMemory("agt_alpha1", frozenSlug, authority.version);

@@ -40,11 +40,13 @@ const DEFAULTS = {
     chatSandbox: "workspace-write",
     watchdogMs: 30 * 60 * 1000,
     digestTimeoutMs: 5 * 60 * 1000,
+    dreamTimeoutMs: 10 * 60 * 1000,
     maxInputBytes: 12000,
   },
   ollama: {
     watchdogMs: 30 * 60 * 1000,
     digestTimeoutMs: 5 * 60 * 1000,
+    dreamTimeoutMs: 10 * 60 * 1000,
     numCtx: 16384,
     maxInputBytes: 12000,
   },
@@ -53,6 +55,9 @@ const DEFAULTS = {
     residentIndexMaxLines: 25, // 常驻索引截断行数
     retrievalTokenBudget: 384, // M3 当前消息尾部自动检索预算（vera-utf8-v1）
     digestRealtimeThresholdChars: 16000,
+    scheduleTimezone: "UTC",
+    dreamBatchSize: 256,
+    derivedWeightSeed: "vera-m4-v1",
   },
   // Appearance 默认值（ground truth 4.3「F0确认默认值」/ api-contract.md Appearance 字段）。
   // 这是唯一默认源——settings-store 的 appearance.* deriveDefaults 从这里读，
@@ -101,6 +106,21 @@ function num(value, fallback) {
 function positiveInt(value, fallback) {
   const parsed = num(value, fallback);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function boundedPositiveInt(value, fallback, maximum) {
+  const parsed = positiveInt(value, fallback);
+  return parsed <= maximum ? parsed : fallback;
+}
+
+function timeZone(value, fallback) {
+  const candidate = typeof value === "string" && value.trim() ? value.trim() : fallback;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: candidate }).format(new Date(0));
+    return candidate;
+  } catch {
+    return fallback;
+  }
 }
 
 // `~` 前缀展开为用户主目录，其余路径原样返回（config 唯一负责展开的地方，
@@ -156,6 +176,10 @@ export function loadConfig(env = process.env) {
         env.VERA_CODEX_MEMORY_DIGEST_TIMEOUT_MS,
         DEFAULTS.codex.digestTimeoutMs,
       ),
+      dreamTimeoutMs: positiveInt(
+        env.VERA_CODEX_MEMORY_DREAM_TIMEOUT_MS,
+        DEFAULTS.codex.dreamTimeoutMs,
+      ),
       maxInputBytes: positiveInt(env.VERA_CODEX_MAX_INPUT_BYTES, DEFAULTS.codex.maxInputBytes),
     },
     ollama: {
@@ -163,6 +187,10 @@ export function loadConfig(env = process.env) {
       digestTimeoutMs: positiveInt(
         env.VERA_OLLAMA_MEMORY_DIGEST_TIMEOUT_MS,
         DEFAULTS.ollama.digestTimeoutMs,
+      ),
+      dreamTimeoutMs: positiveInt(
+        env.VERA_OLLAMA_MEMORY_DREAM_TIMEOUT_MS,
+        DEFAULTS.ollama.dreamTimeoutMs,
       ),
       numCtx: positiveInt(env.VERA_OLLAMA_NUM_CTX, DEFAULTS.ollama.numCtx),
       maxInputBytes: positiveInt(env.VERA_OLLAMA_MAX_INPUT_BYTES, DEFAULTS.ollama.maxInputBytes),
@@ -178,6 +206,16 @@ export function loadConfig(env = process.env) {
         env.VERA_MEMORY_DIGEST_REALTIME_THRESHOLD_CHARS,
         DEFAULTS.memory.digestRealtimeThresholdChars,
       ),
+      scheduleTimezone: timeZone(
+        env.VERA_MEMORY_SCHEDULE_TIMEZONE,
+        DEFAULTS.memory.scheduleTimezone,
+      ),
+      dreamBatchSize: boundedPositiveInt(
+        env.VERA_MEMORY_DREAM_BATCH_SIZE,
+        DEFAULTS.memory.dreamBatchSize,
+        256,
+      ),
+      derivedWeightSeed: env.VERA_MEMORY_DERIVED_WEIGHT_SEED || DEFAULTS.memory.derivedWeightSeed,
     },
     appearance: DEFAULTS.appearance,
     viewCompiler: {

@@ -14,7 +14,8 @@ const PIPELINE_VERSION = "m2-v1";
 
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
 const SAFE_MESSAGES = {
-  executor_unavailable: "Memory digest executor is unavailable.",
+  memory_task_unavailable: "Memory digest task is unavailable.",
+  memory_provider_unavailable: "Memory Provider is unavailable for digest.",
   executor_failed: "Memory digest executor failed.",
   invalid_range: "Memory digest range is invalid.",
   invalid_proposal: "Memory digest proposal was rejected.",
@@ -27,7 +28,7 @@ function safeError(code) {
   return { code: safeCode, message: SAFE_MESSAGES[safeCode] };
 }
 function safeJob(job) {
-  const { _seq, proposals, catalogVersions, ...rest } = job;
+  const { _seq, proposals, catalogVersions, memoryTaskSnapshot, memoryProviderSnapshot, freezeError, ...rest } = job;
   const safe = structuredClone(rest);
   if (safe.range) {
     delete safe.range.fromSeq;
@@ -47,6 +48,7 @@ function safeJob(job) {
 
 export function createMemoryDigestService({
   store, memory, proposalExecutor = null, executor = proposalExecutor,
+  freezeTask = null, validateTaskSnapshot = async () => {},
   pipelineVersion = PIPELINE_VERSION, chunkMaxChars = 8000,
   onJobUpdated = () => {}, now = () => new Date().toISOString(),
 } = {}) {
@@ -63,8 +65,8 @@ export function createMemoryDigestService({
   };
   const patchJob = (id, patch) => notify(store.update(COLLECTION, id, patch));
 
-  function idempotencyKey({ agentId, spaceId, fromMessageId, toMessageId, mode }) {
-    return `sha256:${digest(`${agentId}|${spaceId}|${fromMessageId}|${toMessageId}|${mode}|${pipelineVersion}`)}`;
+  function idempotencyKey({ agentId, spaceId, fromMessageId, toMessageId, mode, taskFingerprint = "legacy" }) {
+    return `sha256:${digest(`${agentId}|${spaceId}|${fromMessageId}|${toMessageId}|${mode}|${pipelineVersion}|${taskFingerprint}`)}`;
   }
 
   function findJob(agentId, jobId) {
@@ -97,7 +99,16 @@ export function createMemoryDigestService({
       if (trigger === "manual") throw new ApiError("invalid_request", "digest range contains no new visible Messages");
       return null;
     }
-    const key = idempotencyKey({ agentId, spaceId, fromMessageId: resolved.range.fromMessageId, toMessageId: resolved.range.toMessageId, mode });
+    let task = null;
+    let freezeError = null;
+    if (typeof freezeTask === "function") {
+      try { task = freezeTask({ ownerAgentId: agentId, kind: "digest" }); }
+      catch (error) { freezeError = safeError(error?.code === "memory_provider_unavailable" ? error.code : "memory_task_unavailable"); }
+    }
+    const taskFingerprint = task
+      ? digest(JSON.stringify([task.memoryTaskSnapshot, task.memoryProviderSnapshot]))
+      : freezeError?.code ?? "legacy";
+    const key = idempotencyKey({ agentId, spaceId, fromMessageId: resolved.range.fromMessageId, toMessageId: resolved.range.toMessageId, mode, taskFingerprint });
     const duplicate = jobs().find((job) => job.idempotencyKey === key);
     if (duplicate) return safeJob(duplicate);
     const active = jobs().find((job) => job.agentId === agentId && job.spaceId === spaceId && ACTIVE.has(job.status));
@@ -109,6 +120,9 @@ export function createMemoryDigestService({
       range: resolved.range,
       pipelineVersion,
       idempotencyKey: key,
+      ...(task?.memoryTaskSnapshot ? { memoryTaskSnapshot: task.memoryTaskSnapshot } : {}),
+      ...(task?.memoryProviderSnapshot ? { memoryProviderSnapshot: task.memoryProviderSnapshot } : {}),
+      ...(freezeError ? { freezeError } : {}),
       status: "queued",
       attempt: 0,
       createdAt,
@@ -337,6 +351,10 @@ export function createMemoryDigestService({
     notify(job);
     let stage = "executor";
     try {
+      if (job.freezeError) throw Object.assign(new Error(job.freezeError.message), { code: job.freezeError.code });
+      if (job.memoryTaskSnapshot || job.memoryProviderSnapshot) {
+        await validateTaskSnapshot({ memoryTaskSnapshot: job.memoryTaskSnapshot, memoryProviderSnapshot: job.memoryProviderSnapshot });
+      }
       const resolved = resolveDigestRange({ store, agentId: job.agentId, spaceId: job.spaceId, ...job.range });
       const chunks = chunkDigestMessages(resolved.messages, { maxChars: chunkMaxChars });
       const existingMemories = await memory.listMemories(job.agentId);
@@ -380,7 +398,7 @@ export function createMemoryDigestService({
           messages: chunk.messages.map((message) => structuredClone(message)),
         }));
         const output = await executor({
-          job: safeJob(job), chunks: executorChunks, facts,
+          job, chunks: executorChunks, facts,
           proposalSchema: MEMORY_DIGEST_OUTPUT_JSON_SCHEMA, signal: controller.signal,
         });
         rawProposals = Array.isArray(output) ? output : output?.proposals;
@@ -438,8 +456,10 @@ export function createMemoryDigestService({
       const cancelled = controller.signal.aborted || error.code === "cancelled";
       const code = cancelled
         ? "cancelled"
-        : error.code === "executor_unavailable"
-          ? "executor_unavailable"
+        : error.code === "executor_unavailable" || error.code === "memory_task_unavailable"
+          ? "memory_task_unavailable"
+          : error.code === "memory_provider_unavailable"
+            ? "memory_provider_unavailable"
           : stage === "executor"
             ? "executor_failed"
             : stage === "proposal"

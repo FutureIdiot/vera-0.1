@@ -21,7 +21,9 @@ import {
   MEMORY_DIGEST_SYSTEM_PROMPT,
   parseMemoryDigestEnvelope,
 } from "../memory/memory-digest-prompt.js";
+import { buildMemoryDreamPrompt, MEMORY_DREAM_SYSTEM_PROMPT } from "../memory/memory-dream-prompt.js";
 import { projectCodexDigestSchema } from "./codex-digest-schema.js";
+import { normalizeCodexDreamProposals, projectCodexDreamSchema } from "./codex-dream-schema.js";
 
 export { projectCodexDigestSchema } from "./codex-digest-schema.js";
 
@@ -61,6 +63,7 @@ export function createCodexAdapter({ config = {} }) {
     chatSandbox = "workspace-write",
     watchdogMs = 30 * 60 * 1000,
     digestTimeoutMs = 5 * 60 * 1000,
+    dreamTimeoutMs = 10 * 60 * 1000,
     maxInputBytes = 12000,
   } = config;
   if (!["read-only", "workspace-write"].includes(chatSandbox)) {
@@ -286,7 +289,7 @@ export function createCodexAdapter({ config = {} }) {
     return trackOperation(runInner(ctx));
   }
 
-  async function digestMemoryInner({ account, payload, signal }) {
+  async function digestMemoryInner({ account, taskModel, payload, signal }) {
     assertAccount(account, "executor_unavailable");
     const binary = resolveBinary(account);
     await assertBinary(binary, "executor_unavailable");
@@ -298,7 +301,8 @@ export function createCodexAdapter({ config = {} }) {
     const directory = await mkdtemp(join(tmpdir(), "vera-codex-digest-"));
     const schemaPath = join(directory, "output-schema.json");
     const outputPath = join(directory, "last-message.json");
-    const model = String(account.model ?? "").trim();
+    const model = String(taskModel ?? "").trim();
+    if (!model) throw new AdapterError("executor_unavailable", "Codex memory digest task model is unavailable");
     let structured = "";
     try {
       await writeFile(schemaPath, `${JSON.stringify(transportSchema)}\n`, { mode: 0o600 });
@@ -345,11 +349,56 @@ export function createCodexAdapter({ config = {} }) {
     return trackOperation(digestMemoryInner(input));
   }
 
+  async function dreamMemoryInner({ account, taskModel, payload, signal }) {
+    assertAccount(account, "executor_unavailable");
+    const binary = resolveBinary(account);
+    await assertBinary(binary, "executor_unavailable");
+    const prompt = `${MEMORY_DREAM_SYSTEM_PROMPT}\n\n${buildMemoryDreamPrompt(payload)}`;
+    if (byteLength(prompt) > maxInputBytes) throw new AdapterError("executor_failed", "Codex memory Dream input exceeds the configured capacity");
+    const transportSchema = projectCodexDreamSchema(payload?.proposalSchema);
+    const directory = await mkdtemp(join(tmpdir(), "vera-codex-dream-"));
+    const schemaPath = join(directory, "output-schema.json");
+    const outputPath = join(directory, "last-message.json");
+    const model = String(taskModel ?? "").trim();
+    if (!model) throw new AdapterError("executor_unavailable", "Codex memory Dream task model is unavailable");
+    let structured = "";
+    try {
+      await writeFile(schemaPath, `${JSON.stringify(transportSchema)}\n`, { mode: 0o600 });
+      const args = ["-C", directory, "-a", "never", "-s", "read-only"];
+      for (const feature of DIGEST_DISABLED_FEATURES) args.push("--disable", feature);
+      args.push("exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--json", "--output-schema", schemaPath, "--output-last-message", outputPath, "-m", model, "-");
+      await execJson({
+        binary, args, cwd: directory, input: prompt, signal, timeoutMs: dreamTimeoutMs, digest: true,
+        onEvent(event) {
+          if (!event?.type?.startsWith("item.")) return;
+          const item = event.item ?? {};
+          if (isDigestToolItem(item)) throw new AdapterError("executor_failed", "Codex memory Dream attempted to use a tool");
+          if (event.type === "item.completed" && item.type === "agent_message" && typeof item.text === "string") structured = item.text;
+        },
+      });
+      try { structured = await readFile(outputPath, "utf8"); } catch {}
+      const envelope = parseMemoryDigestEnvelope(structured);
+      return {
+        ...envelope,
+        proposals: normalizeCodexDreamProposals(envelope.proposals),
+        execution: { adapter: "codex", primaryModel: model, effectiveModel: model, fallbackUsed: false, fallbackReason: null, attempts: 1 },
+      };
+    } catch (error) {
+      if (signal?.aborted) throw new AdapterError("cancelled", "memory Dream cancelled");
+      if (error instanceof AdapterError) throw error;
+      throw new AdapterError("executor_failed", "Codex memory Dream executor failed");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+
+  function dreamMemory(input) { return trackOperation(dreamMemoryInner(input)); }
+
   async function shutdown() {
     if (!shutdownController.signal.aborted) shutdownController.abort();
     for (const child of active) killProcessTree(child, "SIGTERM");
     await Promise.allSettled([...operations]);
   }
 
-  return { run, digestMemory, shutdown };
+  return { run, digestMemory, dreamMemory, shutdown };
 }

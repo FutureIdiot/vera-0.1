@@ -8,6 +8,9 @@ import { join } from "node:path";
 const ARRAY_FILES = new Set([
   "agents.json", "accounts.json", "spaces.json", "messages.json",
   "activities.json", "approvals.json", "runs.json", "themes.json",
+  "memoryDigestJobs.json", "memoryRecallSessions.json", "memorySignals.json",
+  "unitBindings.json", "memoryConfigs.json", "memoryTaskVerifications.json",
+  "memoryDreamJobs.json",
 ]);
 const OBJECT_FILES = new Set(["session-states.json", "meta.json", "settings.json"]);
 const RECOGNIZED_FILES = new Set([...ARRAY_FILES, ...OBJECT_FILES]);

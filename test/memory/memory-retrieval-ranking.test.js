@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  M3_PIPELINE_VERSION,
+  MEMORY_PIPELINE_VERSION,
   estimateMemoryTokens,
   rankMemoryCandidates,
 } from "../../src/memory/memory-retrieval-ranking.js";
@@ -22,11 +22,55 @@ function bySlug(result, slug) {
   return result.candidates.find((candidate) => candidate.slug === slug);
 }
 
-test("m3-r1 token estimator is deterministic over NFKC UTF-8 bytes", () => {
-  assert.equal(M3_PIPELINE_VERSION, "m3-r1");
+test("m4-r1 token estimator is deterministic over NFKC UTF-8 bytes", () => {
+  assert.equal(MEMORY_PIPELINE_VERSION, "m4-r1");
   assert.equal(estimateMemoryTokens("Ａ"), 1, "full-width A normalizes to one ASCII byte");
   assert.equal(estimateMemoryTokens("你好"), 2);
   assert.equal(estimateMemoryTokens(""), 1);
+});
+
+test("derived weights replace only the long-term score input", () => {
+  const memories = [
+    memory("alpha", { description: "orion alpha constraint" }),
+    memory("bravo", { description: "orion bravo constraint" }),
+  ];
+  const neutral = rankMemoryCandidates({ query: "orion constraint", memories });
+  const weighted = rankMemoryCandidates({
+    query: "orion constraint", memories, derivedWeightsBySlug: { alpha: 0, bravo: 1 },
+  });
+  assert.equal(bySlug(weighted, "alpha").scores.derivedWeight, 0);
+  assert.equal(bySlug(weighted, "bravo").scores.derivedWeight, 1);
+  for (const slug of ["alpha", "bravo"]) {
+    const before = bySlug(neutral, slug).scores, after = bySlug(weighted, slug).scores;
+    for (const key of ["queryRelevance", "graphProximity", "intersectionConfidence", "typeFit"]) {
+      assert.equal(after[key], before[key], `${key} must not drift for ${slug}`);
+    }
+  }
+  assert.deepEqual(weighted.audit.seedSlugs, neutral.audit.seedSlugs);
+});
+
+test("seeded exploration is deterministic, capped, and never expands the recalled candidate set", () => {
+  const memories = [
+    memory("alpha", { description: "orion alpha constraint" }),
+    memory("bravo", { description: "orion bravo constraint" }),
+    memory("unrecalled", { description: "完全无关材料", content: "不会被英文查询命中" }),
+  ];
+  const base = rankMemoryCandidates({
+    query: "orion constraint", memories, derivedWeightsBySlug: { alpha: 0.4, bravo: 0.4, unrecalled: 1 },
+  });
+  const first = rankMemoryCandidates({
+    query: "orion constraint", memories, derivedWeightsBySlug: { alpha: 0.4, bravo: 0.4, unrecalled: 1 }, explorationSeed: "seed-a",
+  });
+  const replay = rankMemoryCandidates({
+    query: "orion constraint", memories: [...memories].reverse(), derivedWeightsBySlug: new Map([["alpha", 0.4], ["bravo", 0.4], ["unrecalled", 1]]), explorationSeed: "seed-a",
+  });
+  assert.deepEqual(first, replay);
+  assert.deepEqual(first.audit.seedSlugs, base.audit.seedSlugs);
+  assert.deepEqual(first.orderedCandidates.map((item) => item.slug).sort(), base.orderedCandidates.map((item) => item.slug).sort());
+  assert.equal(first.orderedCandidates.some((item) => item.slug === "unrecalled"), false);
+  for (const item of first.orderedCandidates) {
+    assert.ok(item.scores.derivedWeight >= 0.4 && item.scores.derivedWeight <= 0.42);
+  }
 });
 
 test("BM25 and char-trigram channels are equal-width, deterministic, and exclude archived Memory", () => {

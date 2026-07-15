@@ -6,6 +6,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createHttpClient, startGateway } from "./_helpers.mjs";
+import { createStore } from "../../src/store/store.js";
+import { createMemoryTaskRuntime } from "../../src/memory/memory-task-runtime.js";
+
+async function verifyDigestTask(dataPath, agentId, model) {
+  const store = await createStore({ dataPath, debounceMs: 5 });
+  try {
+    createMemoryTaskRuntime({ store }).recordVerification({
+      taskKind: "digest", executorAgentId: agentId, model,
+    });
+  } finally { await store.close(); }
+}
 
 async function waitForJob(request, agentId, jobId, sleep, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -73,13 +84,14 @@ export async function run(ctx) {
   const { check, assert, assertEqual, repoRoot, sleep } = ctx;
   await check("p5-m2.4 Ollama Account routes chat and digest through the native adapter", async () => {
     const dir = await mkdtemp(join(tmpdir(), "vera-ollama-blackbox-"));
+    const dataPath = join(dir, "data");
     const ollama = await startOllamaStub();
     let gateway;
     try {
       gateway = await startGateway({
         repoRoot,
         env: {
-          VERA_DATA_PATH: join(dir, "data"),
+          VERA_DATA_PATH: dataPath,
           VERA_MEMORY_VAULT_PATH: join(dir, "memory"),
           VERA_OLLAMA_WATCHDOG_MS: "5000",
           VERA_OLLAMA_MEMORY_DIGEST_TIMEOUT_MS: "5000",
@@ -96,32 +108,45 @@ export async function run(ctx) {
       assertEqual(created.status, 201);
       const { agent, account } = created.json;
       assertEqual(account.provider, "ollama");
-      const madeSpace = await request("POST", "/api/spaces", {
+      await gateway.stop();
+      gateway = null;
+      await verifyDigestTask(dataPath, agent.id, "gemma4:e4b");
+      gateway = await startGateway({
+        repoRoot,
+        env: {
+          VERA_DATA_PATH: dataPath,
+          VERA_MEMORY_VAULT_PATH: join(dir, "memory"),
+          VERA_OLLAMA_WATCHDOG_MS: "5000",
+          VERA_OLLAMA_MEMORY_DIGEST_TIMEOUT_MS: "5000",
+        },
+      });
+      const verifiedRequest = createHttpClient(gateway.port);
+      const madeSpace = await verifiedRequest("POST", "/api/spaces", {
         name: "Ollama black-box",
         seats: [{ agentId: agent.id, responseMode: "default" }],
       });
       const space = madeSpace.json.space;
-      const posted = await request("POST", `/api/spaces/${space.id}/messages`, {
+      const posted = await verifiedRequest("POST", `/api/spaces/${space.id}/messages`, {
         author: { type: "user" }, target: { type: "broadcast" }, content: "raw gateway question",
       });
       const userMessage = posted.json.message;
 
       let reply;
       for (let attempt = 0; attempt < 100 && !reply; attempt += 1) {
-        const timeline = await request("GET", `/api/spaces/${space.id}/timeline?limit=20`);
+        const timeline = await verifiedRequest("GET", `/api/spaces/${space.id}/timeline?limit=20`);
         reply = timeline.json.items.find((item) => item.itemType === "message"
           && item.author?.type === "agent" && item.status === "completed");
         if (!reply) await sleep(25);
       }
       assertEqual(reply?.content, "OLLAMA_GATEWAY_STUB_OK");
 
-      const queued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
+      const queued = await verifiedRequest("POST", `/api/agents/${agent.id}/memory/_digest`, {
         spaceId: space.id, mode: "range", fromMessageId: userMessage.id, toMessageId: reply.id,
       });
       let job = queued.json.job;
       for (let attempt = 0; attempt < 100 && !["succeeded", "failed", "cancelled"].includes(job.status); attempt += 1) {
         await sleep(25);
-        job = (await request("GET", `/api/agents/${agent.id}/memory/_digest-jobs/${job.id}`)).json.job;
+        job = (await verifiedRequest("GET", `/api/agents/${agent.id}/memory/_digest-jobs/${job.id}`)).json.job;
       }
       assertEqual(job.status, "succeeded");
       assertEqual(ollama.requests.length, 2);

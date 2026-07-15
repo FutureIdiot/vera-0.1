@@ -20,6 +20,10 @@ import { createMemoryRetrievalService } from "./memory/memory-retrieval.js";
 import { registerMemoryRoutes } from "./memory/routes.js";
 import { createMemoryDigestService } from "./memory/memory-digest-service.js";
 import { createMemoryDigestScheduler } from "./memory/memory-digest-scheduler.js";
+import { createMemoryDreamService } from "./memory/memory-dream-service.js";
+import { createMemoryDreamScheduler } from "./memory/memory-dream-scheduler.js";
+import { createMemoryConfigService } from "./memory/memory-config.js";
+import { createMemoryTaskRuntime } from "./memory/memory-task-runtime.js";
 import { createSettingsStore } from "./core/settings-store.js";
 import { registerSettingsRoutes } from "./api/settings-routes.js";
 import { createStatusTracker } from "./core/status.js";
@@ -27,7 +31,8 @@ import { registerStatusRoutes } from "./api/status-routes.js";
 import { registerPathsRoutes } from "./api/paths-routes.js";
 import { registerThemesRoutes } from "./api/themes-routes.js";
 import { applyRuntimeSettings } from "./core/runtime-settings.js";
-import { getOwningAccount, listAccounts } from "./agents/accounts.js";
+import { listAccounts } from "./agents/accounts.js";
+import { ensureUnitBindings, getUnitBinding } from "./agents/unit-bindings.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOllamaAdapter } from "./adapters/ollama-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
@@ -49,9 +54,26 @@ const hub = createEventHub({
   onSeqAdvance: (seq) => store.setEventSeqWatermark(seq),
 });
 const agentStates = createAgentStateTracker({ hub });
+const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
+const memoryTaskRuntime = createMemoryTaskRuntime({ store });
+const memoryConfig = createMemoryConfigService({
+  store,
+  settingsStore,
+  config,
+  validateTaskSelection: ({ ownerAgentId, taskKind, taskConfig }) =>
+    memoryTaskRuntime.resolveTaskSnapshot({ ownerAgentId, taskKind, taskConfig }),
+});
+await memoryConfig.initializeExistingAgents();
+for (const agent of store.list("agents")) ensureUnitBindings(store, agent.id);
 const memory = createMemoryVault({
   vaultPath: config.memory.vaultPath,
   resolveSource: ({ messageId }) => store.find("messages", messageId),
+  onExternalEdit: ({ agentId, slug }) => {
+    const id = `edit:${agentId}:${slug}`;
+    const signal = { id, agentId, slug, kind: "user_edited", createdAt: new Date().toISOString() };
+    if (store.find("memorySignals", id)) store.update("memorySignals", id, signal);
+    else store.insert("memorySignals", signal);
+  },
 });
 const memoryRetrieval = createMemoryRetrievalService({
   store,
@@ -59,7 +81,9 @@ const memoryRetrieval = createMemoryRetrievalService({
   config: {
     residentIndexMaxLines: config.memory.residentIndexMaxLines,
     injectionTokenBudget: config.memory.retrievalTokenBudget,
+    derivedWeightSeed: config.memory.derivedWeightSeed,
   },
+  isRecallEnabled: (agentId) => getUnitBinding(store, agentId, "vera.memory.recall").enabled,
 });
 
 // provider -> adapter：显式的普通map，不做注册表抽象
@@ -79,36 +103,79 @@ function resolveAdapter(account) {
   return adapters[account.provider] ?? null;
 }
 
+function freezeMemoryTask({ ownerAgentId, kind }) {
+  const record = memoryConfig.getConfig(ownerAgentId);
+  const memoryTaskSnapshot = memoryTaskRuntime.resolveTaskSnapshot({
+    ownerAgentId,
+    taskKind: kind,
+    taskConfig: record.config[kind],
+  });
+  return { memoryTaskSnapshot, memoryProviderSnapshot: memoryConfig.getProviderSnapshot(ownerAgentId) };
+}
+
+function validateMemoryTask({ memoryTaskSnapshot, memoryProviderSnapshot }) {
+  const currentProvider = memoryConfig.getProviderSnapshot(memoryTaskSnapshot?.ownerAgentId);
+  if (!memoryProviderSnapshot || currentProvider.providerId !== memoryProviderSnapshot.providerId ||
+      currentProvider.bindingVersion !== memoryProviderSnapshot.bindingVersion ||
+      currentProvider.configVersion !== memoryProviderSnapshot.configVersion) {
+    throw Object.assign(new Error("Memory Provider binding changed after enqueue"), { code: "memory_provider_unavailable" });
+  }
+  return memoryTaskRuntime.validateSnapshot(memoryTaskSnapshot);
+}
+
 async function executeMemoryDigest({ job, chunks, facts, proposalSchema, signal }) {
   const agent = store.find("agents", job.agentId);
-  const account = getOwningAccount(store, job.agentId);
-  const adapter = account ? memoryDigestAdapters[account.provider] ?? null : null;
+  const { account, taskModel } = validateMemoryTask(job);
+  const adapter = memoryDigestAdapters[account.provider] ?? null;
   if (!agent || !adapter?.digestMemory) {
-    throw Object.assign(new Error("Memory digest executor is unavailable"), { code: "executor_unavailable" });
+    throw Object.assign(new Error("Memory digest executor is unavailable"), { code: "memory_task_unavailable" });
   }
-  const adapterAccount = Object.fromEntries(
-    ["id", "kind", "provider", "connection", "model"].map((key) => [key, account[key]]),
-  );
   return adapter.digestMemory({
-    account: adapterAccount,
+    account,
+    taskModel,
     payload: { agent: { id: agent.id, name: agent.name }, chunks, facts, proposalSchema },
     signal,
   });
 }
 
-const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
+async function executeMemoryDream({ job, payload, signal }) {
+  const { account, taskModel } = validateMemoryTask(job);
+  const adapter = memoryDigestAdapters[account.provider] ?? null;
+  if (!adapter?.dreamMemory) {
+    throw Object.assign(new Error("Memory Dream executor is unavailable"), { code: "memory_task_unavailable" });
+  }
+  return adapter.dreamMemory({ account, taskModel, payload, signal });
+}
+
 applyRuntimeSettings({ settings: settingsStore.getAll(), config, memoryRetrieval });
 const memoryDigestService = createMemoryDigestService({
   store,
   memory,
+  freezeTask: freezeMemoryTask,
+  validateTaskSnapshot: validateMemoryTask,
   proposalExecutor: executeMemoryDigest,
   onJobUpdated: (job) => hub.publish("memory.digest-job.updated", { job }),
 });
 const memoryDigestScheduler = createMemoryDigestScheduler({
-  store, digestService: memoryDigestService, settingsStore,
+  store,
+  digestService: memoryDigestService,
+  configService: memoryConfig,
+  isWriteEnabled: (agentId) => getUnitBinding(store, agentId, "vera.memory.write").enabled,
 });
+const memoryDreamService = createMemoryDreamService({
+  store,
+  memory,
+  freezeTask: freezeMemoryTask,
+  validateTaskSnapshot: validateMemoryTask,
+  proposalExecutor: executeMemoryDream,
+  batchSize: config.memory.dreamBatchSize,
+  onJobUpdated: (job) => hub.publish("memory.dream-job.updated", { agentId: job.agentId, job }),
+});
+const memoryDreamScheduler = createMemoryDreamScheduler({ configService: memoryConfig, dreamService: memoryDreamService });
 memoryDigestService.start();
 memoryDigestScheduler.start();
+memoryDreamService.start();
+memoryDreamScheduler.start();
 
 const router = createRouter();
 
@@ -128,18 +195,27 @@ router.get("/api/events", ({ req, res }) => {
   handleSseRequest(hub, req, res, { pingIntervalMs: config.sse.pingIntervalMs });
 });
 
-registerAgentRoutes(router, { store, agentStates });
+registerAgentRoutes(router, { store, agentStates, memoryConfigService: memoryConfig });
 registerSpaceRoutes(router, {
   store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
 });
-registerMemoryRoutes(router, { memory, retrieval: memoryRetrieval, store, digestService: memoryDigestService });
+registerMemoryRoutes(router, {
+  memory,
+  retrieval: memoryRetrieval,
+  store,
+  digestService: memoryDigestService,
+  dreamService: memoryDreamService,
+  configService: memoryConfig,
+  taskRuntime: memoryTaskRuntime,
+  digestScheduler: memoryDigestScheduler,
+  dreamScheduler: memoryDreamScheduler,
+});
 // 系统设置（Phase 4.5）：独立 settings.json 模块，不进 store.js（避免与 4.3+4.4 并行分支冲突）。
 // boot 顺序：store → hub/agentStates/memory → settingsStore → 路由注册。
 registerSettingsRoutes(router, {
   settingsStore,
   onSettingsChanged: (settings) => {
     applyRuntimeSettings({ settings, config, memoryRetrieval });
-    memoryDigestScheduler.refreshSettings(settings);
   },
 });
 
@@ -169,6 +245,8 @@ server.listen(config.port, () => {
 
 async function shutdown() {
   memoryDigestScheduler.close();
+  memoryDreamScheduler.close();
+  await memoryDreamService.close();
   await memoryDigestService.close();
   for (const adapter of Object.values(adapters)) {
     try {

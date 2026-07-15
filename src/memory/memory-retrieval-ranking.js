@@ -6,7 +6,7 @@ import {
 } from "./memory-retrieval-text.js";
 
 export { estimateMemoryTokens } from "./memory-retrieval-text.js";
-export const M3_PIPELINE_VERSION = "m3-r1";
+export const MEMORY_PIPELINE_VERSION = "m4-r1";
 
 const KNOWN_TYPES = new Set(["project_rule", "architecture", "workflow", "preference", "correction", "bug", "decision", "open_question"]);
 const DEFAULTS = Object.freeze({
@@ -14,16 +14,25 @@ const DEFAULTS = Object.freeze({
   hopDecay: 0.70, bm25K1: 1.2, bm25B: 0.75, semanticCosineThreshold: 0.92,
   semanticJaccardThreshold: 0.75, redundancyStart: 0.75, redundancyCap: 0.20,
   softQuotaScale: 0.25, softQuotaCap: 0.12, bodyProjectionCodePoints: 320,
+  explorationCap: 0.02,
   defaultTokenBudget: 1200, minTokenBudget: 64, maxTokenBudget: 1200,
   blockHeader: "Vera Memory recall:\n", cursorHint: "\nMore memories available via memory_fetch_more.",
 });
 const WEIGHTS = Object.freeze({ queryRelevance: 0.45, graphProximity: 0.20, derivedWeight: 0.15, intersectionConfidence: 0.15, typeFit: 0.05 });
+const clamp01 = (value) => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
 const round6 = (value) => Math.round((Number.isFinite(value) ? value : 0) * 1e6) / 1e6;
 const compareText = (a, b) => String(a) === String(b) ? 0 : String(a) < String(b) ? -1 : 1;
 const confidence = (size) => round6(Math.log2(1 + Math.min(Math.max(size, 1), 4)) / Math.log2(5));
 const directionId = (slug) => `dir_${createHash("sha256").update(slug).digest("hex").slice(0, 12)}`;
 const baseScore = (s) => round6(Object.entries(WEIGHTS).reduce((sum, [key, weight]) => sum + weight * s[key], 0));
 const factId = (map, slug) => map instanceof Map ? map.get(slug) : map?.[slug];
+const mapValue = (map, slug) => map instanceof Map ? map.get(slug) : map?.[slug];
+
+function explorationValue(seed, slug, cap) {
+  if (seed === undefined || seed === null || !Number.isFinite(cap) || cap <= 0) return 0;
+  const digest = createHash("sha256").update(`${String(seed)}\0${slug}`).digest();
+  return round6((digest.readUInt32BE(0) / 0xffffffff) * cap);
+}
 
 function typeInfo(type, queryTokens) {
   const exact = String(type).toLowerCase().split(/[_/-]+/u).filter(Boolean)
@@ -40,7 +49,7 @@ function makeCandidate(source, keywordSeeds, vectorSeeds, queryTokens, config) {
     compactTokenCost: wrapped(projection.compact), standardTokenCost: wrapped(projection.standard),
     directKeyword: keywordSeeds.has(source.memory.slug), directVector: vectorSeeds.has(source.memory.slug),
     directionEvidence: new Map(), mergedSlugs: [source.memory.slug],
-    scores: { queryRelevance: source.queryRelevance, graphProximity: 0, derivedWeight: 0, intersectionConfidence: 0, typeFit: type.typeFit, baseScore: 0 },
+    scores: { queryRelevance: source.queryRelevance, graphProximity: 0, derivedWeight: source.derivedWeight, intersectionConfidence: 0, typeFit: type.typeFit, baseScore: 0 },
   };
 }
 
@@ -189,21 +198,28 @@ function publicCandidate(item, rank, level = "standard", tokenCost = item.standa
     quotaGroup: item.quotaGroup, scores: Object.fromEntries(Object.entries(item.scores).map(([key, value]) => [key, round6(value)])) };
 }
 
-export function rankMemoryCandidates({ query, memories, factIdsBySlug = null, tokenBudget, config: overrides = {} } = {}) {
+export function rankMemoryCandidates({
+  query, memories, factIdsBySlug = null, derivedWeightsBySlug = null,
+  explorationSeed = null, tokenBudget, config: overrides = {},
+} = {}) {
   if (typeof query !== "string" || !normalizeMemoryText(query)) throw new TypeError("query must be a non-empty string");
   if (!Array.isArray(memories)) throw new TypeError("memories must be an array");
   const config = { ...DEFAULTS, ...overrides }, budget = tokenBudget ?? config.defaultTokenBudget;
   if (!Number.isInteger(budget) || budget < config.minTokenBudget || budget > config.maxTokenBudget) throw new RangeError(`tokenBudget must be an integer from ${config.minTokenBudget} to ${config.maxTokenBudget}`);
   const active = memories.filter((item) => item && typeof item.slug === "string" && (item.status ?? "active") === "active")
     .map((item) => ({ ...item, type: String(item.type ?? "unknown"), description: String(item.description ?? "") })).sort((a, b) => compareText(a.slug, b.slug));
-  const emptyAudit = { pipelineVersion: M3_PIPELINE_VERSION, estimator: "vera-utf8-v1", tokenBudget: budget, usedTokens: 0, seedSlugs: [], omittedSlugs: [], counts: { active: 0, seeds: 0, expanded: 0, deduplicated: 0, selected: 0 } };
+  const emptyAudit = { pipelineVersion: MEMORY_PIPELINE_VERSION, estimator: "vera-utf8-v1", tokenBudget: budget, usedTokens: 0, seedSlugs: [], omittedSlugs: [], counts: { active: 0, seeds: 0, expanded: 0, deduplicated: 0, selected: 0 } };
   if (!active.length) return { candidates: [], orderedCandidates: [], selectedCount: 0, directions: [], audit: emptyAudit };
   const texts = active.map((item) => `${item.description}\n${item.content ?? ""}`), tokens = texts.map((text) => tokenizeMemoryText(text));
   const rawKeyword = computeMemoryBm25Scores(tokens, tokenizeMemoryText(query), config), maxKeyword = Math.max(0, ...rawKeyword);
   const keyword = rawKeyword.map((score) => round6(maxKeyword ? score / maxKeyword : 0));
   const tfidf = buildMemoryTfidfModel(texts), queryVector = tfidf.vectorFor(query);
   const vector = tfidf.documentVectors.map((item) => round6(memoryCosine(queryVector, item)));
-  const bySlug = new Map(active.map((memory, index) => [memory.slug, { memory, queryRelevance: round6(Math.max(keyword[index], vector[index])) }]));
+  const bySlug = new Map(active.map((memory, index) => {
+    const stableWeight = clamp01(Number(mapValue(derivedWeightsBySlug, memory.slug)));
+    const derivedWeight = round6(clamp01(stableWeight + explorationValue(explorationSeed, memory.slug, config.explorationCap)));
+    return [memory.slug, { memory, queryRelevance: round6(Math.max(keyword[index], vector[index])), derivedWeight }];
+  }));
   const top = (scores) => active.map((item, index) => ({ slug: item.slug, score: scores[index] })).filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || compareText(a.slug, b.slug)).slice(0, config.seedWidth);
   const keywordTop = top(keyword), vectorTop = top(vector), keywordSeeds = new Set(keywordTop.map((item) => item.slug)), vectorSeeds = new Set(vectorTop.map((item) => item.slug));
@@ -223,7 +239,7 @@ export function rankMemoryCandidates({ query, memories, factIdsBySlug = null, to
   const orderedCandidates = ranked.ordered.map((item, index) => publicCandidate(item, index + 1));
   const candidates = page.selected.map(({ item, level, tokenCost }, index) => publicCandidate(item, index + 1, level, tokenCost));
   return { candidates, orderedCandidates, selectedCount: page.selectedCount, directions,
-    audit: { pipelineVersion: M3_PIPELINE_VERSION, estimator: "vera-utf8-v1", tokenBudget: budget, usedTokens, weights: { ...WEIGHTS }, seedSlugs: seeds,
+    audit: { pipelineVersion: MEMORY_PIPELINE_VERSION, estimator: "vera-utf8-v1", tokenBudget: budget, usedTokens, weights: { ...WEIGHTS }, seedSlugs: seeds,
       keywordSeedSlugs: keywordTop.map((item) => item.slug), vectorSeedSlugs: vectorTop.map((item) => item.slug),
       targetShares: Object.fromEntries([...ranked.targets].map(([key, value]) => [key, round6(value)])), omittedSlugs: page.remaining.map((item) => item.memory.slug),
       counts: { active: active.length, seeds: seeds.length, expanded: expanded.size, deduplicated: deduped.length, selected: page.selectedCount } } };

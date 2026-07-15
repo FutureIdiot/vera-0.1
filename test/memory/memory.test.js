@@ -32,11 +32,11 @@ function operation({ kind, slug, value, patch, ifMatch, agentId = AGENT_ID, orig
   };
 }
 
-async function withVault(fn, { resolveSource, writeMemoryFile } = {}) {
+async function withVault(fn, { resolveSource, onExternalEdit, writeMemoryFile } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "vera-memory-test-"));
   const vaultPath = join(dir, "vault");
   const agentPath = join(vaultPath, AGENT_ID);
-  const vault = createMemoryVault({ vaultPath, resolveSource, writeMemoryFile });
+  const vault = createMemoryVault({ vaultPath, resolveSource, onExternalEdit, writeMemoryFile });
   try {
     await fn({ vault, vaultPath, agentPath, agentId: AGENT_ID });
   } finally {
@@ -107,6 +107,55 @@ test("same ifMatch concurrent updates produce one winner and one 409 current aut
     assert.ok(["updated A", "updated B"].includes(current.content));
     assert.notEqual(current.version, created.version);
     assert.deepEqual(await vault.getMemory(agentId, created.slug), current);
+  });
+});
+
+test("Memory batch preflights every version and publishes one index generation", async () => {
+  await withVault(async ({ vault, agentId }) => {
+    const alpha = await vault.saveMemory(agentId, memoryInput({ slug: "batch-alpha" }));
+    const beta = await vault.saveMemory(agentId, memoryInput({ slug: "batch-beta" }));
+    const before = await vault.listWithDiagnostics(agentId);
+    const receipts = [];
+    await vault.applyBatch(agentId, [
+      operation({ kind: "update", slug: alpha.slug, ifMatch: alpha.version, patch: { content: "Alpha updated" }, origin: "memory-dream" }),
+      operation({ kind: "archive", slug: beta.slug, ifMatch: beta.version, patch: {}, origin: "memory-dream" }),
+    ], { onApplied: ({ operation: applied }) => receipts.push(applied.slug) });
+    const after = await vault.listWithDiagnostics(agentId);
+    assert.equal(after.index.generation, before.index.generation + 1);
+    assert.deepEqual(receipts, ["batch-alpha", "batch-beta"]);
+    assert.equal((await vault.getMemory(agentId, "batch-alpha")).content, "Alpha updated");
+    assert.equal((await vault.getMemory(agentId, "batch-beta")).status, "archived");
+  });
+});
+
+test("Memory batch rolls back applied files and receipts when a later batch callback fails", async () => {
+  await withVault(async ({ vault, agentId }) => {
+    const alpha = await vault.saveMemory(agentId, memoryInput({ slug: "rollback-alpha", content: "Alpha before" }));
+    const beta = await vault.saveMemory(agentId, memoryInput({ slug: "rollback-beta", content: "Beta before" }));
+    const rolledBack = [];
+    await assert.rejects(() => vault.applyBatch(agentId, [
+      operation({ kind: "update", slug: alpha.slug, ifMatch: alpha.version, patch: { content: "Alpha after" }, origin: "memory-dream" }),
+      operation({ kind: "update", slug: beta.slug, ifMatch: beta.version, patch: { content: "Beta after" }, origin: "memory-dream" }),
+    ], {
+      onApplied: ({ index }) => { if (index === 1) throw new Error("receipt persistence failed"); },
+      onRolledBack: ({ operations }) => rolledBack.push(...operations.map((item) => item.slug)),
+    }), /receipt persistence failed/);
+    assert.deepEqual(rolledBack, ["rollback-alpha", "rollback-beta"]);
+    assert.equal((await vault.getMemory(agentId, alpha.slug)).content, "Alpha before");
+    assert.equal((await vault.getMemory(agentId, beta.slug)).content, "Beta before");
+    assert.equal((await vault.listWithDiagnostics(agentId)).memories.length, 2);
+  });
+});
+
+test("Dream snapshot hydrates one confirmed index generation under the Agent queue", async () => {
+  await withVault(async ({ vault, agentId }) => {
+    const saved = await vault.saveMemory(agentId, memoryInput({ slug: "snapshot-rule", content: "Before" }));
+    const frozenPromise = vault.snapshotMemories(agentId);
+    const updatePromise = vault.updateMemory(agentId, saved.slug, { ifMatch: saved.version, content: "After" });
+    const [frozen, updated] = await Promise.all([frozenPromise, updatePromise]);
+    assert.equal(frozen.memories[0].version, saved.version);
+    assert.equal(frozen.memories[0].content, "Before");
+    assert.notEqual(updated.version, frozen.memories[0].version);
   });
 });
 
@@ -209,6 +258,7 @@ test("legacy F1 frontmatter upgrades once to canonical scope and legacy manual s
 });
 
 test("external Obsidian edits are found by rescan as create, update, and remove", async () => {
+  const edits = [];
   await withVault(async ({ vault, agentPath, agentId }) => {
     const saved = await vault.saveMemory(agentId, memoryInput({ slug: "external-edit", description: "before edit" }));
     const path = join(agentPath, `${saved.slug}.md`);
@@ -231,7 +281,8 @@ test("external Obsidian edits are found by rescan as create, update, and remove"
     const removed = await vault.listWithDiagnostics(agentId);
     assert.deepEqual(removed.removed, [saved.slug]);
     assert.ok(!removed.memories.some((item) => item.slug === saved.slug));
-  });
+    assert.deepEqual(edits, [saved.slug, "external-added"]);
+  }, { onExternalEdit: ({ slug }) => edits.push(slug) });
 });
 
 test("bad files stay on disk, are excluded, and expose relative diagnostics plus 422 detail", async () => {

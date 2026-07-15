@@ -43,6 +43,7 @@ import * as pathMigrations from "../test/checks/path-migrations.mjs";
 import * as f3WebCore from "../test/checks/f3-web-core.mjs";
 import * as f4WebManagement from "../test/checks/f4-web-management.mjs";
 import * as memoryDigest from "../test/checks/memory-digest.mjs";
+import * as memoryM4 from "../test/checks/memory-m4.mjs";
 import * as memoryRetrieval from "../test/checks/memory-retrieval.mjs";
 import * as ollamaAdapter from "../test/checks/ollama-adapter.mjs";
 import * as codexAdapter from "../test/checks/codex-adapter.mjs";
@@ -139,6 +140,7 @@ async function main() {
   await responseRules.run(ctx);
   await settings.run(ctx);
   await memoryDigest.run(ctx);
+  await memoryM4.run(ctx);
   await memoryRetrieval.run(ctx);
   await ollamaAdapter.run(ctx);
   await ollamaAdapter.runReal(ctx);

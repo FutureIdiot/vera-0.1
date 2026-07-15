@@ -9,7 +9,9 @@ import { ApiError } from "../core/errors.js";
 import {
   parseMemoryDocument, serializeMemoryDocument, toIndexEntry, validateSources,
 } from "./memory-format.js";
-import { MEMORY_INDEX_SCHEMA_VERSION, readMemoryIndex, writeMemoryIndex } from "./memory-index.js";
+import {
+  MEMORY_INDEX_SCHEMA_VERSION, hasMemoryBatchMarker, readMemoryIndex, writeMemoryIndex,
+} from "./memory-index.js";
 import { createMemoryOperations } from "./memory-operations.js";
 import { createMemoryWriteQueue } from "./memory-write-queue.js";
 
@@ -76,7 +78,7 @@ async function atomicReplace(path, content, { createOnly = false } = {}) {
   }
 }
 
-export function createMemoryVault({ vaultPath, resolveSource, writeMemoryFile = atomicReplace } = {}) {
+export function createMemoryVault({ vaultPath, resolveSource, onExternalEdit = null, writeMemoryFile = atomicReplace } = {}) {
   let activeRoot = resolve(vaultPath);
   let epoch = 0;
   const queue = createMemoryWriteQueue();
@@ -121,7 +123,10 @@ export function createMemoryVault({ vaultPath, resolveSource, writeMemoryFile = 
     return parsed.memory;
   }
 
-  async function scanAt(root, agentId, { force = false, queueHeld = false } = {}) {
+  async function scanAt(root, agentId, { force = false, queueHeld = false, external = false, allowPendingBatch = false } = {}) {
+    if (!allowPendingBatch && await hasMemoryBatchMarker(root, agentId)) {
+      throw new ApiError("memory_provider_unavailable", "Memory maintenance recovery is in progress");
+    }
     const agentPath = agentPathFor(root, agentId);
     let dirents;
     try { dirents = await readdir(agentPath, { withFileTypes: true }); }
@@ -223,6 +228,11 @@ export function createMemoryVault({ vaultPath, resolveSource, writeMemoryFile = 
     catch (error) {
       indexWriteFailed = true;
     }
+    if (external && previous && typeof onExternalEdit === "function") {
+      for (const slug of [...created, ...updated]) {
+        try { onExternalEdit({ agentId, slug }); } catch {}
+      }
+    }
     return {
       agentId, scannedAt: new Date().toISOString(), created, updated, removed,
       unchangedCount: files.length - created.length - updated.length,
@@ -237,13 +247,32 @@ export function createMemoryVault({ vaultPath, resolveSource, writeMemoryFile = 
   }
 
   async function listWithDiagnostics(agentId) {
-    return queue.enqueue(agentId, () => scanAt(rootSnapshot().root, agentId, { queueHeld: true }));
+    return queue.enqueue(agentId, () => scanAt(rootSnapshot().root, agentId, { queueHeld: true, external: true }));
   }
   async function listMemories(agentId) { return (await listWithDiagnostics(agentId)).memories; }
+  async function snapshotMemories(agentId) {
+    return queue.enqueue(agentId, async () => {
+      const root = rootSnapshot().root;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const listed = await scanAt(root, agentId, { queueHeld: true, external: true });
+        const memories = [];
+        for (const item of listed.memories) {
+          const full = await readCanonical(root, agentId, item.slug, { queueHeld: true });
+          full.sources = await validateSourceRefs(full.sources);
+          memories.push(full);
+        }
+        const confirmed = await scanAt(root, agentId, { queueHeld: true, external: true });
+        if (confirmed.index.generation === listed.index.generation) {
+          return { memories, index: confirmed.index };
+        }
+      }
+      throw new ApiError("memory_provider_unavailable", "Memory snapshot changed while it was being frozen");
+    });
+  }
   async function rebuildIndex(agentId) {
     return queue.enqueue(agentId, () => scanAt(rootSnapshot().root, agentId, { force: true, queueHeld: true }));
   }
-  const { applyOperation, saveMemory, getMemory, updateMemory, deleteMemory } = createMemoryOperations({
+  const { applyOperation, applyBatch, finalizeBatch, saveMemory, getMemory, updateMemory, deleteMemory } = createMemoryOperations({
     queue, rootSnapshot, getActiveRoot: () => activeRoot, assertAgentId, assertSlug,
     filePathFor, agentPathFor, readCanonical, scanAt, validateSourceRefs,
     atomicReplace: writeMemoryFile, syncDirectory, invalidMemoryFile,
@@ -279,7 +308,7 @@ export function createMemoryVault({ vaultPath, resolveSource, writeMemoryFile = 
     return activeRoot;
   }
   return {
-    applyOperation, listMemories, listWithDiagnostics, rebuildIndex, saveMemory,
+    applyOperation, applyBatch, finalizeBatch, listMemories, listWithDiagnostics, snapshotMemories, rebuildIndex, saveMemory,
     getMemory, updateMemory, deleteMemory, inspect, reopen,
     drain: queue.drain, withExclusive: queue.withExclusive,
     getVaultPath: () => activeRoot,

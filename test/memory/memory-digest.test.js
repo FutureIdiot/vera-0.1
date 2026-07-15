@@ -381,13 +381,13 @@ test("supersede updates the same slug with explicit correction evidence and arch
   });
 });
 
-test("executor unavailable fails with a stable safe code", async () => {
+test("task unavailable fails with a stable safe code", async () => {
   const messages = [message("msg_one", 1, "Remember this")];
   await withService(messages, null, async ({ service }) => {
     const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
     const done = await waitForJob(service, job.id);
     assert.equal(done.status, "failed");
-    assert.equal(done.error.code, "executor_unavailable");
+    assert.equal(done.error.code, "memory_task_unavailable");
   });
 });
 
