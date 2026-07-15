@@ -69,7 +69,7 @@ Vera 不依赖小火箭的配置格式，只依赖它最终正确承载 Tailscal
 5. 配置`vera-gateway.service`：`PORT=3210`、data/vault路径、heartbeat配置、`ownerTailscaleLogins`；gateway只绑定回环。
 6. 使用Tailscale Serve把私网HTTPS地址转到`http://127.0.0.1:3210`，保持后台运行；不得启用Funnel。
 7. 手机与Mac分别通过`*.ts.net`地址验证health、页面、API和SSE。
-8. agent daemon配置同一私网URL + per-agent token，验证登录、run、流式回传、心跳和sessionState。
+8. agent daemon配置同一私网URL + per-agent token，验证登录、run、流式回传、心跳和CLI provider binding恢复；API Agent的规范history由gateway恢复。
 9. 验收完成后停止旧Mac gateway和cloudflared自启；旧文件只留冷备份。
 
 Tailscale Serve 是当前唯一入口实现，不再同时维护Caddy/nginx公网配置。部署命令与systemd整合方式在Phase 5.5实际落地验证后补回本文，不能把未经实测的示例当完成项。
@@ -107,14 +107,14 @@ VERA_<PROVIDER>_BIN=<local-cli-path>
 ### 6.3 Agent链路
 
 - Mac能解析私网域名并访问health；关闭Tailscale路径后立即失败。
-- daemon能login、订阅SSE、接收`run.requested`、回传delta/activity/message并同步sessionState。
+- daemon能login、订阅SSE、接收`run.requested`、回传delta/activity/message；CLI按`agentSessionId + generation`同步provider binding，API不另传opaque会话状态。
 - 连续运行至少30分钟确认SSE不结块。
 - 停gateway后daemon约45秒内停止在飞run并退出，不反复重连烧token。
 
 ### 6.4 单一事实来源与恢复
 
 - 手机、Mac Web和daemon观察到同一个gateway startedAt与SSE seq水位。
-- 重启gateway后daemon取回sessionState，手机客户端重连无事件缺口。
+- 重启gateway后daemon取回CLI provider bindings，API AgentSession由gateway规范history续接，手机客户端重连无事件缺口。
 - 备份恢复演练覆盖data、vault、secrets和agent tokens。
 
 ## 7. 日常运维
