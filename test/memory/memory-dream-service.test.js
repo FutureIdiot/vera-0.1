@@ -50,7 +50,7 @@ test("Dream job is idempotent, writes through one batch, and exposes only a safe
     payloadKeys = Object.keys(target).sort();
     return { proposals: [{
       action: "update", targetSlug: target.slug, targetVersion: target.version,
-      description: "Maintained rule", content: "Maintained content.",
+      description: "Maintained rule",
     }] };
   }, async ({ service, memory }) => {
     const first = await service.enqueue({ agentId: AGENT, trigger: "manual", requestId: "request-one" });
@@ -61,7 +61,8 @@ test("Dream job is idempotent, writes through one batch, and exposes only a safe
     assert.equal(done.result.updatedCount, 1);
     assert.equal(calls, 1);
     assert.deepEqual(payloadKeys, ["content", "derived", "description", "links", "slug", "sources", "status", "type", "version"]);
-    assert.equal((await memory.getMemory(AGENT, "old-rule")).content, "Maintained content.");
+    assert.equal((await memory.getMemory(AGENT, "old-rule")).description, "Maintained rule");
+    assert.equal((await memory.getMemory(AGENT, "old-rule")).content, "Old content.");
     for (const secretField of ["memorySnapshot", "memoryTaskSnapshot", "memoryProviderSnapshot", "proposals", "receipts"]) {
       assert.equal(secretField in done, false);
     }
@@ -78,12 +79,12 @@ test("merge fails with write_conflict if its target is archived while the execut
       action: "merge", targetSlug: target.slug, targetVersion: target.version,
       sourceSlugs: [target.slug, other.slug],
       sourceVersions: { [target.slug]: target.version, [other.slug]: other.version },
-      type: "rule", description: "Merged rule", content: "Merged content.",
+      type: "rule", description: "Merged rule", content: "Old content.",
     }] };
   }, async ({ service, memory }) => {
     liveMemory = memory;
     await memory.saveMemory(AGENT, {
-      slug: "other-rule", type: "rule", description: "Other rule", content: "Other content.",
+      slug: "other-rule", type: "rule", description: "Other rule", content: "Old content.",
     });
     const queued = await service.enqueue({ agentId: AGENT, trigger: "manual", requestId: "request-merge-conflict" });
     const done = await waitFor(service, queued.job.id);

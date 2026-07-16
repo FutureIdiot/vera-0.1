@@ -16,6 +16,7 @@ import { registerAgentRoutes } from "./agents/routes.js";
 import { listSpaces } from "./spaces/spaces.js";
 import { registerSpaceRoutes } from "./spaces/routes.js";
 import { createMemoryVault } from "./memory/memory.js";
+import { createMemoryEmbeddingIndex } from "./memory/memory-embedding-index.js";
 import { createMemoryRetrievalService } from "./memory/memory-retrieval.js";
 import { registerMemoryRoutes } from "./memory/routes.js";
 import { createMemoryDigestService } from "./memory/memory-digest-service.js";
@@ -78,9 +79,11 @@ const memory = createMemoryVault({
     else store.insert("memorySignals", signal);
   },
 });
+const memoryEmbeddingIndex = createMemoryEmbeddingIndex({ memory });
 const memoryRetrieval = createMemoryRetrievalService({
   store,
   memory,
+  embeddingIndex: memoryEmbeddingIndex,
   config: {
     residentIndexMaxLines: config.memory.residentIndexMaxLines,
     injectionTokenBudget: config.memory.retrievalTokenBudget,
@@ -254,6 +257,7 @@ async function shutdown() {
   memoryDreamScheduler.close();
   await memoryDreamService.close();
   await memoryDigestService.close();
+  await memoryEmbeddingIndex.drain();
   for (const adapter of Object.values(adapters)) {
     try {
       await adapter.shutdown?.();

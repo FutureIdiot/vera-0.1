@@ -170,7 +170,7 @@ test("frozen cursors paginate idempotently without leaking unsafe state", async 
     const result = await retrieval.search({ context, query: "规则 检索 稳定", tokenBudget: 64 });
     assert.ok(result.cursor);
     const storedSession = store.find("memoryRecallSessions", recall.id);
-    assert.equal(storedSession.cursors.find((item) => item.id === result.cursor).pipelineVersion, "m4-r1");
+    assert.equal(storedSession.cursors.find((item) => item.id === result.cursor).pipelineVersion, "m4-r2");
     const frozenSlug = storedSession.cursors.find((item) => item.id === result.cursor).items[0].slug;
     const authority = await memory.getMemory("agt_alpha1", frozenSlug);
     await memory.deleteMemory("agt_alpha1", frozenSlug, authority.version);
@@ -202,6 +202,73 @@ test("frozen cursors paginate idempotently without leaking unsafe state", async 
       await readFile(join(dataPath, "memorySignals.json"), "utf8"),
     ].join("\n");
     assert.doesNotMatch(persisted, /#A1B2C3|stains|provider|sessionState|memorySessionId|accountId|spaceId|规则 检索/u);
+  });
+});
+
+test("delivering one semantic-cluster representative marks every merged slug across calls", async () => {
+  await withFixture(async ({ store, memory, retrieval }) => {
+    for (const slug of ["duplicate-a", "duplicate-b"]) {
+      await save(memory, "agt_alpha1", slug, {
+        description: "Use one private gateway",
+        content: "The gateway is the single authority.",
+      });
+    }
+    const recall = await session(retrieval);
+    const context = { agentId: "agt_alpha1", agentSessionId: recall.agentSessionId, generation: 1 };
+    const first = await retrieval.search({ context, query: "private gateway authority" });
+    assert.equal(first.nodes.length, 1);
+    assert.deepEqual(
+      [...store.find("memoryRecallSessions", recall.id).deliveredSlugs].sort(),
+      ["duplicate-a", "duplicate-b"],
+    );
+    const second = await retrieval.search({ context, query: "private gateway authority" });
+    assert.deepEqual(second.nodes, []);
+  });
+});
+
+test("retrieval uses injected real embedding results and reports vector degradation safely", async () => {
+  await withFixture(async ({ memory, store }) => {
+    await save(memory, "agt_alpha1", "orchid-care", {
+      description: "兰花养护要点",
+      content: "保持散射光并控制浇水频率。",
+    });
+    await save(memory, "agt_alpha1", "deploy-rule", {
+      description: "部署边界",
+      content: "只使用一个本地gateway。",
+    });
+    let degraded = false;
+    const embeddingIndex = {
+      async prepare({ memories }) {
+        return {
+          vectorsBySlug: new Map(memories.map((item) => [
+            item.slug,
+            item.slug === "orchid-care" ? [1, 0] : [0, 1],
+          ])),
+          queryVector: [1, 0],
+          embeddingGeneration: 3,
+          degraded,
+        };
+      },
+    };
+    const retrieval = createMemoryRetrievalService({ store, memory, embeddingIndex });
+    const recall = await retrieval.ensureSession({
+      agentId: "agt_alpha1", agentSessionId: "ags_embedding", generation: 1,
+    });
+    const context = { agentId: "agt_alpha1", agentSessionId: recall.agentSessionId, generation: 1 };
+    const result = await retrieval.search({ context, query: "how should I water this plant" });
+    assert.equal(result.nodes[0].slug, "orchid-care");
+    assert.ok(result.nodes[0].reasons.some((reason) => reason.kind === "vector"));
+    assert.deepEqual(result.degradedChannels, []);
+
+    degraded = true;
+    const next = await retrieval.ensureSession({
+      agentId: "agt_alpha1", agentSessionId: "ags_embedding_degraded", generation: 1,
+    });
+    const fallback = await retrieval.search({
+      context: { agentId: "agt_alpha1", agentSessionId: next.agentSessionId, generation: 1 },
+      query: "gateway",
+    });
+    assert.deepEqual(fallback.degradedChannels, ["vector"]);
   });
 });
 

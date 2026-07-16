@@ -22,8 +22,8 @@ function bySlug(result, slug) {
   return result.candidates.find((candidate) => candidate.slug === slug);
 }
 
-test("m4-r1 token estimator is deterministic over NFKC UTF-8 bytes", () => {
-  assert.equal(MEMORY_PIPELINE_VERSION, "m4-r1");
+test("m4-r2 token estimator is deterministic over NFKC UTF-8 bytes", () => {
+  assert.equal(MEMORY_PIPELINE_VERSION, "m4-r2");
   assert.equal(estimateMemoryTokens("Ａ"), 1, "full-width A normalizes to one ASCII byte");
   assert.equal(estimateMemoryTokens("你好"), 2);
   assert.equal(estimateMemoryTokens(""), 1);
@@ -73,14 +73,21 @@ test("seeded exploration is deterministic, capped, and never expands the recalle
   }
 });
 
-test("BM25 and char-trigram channels are equal-width, deterministic, and exclude archived Memory", () => {
+test("BM25 and real embedding channels are equal-width, deterministic, and exclude archived Memory", () => {
   const memories = [
     memory("zeta", { description: "console layout unrelated" }),
     memory("alpha", { description: "project rule keeps mobile first" }),
     memory("archived-hit", { description: "project rule archived", status: "archived" }),
   ];
-  const first = rankMemoryCandidates({ query: "project rules", memories });
-  const second = rankMemoryCandidates({ query: "project rules", memories: [...memories].reverse() });
+  const embeddingBySlug = {
+    zeta: [0, 1],
+    alpha: [1, 0],
+    "archived-hit": [1, 0],
+  };
+  const first = rankMemoryCandidates({ query: "project rules", memories, embeddingBySlug, queryEmbedding: [1, 0] });
+  const second = rankMemoryCandidates({
+    query: "project rules", memories: [...memories].reverse(), embeddingBySlug, queryEmbedding: [1, 0],
+  });
 
   assert.equal(first.candidates[0].slug, "alpha");
   assert.ok(first.candidates[0].reasons.some((reason) => reason.kind === "keyword"));
@@ -89,6 +96,15 @@ test("BM25 and char-trigram channels are equal-width, deterministic, and exclude
   assert.deepEqual(first, second, "input order must not affect ranking or audit");
   assert.ok(first.audit.keywordSeedSlugs.length <= 24);
   assert.ok(first.audit.vectorSeedSlugs.length <= 24);
+});
+
+test("char-trigram similarity never creates a query vector seed without a real embedding", () => {
+  const result = rankMemoryCandidates({
+    query: "project rules",
+    memories: [memory("alpha", { description: "project rule keeps mobile first" })],
+  });
+  assert.deepEqual(result.audit.vectorSeedSlugs, []);
+  assert.equal(result.candidates[0].reasons.some((reason) => reason.kind === "vector"), false);
 });
 
 test("multiple seed directions increase confidence once each while repeated paths in one direction do not", () => {

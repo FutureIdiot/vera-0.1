@@ -280,12 +280,14 @@
 ### P5-M3.1 — 真实 embedding 召回与 merged slug 修复
 
 - [x] **M3.1契约先行（2026-07-15）**：pipeline升级为`m4-r2`。gateway通过loopback Ollama `qwen3-embedding:0.6b`调用`/api/embed`，`truncate:false`，冻结1024维及完整model digest；不引入执行Agent、Account、MCP模型字段、向量数据库或provider注册表。
-- [ ] 默认`vera.markdown`按`Type + Description + Content`生成每条Memory一个向量，写入`<vault>/.vera-index/<agentId>.embedding.json`派生sidecar；记录model tag+完整digest、维度、投影版本与Memory version。单条变化增量更新，模型/维度/投影变化或损坏时全量重建；sidecar不进Git、不迁移。
-- [ ] Recall并行取得BM25 top24与embedding top24，取并集后再做slug归并、图扩散、五项评分、近重复聚类、软配额与token预算。embedding仅补充query语义召回；char-trigram仅用于确定性近重复与冗余惩罚，不能冒充embedding或事实身份。
-- [ ] 修复代表节点交付：被返回代表及全部`mergedSlugs`同时写入当前`agentSessionId + generation`的delivered集合，保证后续Recall、`fetch_more`与并发渠道不重复注入同一语义簇。
-- [ ] Ollama/模型不可用、digest不符、索引损坏或请求失败时fail open到keyword + graph，公开`degradedChannels:["vector"]`且不阻塞聊天；补齐中英文语义召回、跨slug近重复、重建/增量、降级、游标冻结和真实Ollama smoke。
+- [x] 默认`vera.markdown`按`Type + Description + Content`生成每条Memory一个向量，写入`<vault>/.vera-index/<agentId>.embedding.json`派生sidecar；记录model tag+完整digest、维度、投影版本与Memory version。单条变化增量更新，模型/维度/投影变化或损坏时全量重建；sidecar不进Git、不迁移。
+- [x] Recall并行取得BM25 top24与embedding top24，取并集后再做slug归并、图扩散、五项评分、近重复聚类、软配额与token预算。embedding仅补充query语义召回；char-trigram仅用于确定性近重复与冗余惩罚，不能冒充embedding或事实身份。
+- [x] 修复代表节点交付：被返回代表及全部`mergedSlugs`同时写入当前`agentSessionId + generation`的delivered集合，保证后续Recall、`fetch_more`与并发渠道不重复注入同一语义簇。
+- [x] Ollama/模型不可用、digest不符、索引损坏或请求失败时fail open到keyword + graph，公开`degradedChannels:["vector"]`且不阻塞聊天；补齐中英文语义召回、跨slug近重复、重建/增量、降级、游标冻结和真实Ollama smoke。
 
 **M3.1验收**：删掉`.vera-index`可从Markdown等价重建；仅改一条Memory只重算一条；相同query在相同generation中不会以代表/merged成员换皮重复注入；关闭Ollama仍能得到可用关键词/图结果且错误不泄露endpoint或宿主路径；MCP保持程序检索，无semantic Agent或模型配置。
+
+**M3.1当前验收（2026-07-16）**：`m4-r2`已接入gateway本地Ollama embedding、后台可重建sidecar、model digest/维度/投影/Memory version绑定、增量更新、keyword+graph fail-open、vector降级公开、generation/cursor冻结及merged slug共同交付。普通`npm test`为267通过、3个真实provider/embedding smoke默认skip；`npm run analyze:web`通过，默认chat gzip 20234/204800。已提供`VERA_TEST_OLLAMA_EMBEDDING=1`真实`qwen3-embedding:0.6b` smoke，本窗口未自动下载模型或把未运行smoke冒充通过。
 
 ### P5-M4 — 派生权重与 dream 维护
 
@@ -293,12 +295,14 @@
 - [x] **任务归属、执行资源与单一事实来源（2026-07-15后端完成）**：Digest/Dream始终归属于Memory所属owner Agent A，proposal也只能写A的active Provider；Data → Memory为两类任务分别保存可选`executorAgentId`（`null`=A自己）、`modelMode: inherit | fixed`和task model。executor B只提供其Home Account connection、adapter/runtime与已验证task model，不取得Memory所有权，也不是Memory Hook执行者。`inherit`在入队时解析executor当时的默认聊天模型，`fixed`只可选择executor Home Account同一connection下、已通过对应任务资格验证的模型。两类资格分别验证，入队快照不持久化connection或secret；不可用时进入`failed`且无静默fallback。
 - [x] **配置迁移一次完成（2026-07-15）**：M2全局Digest旧键经持久`memory-config-v1` marker一次迁移为per-Agent配置，崩溃重启幂等；迁移后Settings白名单、runtime与旧System控件均不再读写这些键，新Agent的Digest/Dream默认均为`manual`。
 - [x] **派生权重（2026-07-15）**：以vault+signals可重建的双链入度、usage、owner编辑、置顶与type时间衰减替换M3中性贡献；不改变候选生成、图扩散、查询相关性、去重、软配额或token预算，stain不参与，确定性探索受`0.02`上限约束。
-- [x] **Dream异步维护（2026-07-15历史实现）**：持久job已执行严格`keep/update/merge/archive` proposal；整批预检后进入同一Agent单写者，保留sources与组外双链，默认归档不物理删除，失败不阻塞聊天。现行契约进一步收窄为只允许语义不变的update、明确重复merge与有replacement的冗余archive；实现与validator仍需按下一条整改，不能把历史能力范围当成当前规范。
+- [x] **Dream异步维护（2026-07-15历史实现，2026-07-16收窄）**：持久job执行严格`keep/update/merge/archive` proposal；整批预检后进入同一Agent单写者，保留sources与组外双链，默认归档不物理删除，失败不阻塞聊天。现行validator只允许语义不变的update、明确重复merge与有replacement的冗余archive，不能把历史能力范围当成当前规范。
 - [x] **Dream批量发布与调度（2026-07-15）**：批次逐文件原子提交并持久receipt，批末只重建一次索引generation；manual与daily/weekly/custom schedule复用同一幂等状态机，重复请求不并发，Codex/Ollama使用独立Dream timeout与精确已验证task model。
-- [ ] **Dream语义与Provider能力整改**：validator与任务payload只允许keep、明确重复merge、语义不变的结构/description/links update、带replacement的冗余archive；无原始Message证据时拒绝事实值纠正、supersede、常识过期判断与无替代归档。默认Provider分别声明`digest.ingest`和`dream.maintenance`支持的operation；自定义Provider缺少某能力时Data页面明确不可用，不强行套用Markdown维护模式。
+- [x] **Dream语义与Provider能力整改**：validator与任务payload只允许keep、明确重复merge、语义不变的结构/description/links update、带replacement的冗余archive；无原始Message证据时拒绝事实值纠正、supersede、常识过期判断与无替代归档。默认Provider分别声明`digest.ingest`和`dream.maintenance`支持的operation；自定义Provider缺少某能力时Data页面明确不可用，不强行套用Markdown维护模式。
 - [ ] **Data → Memory真实页面在后端之后接入**：Agent设置固定为Skills / Hooks / MCP / Data四个平级入口，Data下进入Memory。页面的“Memory结构”展示唯一active Provider（默认文案`Vera（兼容 Obsidian）`，底层`vera.markdown`；仅列实际安装且声明`memory-provider`能力的Provider），并显示条件化Provider配置、受控位置、连接状态、长期Memory条数/逻辑大小/token估算。待整理区域按SpaceSession显示未Digest Message数、字符数和估算token，并单列“带入当前AgentSession将额外消耗的上下文压力”；跨Space总量不得冒充下一轮精确tokens。Digest与Dream分别展示executor、任务模型、能力可用性、运行状态和手动动作；Dream另有schedule/上次/下次/“立即Dream”。Recall/Write只在Hooks，Data不引用、不投影、不保存其状态。普通第三方MCP不进入Provider列表。M4页面先完整支持已实现的`vera.markdown` Provider，不做不可用的“自定义”假选项；通用自定义Provider安装与runtime依赖Phase 6。
 
 **M4后端当前验收（2026-07-15）**：per-Agent Provider/Digest/Dream配置、任务资格与冻结快照、Recall/Write binding gate、派生权重、Dream proposal/批量单写者/receipt恢复、IANA调度、Codex/Ollama隔离执行及安全HTTP/SSE摘要均已接入。普通`npm test`为236通过、2个真实provider smoke默认skip；`node scripts/verify.mjs`为79通过、0失败。Data → Memory页面仍按上条单独接入，不在本后端阶段伪造UI。
+
+**M4语义收口验收（2026-07-16）**：Dream无Message证据时拒绝事实内容重写，merge必须由同一fact identity或确定性相同正文证明为重复，archive必须指向另一条明确重复的active replacement；默认`vera.markdown`分别声明`digest.ingest=[create,update,supersede,archive]`与`dream.maintenance=[update,merge,archive,structureRewrite]`。相关测试已并入上方M3.1记录的全量`npm test`结果；Data → Memory页面仍按下一条单独接入。
 
 **M4 验收**：契约先于代码落地，后端Dream与任务模型配置闭环后才接Data → Memory页面；Recall/Write Hook、MCP主动访问、Digest和Dream路径的触发者/输入/权限测试证明模型不能自行监听或越权写入。关闭Recall只停止自动注入，关闭Write只停止自动Digest，均不影响Message保存或其余显式路径；Dream不依赖Hook。Digest与Dream始终写owner Agent的Provider；选择executor B时只借用B的Home Account connection/runtime与已验证task model，输入中不含B的AgentSession、checkpoint、API history、CLI provider binding、Memory、system prompt、Workspace或Tools。`inherit/fixed`解析和`memoryTaskSnapshot`可复现，未验证或失效executor/model明确失败且零写入、无静默fallback。Dream无原始Message时不能改事实，merge保留sources/双链，archive必须有replacement且可恢复；权重可由输入完全复算；索引批量换版不会改变正在进行的generation；dream失败有明确状态且不阻塞主流程。Data → Memory只列真实可用Provider，默认`vera.markdown`的位置、长期大小、分SpaceSession待整理量、当前窗口token压力、任务状态、schedule、立即Dream与长期记忆管理均读写真实API，刷新后回显。Data不出现Recall/Write，Hooks与Data各自只有一个事实来源；自定义Provider未实现时不得出现可选假状态。
 

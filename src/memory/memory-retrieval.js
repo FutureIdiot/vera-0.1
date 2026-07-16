@@ -36,6 +36,7 @@ function publicNode(item, projectionLevel = item.projectionLevel ?? "standard", 
 function frozenNode(item) {
   return {
     ...publicNode(item),
+    mergedSlugs: [...new Set(item.mergedSlugs ?? [item.slug])],
     projectionOptions: { ...item.projectionOptions },
     compactTokenCost: item.compactTokenCost,
     standardTokenCost: item.standardTokenCost,
@@ -60,7 +61,7 @@ function validQuery(query) {
 }
 
 export function createMemoryRetrievalService({
-  store, memory, config = {}, isRecallEnabled = () => true, now = () => new Date().toISOString(),
+  store, memory, embeddingIndex = null, config = {}, isRecallEnabled = () => true, now = () => new Date().toISOString(),
 } = {}) {
   if (!store || !memory) throw new Error("createMemoryRetrievalService requires store and memory");
   let residentIndexMaxLines = config.residentIndexMaxLines ?? 25;
@@ -98,7 +99,7 @@ export function createMemoryRetrievalService({
       else if (usedTokens + compactCost <= tokenBudget) { nodes.push(compact); usedTokens += compactCost; }
       else break;
     }
-    return { nodes, usedTokens, remaining: items.slice(nodes.length) };
+    return { nodes, selectedItems: items.slice(0, nodes.length), usedTokens, remaining: items.slice(nodes.length) };
   }
   async function searchLocked({ context, query, tokenBudget, kind = "search_returned", reservedTokens = 0, maximumBudget = MAX_PAGE_BUDGET, explorationSeed = undefined }) {
     const session = findSession(context);
@@ -110,8 +111,25 @@ export function createMemoryRetrievalService({
     const derivedWeightsBySlug = calculateMemoryDerivedWeights({
       agentId: context.agentId, memories, signals: state.listSignals(), now: now(),
     });
+    let embedding = {
+      vectorsBySlug: new Map(),
+      queryVector: null,
+      embeddingGeneration: null,
+      degraded: true,
+    };
+    if (embeddingIndex?.prepare) {
+      try {
+        embedding = await embeddingIndex.prepare({
+          agentId: context.agentId,
+          memories,
+          memoryGeneration: generation,
+          query,
+        });
+      } catch {}
+    }
     const ranked = rankMemoryCandidates({
       query, memories: eligible, factIdsBySlug: factIds(context.agentId), derivedWeightsBySlug,
+      embeddingBySlug: embedding.vectorsBySlug, queryEmbedding: embedding.queryVector,
       explorationSeed: explorationSeed ?? derivedWeightSeed,
       tokenBudget: MAX_PAGE_BUDGET,
     });
@@ -119,17 +137,19 @@ export function createMemoryRetrievalService({
     const page = pack(frozen, Math.max(0, budget - reservedTokens));
     const retrievalId = opaque("mrt");
     const cursor = page.remaining.length ? saveCursor(session, {
-      retrievalId, pipelineVersion: MEMORY_PIPELINE_VERSION, indexGeneration: generation,
+      retrievalId, pipelineVersion: MEMORY_PIPELINE_VERSION,
+      memoryIndexGeneration: generation, embeddingGeneration: embedding.embeddingGeneration,
+      degradedChannels: embedding.degraded ? ["vector"] : [],
       direction: null, items: page.remaining, directions: ranked.directions, cached: null,
     }) : null;
     const response = {
       retrievalId, nodes: page.nodes, cursor, directions: ranked.directions.map(({ id, seedSlug }) => ({ id, seedSlug })),
       budget: { estimator: "vera-utf8-v1", limitTokens: budget, usedTokens: page.usedTokens,
         omittedCount: page.remaining.length, minimumNextNodeTokens: page.remaining.length ? estimateMemoryTokens(nodeLine(publicNode(page.remaining[0], "compact"))) : 0 },
-      degradedChannels: [],
+      degradedChannels: embedding.degraded ? ["vector"] : [],
     };
     addUsage(context, retrievalId, page.nodes, kind);
-    addDelivered(session, page.nodes.map((item) => item.slug));
+    addDelivered(session, page.selectedItems.flatMap((item) => item.mergedSlugs ?? [item.slug]));
     return response;
   }
   async function search(args) {
@@ -168,6 +188,9 @@ export function createMemoryRetrievalService({
     const session = findSession(context);
     let saved = (session.cursors ?? []).find((item) => item.id === cursor);
     if (!saved) throw fail("memory_cursor_invalid", "Memory cursor is invalid");
+    if (saved.pipelineVersion !== MEMORY_PIPELINE_VERSION) {
+      throw fail("memory_cursor_invalid", "Memory cursor pipeline is no longer available");
+    }
     if (Date.parse(saved.expiresAt) <= Date.parse(now())) throw fail("memory_cursor_expired", "Memory cursor has expired");
     const allowed = new Set(["all", ...(saved.directions ?? []).map((item) => item.id)]);
     if (!allowed.has(direction) || (saved.direction && saved.direction !== direction)) throw fail("memory_cursor_invalid", "Memory cursor direction is invalid");
@@ -189,18 +212,20 @@ export function createMemoryRetrievalService({
     }
     const nextCursor = page.remaining.length ? saveCursor(session, {
       retrievalId: saved.retrievalId, pipelineVersion: saved.pipelineVersion,
-      indexGeneration: saved.indexGeneration, direction, items: page.remaining,
+      memoryIndexGeneration: saved.memoryIndexGeneration, embeddingGeneration: saved.embeddingGeneration,
+      degradedChannels: saved.degradedChannels ?? [],
+      direction, items: page.remaining,
       directions: saved.directions, cached: null,
     }) : null;
     const response = {
       retrievalId: saved.retrievalId, nodes: authorityNodes, cursor: nextCursor, directions: [],
       budget: { estimator: "vera-utf8-v1", limitTokens: budget, usedTokens: page.usedTokens,
         omittedCount: page.remaining.length, minimumNextNodeTokens: page.remaining.length ? estimateMemoryTokens(nodeLine(publicNode(page.remaining[0], "compact"))) : 0 },
-      degradedChannels: [],
+      degradedChannels: saved.degradedChannels ?? [],
     };
     cacheCursor(session, saved.id, { response });
     addUsage(context, saved.retrievalId, authorityNodes, "fetch_more_returned");
-    addDelivered(session, authorityNodes.map((item) => item.slug));
+    addDelivered(session, page.selectedItems.flatMap((item) => item.mergedSlugs ?? [item.slug]));
     return response;
   }
   async function fetchMore(args) {
@@ -233,7 +258,8 @@ export function createMemoryRetrievalService({
     });
     const linksCursor = remaining.length ? saveCursor(session, {
       retrievalId: opaque("mrt"), pipelineVersion: MEMORY_PIPELINE_VERSION,
-      indexGeneration: null, direction: "all", items: remaining, directions: [], cached: null,
+      memoryIndexGeneration: null, embeddingGeneration: null, degradedChannels: [],
+      direction: "all", items: remaining, directions: [], cached: null,
     }) : null;
     const prior = hasUsage(context, slug, "detail_opened");
     if (!prior) addUsage(context, null, [{ slug }], "detail_opened");

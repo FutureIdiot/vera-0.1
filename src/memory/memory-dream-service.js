@@ -10,6 +10,7 @@ import {
   planDreamOperations,
   validateDreamProposals,
 } from "./memory-dream-proposals.js";
+import { VERA_MARKDOWN_CAPABILITIES } from "./memory-provider-capabilities.js";
 
 const COLLECTION = "memoryDreamJobs";
 const ACTIVE = new Set(["queued", "running", "applying"]);
@@ -76,6 +77,7 @@ export function createMemoryDreamService({
   freezeTask,
   validateTaskSnapshot = async () => {},
   proposalExecutor,
+  providerCapabilities = VERA_MARKDOWN_CAPABILITIES,
   batchSize = 256,
   pipelineVersion = PIPELINE_VERSION,
   onJobUpdated = () => {},
@@ -90,6 +92,14 @@ export function createMemoryDreamService({
   let accepting = true;
 
   const jobs = () => store.list(COLLECTION);
+  function factIds(agentId) {
+    const result = {};
+    for (const job of store.list("memoryDigestJobs")) {
+      if (job.agentId !== agentId || !["succeeded", "partial"].includes(job.status)) continue;
+      for (const fact of job.result?.facts ?? []) if (fact?.slug && fact?.factId) result[fact.slug] = fact.factId;
+    }
+    return result;
+  }
   const notify = (job) => {
     const safe = safeJob(job);
     try { onJobUpdated(safe); } catch {}
@@ -235,7 +245,13 @@ export function createMemoryDreamService({
       }
       if (controller.signal.aborted) throw Object.assign(new Error("Dream cancelled"), { code: "cancelled" });
       stage = "proposal";
-      const proposals = validateDreamProposals({ proposals: raw, memories: job.memorySnapshot, jobId: job.id });
+      const proposals = validateDreamProposals({
+        proposals: raw,
+        memories: job.memorySnapshot,
+        factIdsBySlug: factIds(job.agentId),
+        providerCapabilities,
+        jobId: job.id,
+      });
       if (!job.proposals) {
         job = store.update(COLLECTION, jobId, { proposals: structuredClone(raw) });
         await store.flush?.();

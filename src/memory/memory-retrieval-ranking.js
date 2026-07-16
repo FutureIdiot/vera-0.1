@@ -6,7 +6,7 @@ import {
 } from "./memory-retrieval-text.js";
 
 export { estimateMemoryTokens } from "./memory-retrieval-text.js";
-export const MEMORY_PIPELINE_VERSION = "m4-r1";
+export const MEMORY_PIPELINE_VERSION = "m4-r2";
 
 const KNOWN_TYPES = new Set(["project_rule", "architecture", "workflow", "preference", "correction", "bug", "decision", "open_question"]);
 const DEFAULTS = Object.freeze({
@@ -27,6 +27,20 @@ const directionId = (slug) => `dir_${createHash("sha256").update(slug).digest("h
 const baseScore = (s) => round6(Object.entries(WEIGHTS).reduce((sum, [key, weight]) => sum + weight * s[key], 0));
 const factId = (map, slug) => map instanceof Map ? map.get(slug) : map?.[slug];
 const mapValue = (map, slug) => map instanceof Map ? map.get(slug) : map?.[slug];
+
+function denseCosine(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length || !left.length) return 0;
+  let dot = 0, leftNorm = 0, rightNorm = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index], b = right[index];
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+    dot += a * b;
+    leftNorm += a * a;
+    rightNorm += b * b;
+  }
+  if (!leftNorm || !rightNorm) return 0;
+  return clamp01(dot / Math.sqrt(leftNorm * rightNorm));
+}
 
 function explorationValue(seed, slug, cap) {
   if (seed === undefined || seed === null || !Number.isFinite(cap) || cap <= 0) return 0;
@@ -200,6 +214,7 @@ function publicCandidate(item, rank, level = "standard", tokenCost = item.standa
 
 export function rankMemoryCandidates({
   query, memories, factIdsBySlug = null, derivedWeightsBySlug = null,
+  embeddingBySlug = null, queryEmbedding = null,
   explorationSeed = null, tokenBudget, config: overrides = {},
 } = {}) {
   if (typeof query !== "string" || !normalizeMemoryText(query)) throw new TypeError("query must be a non-empty string");
@@ -213,8 +228,7 @@ export function rankMemoryCandidates({
   const texts = active.map((item) => `${item.description}\n${item.content ?? ""}`), tokens = texts.map((text) => tokenizeMemoryText(text));
   const rawKeyword = computeMemoryBm25Scores(tokens, tokenizeMemoryText(query), config), maxKeyword = Math.max(0, ...rawKeyword);
   const keyword = rawKeyword.map((score) => round6(maxKeyword ? score / maxKeyword : 0));
-  const tfidf = buildMemoryTfidfModel(texts), queryVector = tfidf.vectorFor(query);
-  const vector = tfidf.documentVectors.map((item) => round6(memoryCosine(queryVector, item)));
+  const vector = active.map((item) => round6(denseCosine(queryEmbedding, mapValue(embeddingBySlug, item.slug))));
   const bySlug = new Map(active.map((memory, index) => {
     const stableWeight = clamp01(Number(mapValue(derivedWeightsBySlug, memory.slug)));
     const derivedWeight = round6(clamp01(stableWeight + explorationValue(explorationSeed, memory.slug, config.explorationCap)));

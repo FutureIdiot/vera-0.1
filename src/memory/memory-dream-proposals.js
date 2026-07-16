@@ -4,7 +4,8 @@
 import { createHash } from "node:crypto";
 import { ApiError } from "../core/errors.js";
 import { mergeSourceRefs } from "./memory-proposals.js";
-import { extractMemoryLinks } from "./memory-retrieval-text.js";
+import { extractMemoryLinks, normalizeMemoryText } from "./memory-retrieval-text.js";
+import { requireDreamProviderCapabilities } from "./memory-provider-capabilities.js";
 
 const SLUG = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const VERSION = "^sha256:[a-f0-9]{64}$";
@@ -36,7 +37,7 @@ export const MEMORY_DREAM_OUTPUT_JSON_SCHEMA = Object.freeze({
           { type: "object", additionalProperties: false, required: ["action", "targetSlug", "targetVersion"], properties: { ...targetProperties, action: { const: "keep" } } },
           { type: "object", additionalProperties: false, required: ["action", "targetSlug", "targetVersion"], properties: { ...targetProperties, action: { const: "update" }, type: { type: "string", pattern: TYPE }, description: { type: "string", minLength: 1 }, content: { type: "string", minLength: 1 } }, anyOf: [{ required: ["type"] }, { required: ["description"] }, { required: ["content"] }] },
           { type: "object", additionalProperties: false, required: ["action", "targetSlug", "targetVersion", "sourceSlugs", "sourceVersions", "type", "description", "content"], properties: { ...targetProperties, action: { const: "merge" }, sourceSlugs: { type: "array", minItems: 2, maxItems: 16, uniqueItems: true, items: { type: "string", pattern: SLUG } }, sourceVersions: { type: "object", additionalProperties: { type: "string", pattern: VERSION } }, type: { type: "string", pattern: TYPE }, description: { type: "string", minLength: 1 }, content: { type: "string", minLength: 1 } } },
-          { type: "object", additionalProperties: false, required: ["action", "targetSlug", "targetVersion"], properties: { ...targetProperties, action: { const: "archive" }, replacementSlug: { type: "string", pattern: SLUG } } },
+          { type: "object", additionalProperties: false, required: ["action", "targetSlug", "targetVersion", "replacementSlug"], properties: { ...targetProperties, action: { const: "archive" }, replacementSlug: { type: "string", pattern: SLUG } } },
         ],
       },
     },
@@ -65,13 +66,32 @@ function proposalId(jobId, index, proposal) {
   return `dpr_${createHash("sha256").update(`${jobId}|${index}|${canonical(proposal)}`).digest("hex").slice(0, 20)}`;
 }
 
-export function validateDreamProposals({ proposals, memories, jobId = "dream" } = {}) {
+function semanticContent(value) {
+  return normalizeMemoryText(String(value ?? "").replace(/\[\[[^\]]+\]\]/gu, " "))
+    .replace(/\s+([.,;:!?])/gu, "$1");
+}
+
+function mapValue(map, key) {
+  return map instanceof Map ? map.get(key) : map?.[key];
+}
+
+export function validateDreamProposals({
+  proposals,
+  memories,
+  factIdsBySlug = null,
+  providerCapabilities = null,
+  jobId = "dream",
+} = {}) {
   if (!Array.isArray(proposals) || proposals.length > 64) throw invalid("Dream proposals must be an array of at most 64 items");
   const bySlug = new Map((memories ?? []).map((memory) => [memory.slug, memory]));
   const claimed = new Set();
   return proposals.map((raw, index) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw invalid(`Dream proposal ${index} must be an object`);
     if (!ACTIONS.has(raw.action)) throw invalid(`Dream proposal ${index} has an unsupported action`);
+    if (providerCapabilities) {
+      try { requireDreamProviderCapabilities(providerCapabilities, raw.action); }
+      catch { throw new ApiError("memory_provider_unsupported", `Memory Provider does not support Dream ${raw.action}`); }
+    }
     for (const key of Object.keys(raw)) if (!BY_ACTION[raw.action].has(key)) throw invalid(`unknown Dream ${raw.action} field: ${key}`);
     slug(raw.targetSlug, "targetSlug");
     version(raw.targetVersion, "targetVersion");
@@ -87,11 +107,23 @@ export function validateDreamProposals({ proposals, memories, jobId = "dream" } 
       if (raw.type !== undefined && (typeof raw.type !== "string" || !new RegExp(TYPE).test(raw.type))) throw invalid("Dream type must be a lowercase token");
       if (raw.description !== undefined) description(raw.description);
       if (raw.content !== undefined) content(raw.content);
+      if (raw.content !== undefined && semanticContent(raw.content) !== semanticContent(target.content)) {
+        throw invalid("Dream update cannot change factual content without Message evidence");
+      }
     }
-    if (raw.action === "archive" && raw.replacementSlug !== undefined) {
+    if (raw.action === "archive") {
+      if (raw.replacementSlug === undefined) throw invalid("Dream archive requires replacementSlug");
       slug(raw.replacementSlug, "replacementSlug");
       const replacement = bySlug.get(raw.replacementSlug);
-      if (!replacement || replacement.status !== "active") throw invalid("Dream replacementSlug must identify a frozen active Memory");
+      if (!replacement || replacement.status !== "active" || replacement.slug === target.slug) {
+        throw invalid("Dream replacementSlug must identify another frozen active Memory");
+      }
+      const targetFactId = mapValue(factIdsBySlug, target.slug);
+      const replacementFactId = mapValue(factIdsBySlug, replacement.slug);
+      const sameFact = targetFactId && replacementFactId && targetFactId === replacementFactId;
+      if (!sameFact && semanticContent(target.content) !== semanticContent(replacement.content)) {
+        throw invalid("Dream archive replacement must be an explicit duplicate");
+      }
     }
     if (raw.action === "merge") {
       if (!Array.isArray(raw.sourceSlugs) || raw.sourceSlugs.length < 2 || raw.sourceSlugs.length > 16 || new Set(raw.sourceSlugs).size !== raw.sourceSlugs.length) throw invalid("Dream merge sourceSlugs must contain 2..16 unique slugs");
@@ -99,18 +131,31 @@ export function validateDreamProposals({ proposals, memories, jobId = "dream" } 
       if (!raw.sourceVersions || typeof raw.sourceVersions !== "object" || Array.isArray(raw.sourceVersions) || Object.keys(raw.sourceVersions).length !== raw.sourceSlugs.length) throw invalid("Dream merge sourceVersions must cover every source slug");
       const group = new Set(raw.sourceSlugs);
       const requiredLinks = new Set();
+      const sourceSemantics = new Set();
+      const sourceFactIds = new Set();
       for (const sourceSlug of raw.sourceSlugs) {
         slug(sourceSlug, "sourceSlug");
         const source = bySlug.get(sourceSlug);
         if (!source || source.status !== "active" || raw.sourceVersions[sourceSlug] !== source.version) throw invalid("Dream merge source must match a frozen active Memory");
         if (claimed.has(sourceSlug) && sourceSlug !== raw.targetSlug) throw invalid(`Dream writes ${sourceSlug} more than once`);
         claimed.add(sourceSlug);
+        sourceSemantics.add(semanticContent(source.content));
+        const sourceFactId = mapValue(factIdsBySlug, sourceSlug);
+        if (sourceFactId) sourceFactIds.add(sourceFactId);
         for (const link of extractMemoryLinks(source)) if (!group.has(link)) requiredLinks.add(link);
       }
       if (Object.keys(raw.sourceVersions).some((sourceSlug) => !group.has(sourceSlug))) throw invalid("Dream merge sourceVersions contains an unknown source");
       if (typeof raw.type !== "string" || !new RegExp(TYPE).test(raw.type)) throw invalid("Dream merge type must be a lowercase token");
       description(raw.description);
       content(raw.content);
+      const sameFact = sourceFactIds.size === 1 &&
+        raw.sourceSlugs.every((sourceSlug) => mapValue(factIdsBySlug, sourceSlug));
+      if (!sameFact && sourceSemantics.size !== 1) {
+        throw invalid("Dream merge requires explicit duplicate identity");
+      }
+      if (!sourceSemantics.has(semanticContent(raw.content))) {
+        throw invalid("Dream merge cannot invent or change factual content");
+      }
       const proposedLinks = new Set(extractMemoryLinks({ content: raw.content }));
       for (const link of requiredLinks) if (!proposedLinks.has(link)) throw invalid(`Dream merge must preserve outgoing link ${link}`);
     }

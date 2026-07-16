@@ -3,12 +3,7 @@
 import { asHandler, readJsonBody, sendJson, sendNoContent } from "../api/http.js";
 import { ApiError } from "../core/errors.js";
 import { getUnitBinding } from "../agents/unit-bindings.js";
-
-const MARKDOWN_CAPABILITIES = Object.freeze({
-  list: true, fetch: true, search: true, create: true, update: true,
-  archive: true, delete: true, sources: true, versioning: true, pin: true,
-  links: true, usage: true, externalEdit: true, digest: true, dream: true,
-});
+import { VERA_MARKDOWN_CAPABILITIES } from "./memory-provider-capabilities.js";
 
 const MARKDOWN_PROVIDER_OPTION = Object.freeze({
   providerId: "vera.markdown",
@@ -16,7 +11,7 @@ const MARKDOWN_PROVIDER_OPTION = Object.freeze({
   source: "built-in",
   kind: "memory-provider",
   availability: "available",
-  capabilities: MARKDOWN_CAPABILITIES,
+  capabilities: VERA_MARKDOWN_CAPABILITIES,
   configSchema: { type: "object", additionalProperties: false },
   locationKind: "file",
 });
@@ -105,7 +100,7 @@ export function registerMemoryRoutes(router, {
         provider: {
           providerId: "vera.markdown",
           state: providerState,
-          capabilities: MARKDOWN_CAPABILITIES,
+          capabilities: VERA_MARKDOWN_CAPABILITIES,
           location: { vaultRoot: memory.getVaultPath(), agentPath: params.agentId },
         },
         hooks: { recall: { enabled: recall.enabled }, write: { enabled: write.enabled } },
