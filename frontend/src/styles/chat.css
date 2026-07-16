@@ -31,6 +31,9 @@
   align-self: flex-start;
   background: var(--vera-color-bubble-agent-bg);
   color: var(--vera-color-bubble-agent-text);
+  column-gap: var(--vera-space-sm);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
 }
 
 .vera-bubble--streaming {
@@ -40,8 +43,28 @@
 .vera-bubble__author {
   color: var(--vera-color-bubble-author-text);
   font-size: var(--vera-font-size-small);
+  grid-column: 2;
   margin-bottom: var(--vera-space-xs);
 }
+
+.vera-bubble__avatar {
+  align-items: center;
+  align-self: start;
+  background: var(--vera-color-surface);
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  border-radius: 50%;
+  color: var(--vera-color-accent);
+  display: inline-flex;
+  font-size: var(--vera-font-size-small);
+  font-weight: 700;
+  grid-row: 1 / span 2;
+  height: calc(var(--vera-touch-target) * 0.75);
+  justify-content: center;
+  text-decoration: none;
+  width: calc(var(--vera-touch-target) * 0.75);
+}
+
+.vera-bubble__content { grid-column: 2; }
 
 .vera-activity {
   align-self: flex-start;

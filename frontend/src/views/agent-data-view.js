@@ -3,7 +3,7 @@ import { createNotice } from "../components/management-ui.js";
 export async function mountAgentDataView({ root, runtime, agentId, shell } = {}) {
   root.dataset.routeScope = "management";
   const agent = runtime.getBootstrap().agents.find((item) => item.id === agentId);
-  const back = `#/settings/accounts/${encodeURIComponent(agentId)}`;
+  const back = `#/agents/${encodeURIComponent(agentId)}`;
   shell?.setManagementHeader({ title: "Data", backHref: back, backLabel: "返回" });
 
   const content = document.createElement("div");
@@ -20,7 +20,7 @@ export async function mountAgentDataView({ root, runtime, agentId, shell } = {})
   // Memory entry
   const memoryRow = document.createElement("a");
   memoryRow.className = "vera-settings-row";
-  memoryRow.href = `#/settings/accounts/${encodeURIComponent(agentId)}/data/memory`;
+  memoryRow.href = `#/agents/${encodeURIComponent(agentId)}/data/memory`;
   const copy = document.createElement("span");
   const label = document.createElement("strong");
   label.textContent = "Memory";

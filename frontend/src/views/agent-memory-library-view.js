@@ -11,7 +11,7 @@ export async function mountAgentMemoryLibraryView({ root, platform, runtime, age
   let selected = null;
   let disposed = false;
   let dirty = false;
-  const back = `#/settings/accounts/${encodeURIComponent(agentId)}/data/memory`;
+  const back = `#/agents/${encodeURIComponent(agentId)}/data/memory`;
   shell?.setManagementHeader({ title: `${agent?.name ?? "Agent"} Memory Library`, backHref: back, backLabel: "返回" });
   if (!agent) {
     root.appendChild(createNotice("Agent 不存在", "danger"));

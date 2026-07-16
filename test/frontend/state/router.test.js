@@ -80,7 +80,18 @@ test("parseRoute recognizes the chat root and encoded Space ids", () => {
   assert.deepEqual(parseRoute("#/settings"), { name: "settings" });
   assert.deepEqual(parseRoute("#/settings/accounts"), { name: "accounts" });
   assert.deepEqual(parseRoute("#/settings/accounts/agt_one"), { name: "account-detail", agentId: "agt_one" });
-  assert.deepEqual(parseRoute("#/settings/accounts/agt_one/memory"), { name: "agent-memory", agentId: "agt_one" });
+  assert.deepEqual(parseRoute("#/agents"), { name: "agent-detail", agentId: null });
+  assert.deepEqual(parseRoute("#/agents/agt_one"), { name: "agent-detail", agentId: "agt_one" });
+  assert.deepEqual(parseRoute("#/agents/agt_one/skills"), { name: "agent-skills", agentId: "agt_one" });
+  assert.deepEqual(parseRoute("#/agents/agt_one/hooks"), { name: "agent-hooks", agentId: "agt_one" });
+  assert.deepEqual(parseRoute("#/agents/agt_one/mcp"), { name: "agent-mcp", agentId: "agt_one" });
+  assert.deepEqual(parseRoute("#/agents/agt_one/data"), { name: "agent-data", agentId: "agt_one" });
+  assert.deepEqual(parseRoute("#/agents/agt_one/data/memory"), {
+    name: "agent-memory-config", agentId: "agt_one",
+  });
+  assert.deepEqual(parseRoute("#/agents/agt_one/data/memory/library"), {
+    name: "agent-memory-library", agentId: "agt_one",
+  });
   assert.deepEqual(parseRoute("#/settings/system"), { name: "system-settings" });
   assert.deepEqual(parseRoute("#/settings/appearance"), { name: "appearance" });
   assert.deepEqual(parseRoute("#/settings/paths"), { name: "path-settings" });
@@ -96,6 +107,9 @@ test("parseRoute recognizes the chat root and encoded Space ids", () => {
 
 test("parseRoute returns a not-found route for unsupported paths", () => {
   assert.deepEqual(parseRoute("#/settings/nope"), { name: "not-found", path: "/settings/nope" });
+  assert.deepEqual(parseRoute("#/settings/accounts/agt_one/memory"), {
+    name: "not-found", path: "/settings/accounts/agt_one/memory",
+  });
 });
 
 test("the Space directory deep link keeps the chat mounted behind the navigator", async () => {

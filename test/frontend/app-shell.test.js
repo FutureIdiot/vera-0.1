@@ -34,6 +34,14 @@ test("all management routes expose one top-bar back action and one heading", () 
   });
   assert.equal(dynamic.title, "Gemma");
   assert.equal(dynamic.leadingHref, "#/settings/accounts");
+
+  const agent = resolveShellHeader({
+    routeName: "agent-detail",
+    currentSpace: space,
+    managementHeader: { title: "Gemma", backHref: "#/spaces/spc_one", backLabel: "返回" },
+  });
+  assert.equal(agent.title, "Gemma");
+  assert.equal(agent.leadingHref, "#/spaces/spc_one");
 });
 
 test("the directory stays open across chat routes but never enters settings", () => {

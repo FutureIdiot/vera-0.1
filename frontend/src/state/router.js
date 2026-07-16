@@ -7,42 +7,44 @@ export function parseRoute(hash = "") {
   if (path === "/spaces" || path === "/spaces/") return { name: "spaces", spaceId: null };
   if (path === "/settings" || path === "/settings/") return { name: "settings" };
 
-  // Agent settings — most specific first
-  const memoryLibraryMatch = path.match(/^\/settings\/accounts\/([^/]+)\/data\/memory\/library\/?$/);
+  // Agent usage management — most specific first
+  const memoryLibraryMatch = path.match(/^\/agents\/([^/]+)\/data\/memory\/library\/?$/);
   if (memoryLibraryMatch) {
     try { return { name: "agent-memory-library", agentId: decodeURIComponent(memoryLibraryMatch[1]) }; }
     catch { return { name: "not-found", path }; }
   }
-  const memoryConfigMatch = path.match(/^\/settings\/accounts\/([^/]+)\/data\/memory\/?$/);
+  const memoryConfigMatch = path.match(/^\/agents\/([^/]+)\/data\/memory\/?$/);
   if (memoryConfigMatch) {
     try { return { name: "agent-memory-config", agentId: decodeURIComponent(memoryConfigMatch[1]) }; }
     catch { return { name: "not-found", path }; }
   }
-  const dataMatch = path.match(/^\/settings\/accounts\/([^/]+)\/data\/?$/);
+  const dataMatch = path.match(/^\/agents\/([^/]+)\/data\/?$/);
   if (dataMatch) {
     try { return { name: "agent-data", agentId: decodeURIComponent(dataMatch[1]) }; }
     catch { return { name: "not-found", path }; }
   }
-  const mcpMatch = path.match(/^\/settings\/accounts\/([^/]+)\/mcp\/?$/);
+  const mcpMatch = path.match(/^\/agents\/([^/]+)\/mcp\/?$/);
   if (mcpMatch) {
     try { return { name: "agent-mcp", agentId: decodeURIComponent(mcpMatch[1]) }; }
     catch { return { name: "not-found", path }; }
   }
-  const hooksMatch = path.match(/^\/settings\/accounts\/([^/]+)\/hooks\/?$/);
+  const hooksMatch = path.match(/^\/agents\/([^/]+)\/hooks\/?$/);
   if (hooksMatch) {
     try { return { name: "agent-hooks", agentId: decodeURIComponent(hooksMatch[1]) }; }
     catch { return { name: "not-found", path }; }
   }
-  const skillsMatch = path.match(/^\/settings\/accounts\/([^/]+)\/skills\/?$/);
+  const skillsMatch = path.match(/^\/agents\/([^/]+)\/skills\/?$/);
   if (skillsMatch) {
     try { return { name: "agent-skills", agentId: decodeURIComponent(skillsMatch[1]) }; }
     catch { return { name: "not-found", path }; }
   }
-  const memoryMatch = path.match(/^\/settings\/accounts\/([^/]+)\/memory\/?$/);
-  if (memoryMatch) {
-    try { return { name: "agent-memory", agentId: decodeURIComponent(memoryMatch[1]) }; }
+  const agentMatch = path.match(/^\/agents\/([^/]+)\/?$/);
+  if (agentMatch) {
+    try { return { name: "agent-detail", agentId: decodeURIComponent(agentMatch[1]) }; }
     catch { return { name: "not-found", path }; }
   }
+  if (path === "/agents" || path === "/agents/") return { name: "agent-detail", agentId: null };
+
   const accountMatch = path.match(/^\/settings\/accounts\/([^/]+)\/?$/);
   if (accountMatch) {
     try { return { name: "account-detail", agentId: decodeURIComponent(accountMatch[1]) }; }
@@ -94,7 +96,7 @@ export function createAppRouter({
   loadSettingsView = () => import("../views/settings-index-view.js"),
   loadAccountsView = () => import("../views/account-list-view.js"),
   loadAccountDetailView = () => import("../views/account-detail-view.js"),
-  loadAgentMemoryView = () => import("../views/agent-memory-view.js"),
+  loadAgentDetailView = () => import("../views/agent-detail-view.js"),
   loadSystemSettingsView = () => import("../views/system-settings-view.js"),
   loadAppearanceView = () => import("../views/appearance-view.js"),
   loadPathSettingsView = () => import("../views/path-settings-view.js"),
@@ -155,7 +157,7 @@ export function createAppRouter({
       { names: ["settings"], loader: loadSettingsView, mount: "mountSettingsIndexView" },
       { names: ["accounts"], loader: loadAccountsView, mount: "mountAccountListView" },
       { names: ["account-detail"], loader: loadAccountDetailView, mount: "mountAccountDetailView" },
-      { names: ["agent-memory"], loader: loadAgentMemoryView, mount: "mountAgentMemoryView" },
+      { names: ["agent-detail"], loader: loadAgentDetailView, mount: "mountAgentDetailView" },
       { names: ["system-settings"], loader: loadSystemSettingsView, mount: "mountSystemSettingsView" },
       { names: ["appearance"], loader: loadAppearanceView, mount: "mountAppearanceView" },
       { names: ["path-settings"], loader: loadPathSettingsView, mount: "mountPathSettingsView" },

@@ -232,6 +232,12 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       item.setAttribute("aria-label", entry.label);
       contacts.appendChild(item);
     }
+    const manageAgents = button("人", "vera-contact vera-contact--manage", () => {
+      window.location.hash = "#/agents";
+    });
+    manageAgents.title = "管理 Agent";
+    manageAgents.setAttribute("aria-label", "管理 Agent");
+    contacts.appendChild(manageAgents);
   }
 
   function renderSpaceRow(space, { archived: isArchived = false } = {}) {

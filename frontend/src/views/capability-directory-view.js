@@ -41,7 +41,7 @@ export async function mountCapabilityDirectoryView({ root, platform, agentId, sh
   const hash = window.location.hash;
   const kind = hash.includes("/hooks") ? "hook" : hash.includes("/mcp") ? "mcp" : "skill";
   const kindLabel = kind === "hook" ? "Hooks" : kind === "mcp" ? "MCP" : "Skills";
-  const back = `#/settings/accounts/${encodeURIComponent(agentId)}`;
+  const back = `#/agents/${encodeURIComponent(agentId)}`;
   shell?.setManagementHeader({ title: kindLabel, backHref: back, backLabel: "返回" });
 
   const http = createHttpClient(platform);

@@ -6,7 +6,7 @@ import { createNotice, setBusy } from "../components/management-ui.js";
 export async function mountAgentMemoryConfigView({ root, platform, runtime, agentId, shell } = {}) {
   root.dataset.routeScope = "management";
   const agent = runtime.getBootstrap().agents.find((item) => item.id === agentId);
-  const back = `#/settings/accounts/${encodeURIComponent(agentId)}/data`;
+  const back = `#/agents/${encodeURIComponent(agentId)}/data`;
   shell?.setManagementHeader({ title: `${agent?.name ?? "Agent"} Memory`, backHref: back, backLabel: "返回" });
 
   if (!agent) {
@@ -72,7 +72,7 @@ export async function mountAgentMemoryConfigView({ root, platform, runtime, agen
   dreamBtn.textContent = "立即 Dream";
   const libraryLink = document.createElement("a");
   libraryLink.className = "vera-secondary-button vera-button-link";
-  libraryLink.href = `#/settings/accounts/${encodeURIComponent(agentId)}/data/memory/library`;
+  libraryLink.href = `#/agents/${encodeURIComponent(agentId)}/data/memory/library`;
   libraryLink.textContent = "长期记忆管理";
   actionsSection.append(digestBtn, dreamBtn, libraryLink);
 
@@ -175,14 +175,7 @@ export async function mountAgentMemoryConfigView({ root, platform, runtime, agen
       return;
     }
 
-    // Ensure sections are in DOM
-    if (!content.contains(feedback)) content.prepend(feedback);
-    if (!content.contains(providerSection)) content.insertBefore(providerSection, statusSection);
-    if (!content.contains(statusSection)) content.insertBefore(statusSection, digestSection);
-    if (!content.contains(digestSection)) content.insertBefore(digestSection, dreamSection);
-    if (!content.contains(dreamSection)) content.insertBefore(dreamSection, actionsSection);
-    if (!content.contains(actionsSection)) content.appendChild(actionsSection);
-
+    content.replaceChildren(feedback, providerSection, statusSection, digestSection, dreamSection, actionsSection);
     renderProvider();
     renderStatus();
     renderDigest();
