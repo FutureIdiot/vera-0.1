@@ -1,9 +1,12 @@
-# 运行时能力与 Agent 设置
+# Agent使用管理与运行时能力
 
 ## 阶段A：纯前端目录壳
 
-- [ ] 在Agent详情加入 `Skills / Hooks / MCP / Data` 四个平级入口。
-- [ ] 路由固定为 `#/settings/accounts/:agentId/skills|hooks|mcp|data`；Data当前只列Memory入口。
+- [ ] 新建独立于Vera全局Settings的Agent使用管理页：`#/agents`按默认顺序进入，`#/agents/:agentId`定位指定Agent。
+- [ ] 聊天时间线中发言Agent头像进入指定Agent；Space导航左下角联系人图标进入默认顺序。两个入口复用同一页面和分页状态。
+- [ ] 页面上半部分展示Agent像素形象，左右两侧提供前后翻页箭头；下半部分展示当前状态、所在Space及 `Skills / Hooks / MCP / Data` 四个平级入口。
+- [ ] 路由固定为 `#/agents/:agentId/skills|hooks|mcp|data`；Data当前只列Memory入口。
+- [ ] Vera全局 `#/settings/accounts` 只保留系统层Agent生命周期、Home Account、连接、Workspace与授权管理，不展示AgentState或能力/Data入口。
 - [ ] Skills / Hooks / MCP复用一个无HTTP职责的单列目录view和标准化投影，不创建三份相似页面。
 - [ ] Shell管理页顶栏支持右侧两个页面动作；三个目录固定显示“添加”“管理”。
 - [ ] 实现loading、empty、error、单列条目、可用性、可选开关和窄屏长名称布局。
@@ -13,8 +16,8 @@
 
 ## 阶段A验收闸门
 
-- [ ] 手机与桌面确认四入口、返回关系、标题和右侧动作位置。
-- [ ] deep-link刷新、前进后退、Agent不存在、loading/empty/error、长名称与禁用按钮状态通过。
+- [ ] 手机与桌面确认头像入口、联系人入口、默认/指定Agent定位、前后翻页、四入口、返回关系、标题和右侧动作位置。
+- [ ] deep-link刷新、前进后退、单Agent、无Agent、Agent不存在、loading/empty/error、长名称与禁用按钮状态通过。
 - [ ] 夹具证明Skill/Hook/MCP行使用同一组件；生产构建中没有示例条目或伪造状态。
 - [ ] `npm test`、`node scripts/verify.mjs`、`npm run analyze:web`、`git diff --check`通过。
 - [ ] 阶段A验收前不得开始真实接口接线。
@@ -39,7 +42,7 @@
 - [ ] 将已完成的Codex进程内driver迁移到daemon，不创建第二套Codex adapter，也不回到gateway spawn。
 - [ ] 所有adapter按 `docs/adapter-interface.md` 的stub→临时gateway→真实provider三层闸门验收。
 
-## 阶段C：Agent设置运行时闭环
+## 阶段C：Agent使用设置运行时闭环
 
 - [ ] 不增加第五个Agent Plugin目录，也不把Agent Plugin混入Skills。
 - [ ] Skills、Hooks、MCP的绑定与状态是独立资源，不嵌进Agent身份字段。

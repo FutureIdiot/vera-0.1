@@ -17,7 +17,7 @@
 
 ## 当前依赖顺序
 
-1. [ ] [Agent设置目录壳与内置Hooks/MCP接线（阶段A–B）](runtime-capabilities.md)
+1. [ ] [Agent使用管理、目录壳与内置Hooks/MCP接线（阶段A–B）](runtime-capabilities.md)
 2. [ ] [Data → Memory 页面](memory-ui.md)
 3. [ ] [Files：Space 附件](files.md)
 4. [ ] [Phase 5 收口](phase-5-closeout.md)
@@ -44,7 +44,7 @@
 | [`federation-runtime.md`](federation-runtime.md) | `/api/agent/*`、调度器、daemon、mock daemon |
 | [`federation-deployment.md`](federation-deployment.md) | VPS、Tailscale Serve、数据迁移、本机清理与真实模型复验 |
 | [`native-clients.md`](native-clients.md) | Capacitor共享平台、Android壳与iOS壳 |
-| [`runtime-capabilities.md`](runtime-capabilities.md) | Skills / Hooks / MCP / Data前端目录、内置binding接线与后续运行时闭环 |
+| [`runtime-capabilities.md`](runtime-capabilities.md) | Agent使用管理双入口与分页、Skills / Hooks / MCP / Data前端目录、内置binding接线与后续运行时闭环 |
 | [`extensions.md`](extensions.md) | Extension Package、Agent Plugin、Space Module与Memory Provider扩展 |
 | [`native-release.md`](native-release.md) | Android release、iOS archive与三端最终回归 |
 
