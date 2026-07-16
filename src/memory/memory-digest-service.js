@@ -65,8 +65,8 @@ export function createMemoryDigestService({
   };
   const patchJob = (id, patch) => notify(store.update(COLLECTION, id, patch));
 
-  function idempotencyKey({ agentId, spaceId, fromMessageId, toMessageId, mode, taskFingerprint = "legacy" }) {
-    return `sha256:${digest(`${agentId}|${spaceId}|${fromMessageId}|${toMessageId}|${mode}|${pipelineVersion}|${taskFingerprint}`)}`;
+  function idempotencyKey({ agentId, spaceSessionId, fromMessageId, toMessageId, mode, taskFingerprint = "legacy" }) {
+    return `sha256:${digest(`${agentId}|${spaceSessionId}|${fromMessageId}|${toMessageId}|${mode}|${pipelineVersion}|${taskFingerprint}`)}`;
   }
 
   function findJob(agentId, jobId) {
@@ -84,17 +84,18 @@ export function createMemoryDigestService({
     return safeJob(job);
   }
 
-  function getIncrementalWindow({ agentId, spaceId, toMessageId }) {
-    return resolveIncrementalDigestRange({ store, jobs: jobs(), agentId, spaceId, toMessageId });
+  function getIncrementalWindow({ agentId, spaceId, spaceSessionId, toMessageId }) {
+    return resolveIncrementalDigestRange({ store, jobs: jobs(), agentId, spaceId, spaceSessionId, toMessageId });
   }
 
-  function enqueue({ agentId, spaceId, mode, trigger, fromMessageId, toMessageId }) {
+  function enqueue({ agentId, spaceId, spaceSessionId, mode, trigger, fromMessageId, toMessageId }) {
     if (!accepting) throw new ApiError("conflict", "memory digest service is closing");
     if (!["incremental", "range"].includes(mode)) throw new ApiError("invalid_request", "digest mode must be incremental or range");
     if (!["manual", "scheduled", "realtime"].includes(trigger)) throw new ApiError("invalid_request", "digest trigger is invalid");
+    if (typeof spaceSessionId !== "string" || !spaceSessionId) throw new ApiError("invalid_request", "spaceSessionId is required");
     const resolved = mode === "incremental" && !fromMessageId
-      ? getIncrementalWindow({ agentId, spaceId, toMessageId })
-      : resolveDigestRange({ store, agentId, spaceId, fromMessageId, toMessageId });
+      ? getIncrementalWindow({ agentId, spaceId, spaceSessionId, toMessageId })
+      : resolveDigestRange({ store, agentId, spaceId, spaceSessionId, fromMessageId, toMessageId });
     if (!resolved) {
       if (trigger === "manual") throw new ApiError("invalid_request", "digest range contains no new visible Messages");
       return null;
@@ -108,15 +109,15 @@ export function createMemoryDigestService({
     const taskFingerprint = task
       ? digest(JSON.stringify([task.memoryTaskSnapshot, task.memoryProviderSnapshot]))
       : freezeError?.code ?? "legacy";
-    const key = idempotencyKey({ agentId, spaceId, fromMessageId: resolved.range.fromMessageId, toMessageId: resolved.range.toMessageId, mode, taskFingerprint });
+    const key = idempotencyKey({ agentId, spaceSessionId, fromMessageId: resolved.range.fromMessageId, toMessageId: resolved.range.toMessageId, mode, taskFingerprint });
     const duplicate = jobs().find((job) => job.idempotencyKey === key);
     if (duplicate) return safeJob(duplicate);
-    const active = jobs().find((job) => job.agentId === agentId && job.spaceId === spaceId && ACTIVE.has(job.status));
-    if (active) throw new ApiError("conflict", `agent ${agentId} already has an active digest job in Space ${spaceId}`);
+    const active = jobs().find((job) => job.agentId === agentId && job.spaceSessionId === spaceSessionId && ACTIVE.has(job.status));
+    if (active) throw new ApiError("conflict", `agent ${agentId} already has an active digest job in SpaceSession ${spaceSessionId}`);
     const createdAt = now();
     const job = store.insert(COLLECTION, {
       id: `mdj_${digest(key).slice(0, 12)}`,
-      agentId, spaceId, mode, trigger,
+      agentId, spaceId, spaceSessionId, mode, trigger,
       range: resolved.range,
       pipelineVersion,
       idempotencyKey: key,
@@ -132,18 +133,19 @@ export function createMemoryDigestService({
     return safeJob(job);
   }
 
-  function enqueueIncremental({ agentId, spaceId, trigger, toMessageId }) {
-    return enqueue({ agentId, spaceId, mode: "incremental", trigger, toMessageId });
+  function enqueueIncremental({ agentId, spaceId, spaceSessionId, trigger, toMessageId }) {
+    return enqueue({ agentId, spaceId, spaceSessionId, mode: "incremental", trigger, toMessageId });
   }
 
   function schedule(jobId) {
     const job = store.find(COLLECTION, jobId);
     if (!job || job.status !== "queued") return;
-    const previous = tails.get(job.agentId) ?? Promise.resolve();
+    const tailKey = `${job.agentId}\0${job.spaceSessionId}`;
+    const previous = tails.get(tailKey) ?? Promise.resolve();
     const task = previous.catch(() => {}).then(() => run(jobId));
     const tail = task.catch(() => {});
-    tails.set(job.agentId, tail);
-    tail.finally(() => { if (tails.get(job.agentId) === tail) tails.delete(job.agentId); });
+    tails.set(tailKey, tail);
+    tail.finally(() => { if (tails.get(tailKey) === tail) tails.delete(tailKey); });
   }
 
   function factMap(agentId) {
@@ -355,7 +357,9 @@ export function createMemoryDigestService({
       if (job.memoryTaskSnapshot || job.memoryProviderSnapshot) {
         await validateTaskSnapshot({ memoryTaskSnapshot: job.memoryTaskSnapshot, memoryProviderSnapshot: job.memoryProviderSnapshot });
       }
-      const resolved = resolveDigestRange({ store, agentId: job.agentId, spaceId: job.spaceId, ...job.range });
+      const resolved = resolveDigestRange({
+        store, agentId: job.agentId, spaceId: job.spaceId, spaceSessionId: job.spaceSessionId, ...job.range,
+      });
       const chunks = chunkDigestMessages(resolved.messages, { maxChars: chunkMaxChars });
       const existingMemories = await memory.listMemories(job.agentId);
       const mapBefore = factMap(job.agentId);

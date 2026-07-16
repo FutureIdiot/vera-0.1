@@ -37,6 +37,8 @@ import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOllamaAdapter } from "./adapters/ollama-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 import { createCodexAdapter } from "./adapters/codex-adapter.js";
+import { createContextCompactionService } from "./spaces/context-compactions.js";
+import { recoverInterruptedRuns } from "./spaces/run-controller.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
@@ -44,6 +46,7 @@ const serveStatic = createStaticHandler(frontendRoot);
 const config = loadConfig(process.env);
 const bootPaths = await applyBootPathOverrides(config);
 const store = await createStore({ dataPath: config.dataPath, debounceMs: config.store.debounceMs });
+recoverInterruptedRuns(store);
 // seq 跨重启单调（api-contract.md）：从持久化水位 + 缓冲长度跳跃续增，
 // 保证客户端带上一世的 since 重连必然触发 stream.reset 而不是静默漏事件。
 const seqWatermark = store.getEventSeqWatermark();
@@ -102,6 +105,8 @@ const memoryDigestAdapters = {
 function resolveAdapter(account) {
   return adapters[account.provider] ?? null;
 }
+
+const contextCompaction = createContextCompactionService({ store, hub, config });
 
 function freezeMemoryTask({ ownerAgentId, kind }) {
   const record = memoryConfig.getConfig(ownerAgentId);
@@ -198,6 +203,7 @@ router.get("/api/events", ({ req, res }) => {
 registerAgentRoutes(router, { store, agentStates, memoryConfigService: memoryConfig });
 registerSpaceRoutes(router, {
   store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
+  contextCompaction,
 });
 registerMemoryRoutes(router, {
   memory,

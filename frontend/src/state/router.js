@@ -26,6 +26,21 @@ export function parseRoute(hash = "") {
     try { return { name: "space-settings", spaceId: decodeURIComponent(settingsMatch[1]) }; }
     catch { return { name: "not-found", path }; }
   }
+  const historyDetailMatch = path.match(/^\/spaces\/([^/]+)\/history\/([^/]+)\/?$/);
+  if (historyDetailMatch) {
+    try {
+      return {
+        name: "space-history",
+        spaceId: decodeURIComponent(historyDetailMatch[1]),
+        spaceSessionId: decodeURIComponent(historyDetailMatch[2]),
+      };
+    } catch { return { name: "not-found", path }; }
+  }
+  const historyMatch = path.match(/^\/spaces\/([^/]+)\/history\/?$/);
+  if (historyMatch) {
+    try { return { name: "space-history", spaceId: decodeURIComponent(historyMatch[1]), spaceSessionId: null }; }
+    catch { return { name: "not-found", path }; }
+  }
   const match = path.match(/^\/spaces\/([^/]+)\/?$/);
   if (match) {
     try { return { name: "space", spaceId: decodeURIComponent(match[1]) }; }
@@ -42,6 +57,7 @@ export function createAppRouter({
   createShell = (options) => createAppShell(options),
   loadSpaceView = () => import("../views/space-view.js"),
   loadSpaceSettingsView = () => import("../views/space-settings-view.js"),
+  loadSpaceHistoryView = () => import("../views/space-history-view.js"),
   loadSettingsView = () => import("../views/settings-index-view.js"),
   loadAccountsView = () => import("../views/account-list-view.js"),
   loadAccountDetailView = () => import("../views/account-detail-view.js"),
@@ -99,6 +115,7 @@ export function createAppRouter({
     let mountName = null;
     if (route.name === "space" || route.name === "spaces") { loader = loadSpaceView; mountName = "mountSpaceView"; }
     else if (route.name === "space-settings") { loader = loadSpaceSettingsView; mountName = "mountSpaceSettingsView"; }
+    else if (route.name === "space-history") { loader = loadSpaceHistoryView; mountName = "mountSpaceHistoryView"; }
     else if (route.name === "settings") { loader = loadSettingsView; mountName = "mountSettingsIndexView"; }
     else if (route.name === "accounts") { loader = loadAccountsView; mountName = "mountAccountListView"; }
     else if (route.name === "account-detail") { loader = loadAccountDetailView; mountName = "mountAccountDetailView"; }
@@ -114,7 +131,15 @@ export function createAppRouter({
       outlet.appendChild(routeRoot);
       const module = await loader();
       if (currentTransition !== transition) { routeRoot.remove(); return; }
-      const cleanup = await module[mountName]({ root: routeRoot, platform, runtime, spaceId: route.spaceId, agentId: route.agentId, shell });
+      const cleanup = await module[mountName]({
+        root: routeRoot,
+        platform,
+        runtime,
+        spaceId: route.spaceId,
+        spaceSessionId: route.spaceSessionId,
+        agentId: route.agentId,
+        shell,
+      });
       if (currentTransition !== transition) { cleanup?.(); routeRoot.remove(); return; }
       activeCleanup = () => {
         const result = cleanup?.();

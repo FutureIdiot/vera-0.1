@@ -20,6 +20,12 @@ function envelopeSpaceId(envelope) {
   return data?.spaceId ?? data?.message?.spaceId ?? data?.activity?.spaceId ?? data?.approval?.spaceId ?? data?.run?.spaceId ?? null;
 }
 
+function envelopeSpaceSessionId(envelope) {
+  const data = envelope?.data;
+  return data?.spaceSessionId ?? data?.message?.spaceSessionId ?? data?.activity?.spaceSessionId
+    ?? data?.approval?.spaceSessionId ?? data?.run?.spaceSessionId ?? null;
+}
+
 export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpaceId, shell } = {}) {
   let mounted = true;
   let space = null;
@@ -29,6 +35,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
   let hasOlder = true;
   let loadingOlder = false;
   let preserveFullRenderScroll = false;
+  let activeCompactionJobId = null;
 
   root.dataset.routeScope = "chat";
 
@@ -152,7 +159,40 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
 
   function ingestForCurrentSpace(envelope) {
     if (!space || envelopeSpaceId(envelope) !== space.id) return;
+    const eventSessionId = envelopeSpaceSessionId(envelope);
+    if (eventSessionId && eventSessionId !== space.activeSpaceSessionId) return;
     store.ingestEvent(envelope);
+  }
+
+  async function reloadActiveTimeline() {
+    if (!space) return;
+    const timeline = await spaces.fetchTimeline(space.id, { limit: TIMELINE_PAGE_SIZE });
+    if (!mounted) return;
+    if (timeline.spaceSession?.id) space = { ...space, activeSpaceSessionId: timeline.spaceSession.id };
+    store.hydrate(timeline.items);
+    hasOlder = timeline.items.length === TIMELINE_PAGE_SIZE;
+    olderButton.hidden = !hasOlder;
+    setStatus(timeline.items.length ? "" : "还没有消息，发一条开始。");
+    shell?.setSpace(space);
+  }
+
+  async function refreshCompactionStatus() {
+    if (!mounted || !space || !activeCompactionJobId) return;
+    const expectedJobId = activeCompactionJobId;
+    try {
+      const { job } = await spaces.fetchCompactionJob(space.id, expectedJobId);
+      if (!mounted || activeCompactionJobId !== expectedJobId) return;
+      if (["queued", "running"].includes(job.status)) {
+        setStatus("正在压缩各 Agent 的上下文…");
+        return;
+      }
+      activeCompactionJobId = null;
+      setStatus(job.status === "succeeded" ? "上下文压缩完成。" : "上下文压缩完成，但有 Agent 未成功。");
+    } catch (error) {
+      if (mounted && activeCompactionJobId === expectedJobId) {
+        setStatus(`上下文压缩状态读取失败：${error.message}`);
+      }
+    }
   }
 
   async function hydrateFromBootstrap(bootstrap, baselineSeq, { clearPending = false } = {}) {
@@ -177,6 +217,9 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     } else {
       const timeline = await spaces.fetchTimeline(space.id, { limit: TIMELINE_PAGE_SIZE });
       if (!mounted || generation !== hydrationGeneration) return;
+      if (timeline.spaceSession?.id) {
+        space = { ...space, activeSpaceSessionId: timeline.spaceSession.id };
+      }
       store.hydrate(timeline.items);
       hasOlder = timeline.items.length === TIMELINE_PAGE_SIZE;
       olderButton.hidden = !hasOlder;
@@ -225,6 +268,17 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
       if (space.archivedAt) showArchivedStatus();
       else setStatus(null);
     }
+    if (envelope.type === "space-session.created" && envelope.data?.spaceId === space?.id) {
+      space = { ...space, activeSpaceSessionId: envelope.data.spaceSession.id };
+      runStatus.reset();
+      void reloadActiveTimeline().catch((err) => handleHydrationError("新对话加载失败", err));
+      return;
+    }
+    if (envelope.type === "agent-session.compaction.updated" &&
+        envelope.data?.spaceId === space?.id && envelope.data?.jobId === activeCompactionJobId) {
+      void refreshCompactionStatus();
+      return;
+    }
     runStatus.handleEvent(envelope, space?.id);
     if (hydrating) pendingEvents.push(envelope);
     else ingestForCurrentSpace(envelope);
@@ -238,6 +292,19 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     targets: bootstrap.agents.filter((agent) => initialSpace?.seats.some((seat) => seat.agentId === agent.id)),
     onSend: async (content, target) => {
       if (!space) throw new Error("当前没有可发送消息的 Space");
+      if (content === "/new") {
+        const result = await spaces.startNewSession(space.id, crypto.randomUUID());
+        space = { ...space, activeSpaceSessionId: result.newSession.id };
+        await reloadActiveTimeline();
+        return;
+      }
+      if (content === "/compact") {
+        const { job } = await spaces.compactSession(space.id, crypto.randomUUID());
+        activeCompactionJobId = job.id;
+        setStatus("正在压缩各 Agent 的上下文…");
+        void refreshCompactionStatus();
+        return;
+      }
       await spaces.postMessage(space.id, {
         author: { type: "user" },
         target,

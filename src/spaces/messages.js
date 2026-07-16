@@ -6,6 +6,7 @@ import { ApiError } from "../core/errors.js";
 import { getOwningAccount } from "../agents/accounts.js";
 import { getSpaceOrThrow } from "./spaces.js";
 import { executeRun } from "./run-controller.js";
+import { ensureActiveSpaceSession, ensureAgentSession } from "./context-sessions.js";
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
@@ -49,16 +50,29 @@ function shouldRespond(seat, message) {
   return false;
 }
 
-export function postMessage({ store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler, spaceId, body }) {
+export function postMessage({
+  store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
+  contextCompaction, spaceId, body,
+}) {
   const space = getSpaceOrThrow(store, spaceId);
   if (!body?.author || !body?.content) {
     throw new ApiError("invalid_request", "author and content are required");
   }
+  const controlCommand = typeof body.content === "string" ? body.content.trim() : null;
+  if (controlCommand === "/new" || controlCommand === "/compact") {
+    throw new ApiError(
+      "control_command_required",
+      `${controlCommand} is a context control command and must use its dedicated endpoint`,
+    );
+  }
+
+  const spaceSession = ensureActiveSpaceSession(store, spaceId);
 
   const target = body.target ?? { type: "broadcast" };
   const message = {
     id: newMessageId(),
     spaceId,
+    spaceSessionId: spaceSession.id,
     author: body.author,
     target,
     content: body.content,
@@ -84,9 +98,15 @@ export function postMessage({ store, hub, config, resolveAdapter, agentStates, m
 
     const adapter = resolveAdapter(account);
     if (!adapter) continue;
+    const agentSession = ensureAgentSession(store, {
+      spaceSessionId: spaceSession.id,
+      agentId: agent.id,
+    });
     const run = executeRun({
-      store, hub, config, agent, account, space, triggerMessage: storedMessage,
+      store, hub, config, agent, account, space, spaceSession, agentSession,
+      triggerMessage: storedMessage,
       adapter, agentStates, memoryRetrieval, memoryDigestScheduler,
+      contextCompaction,
     });
     runs.push(run);
   }

@@ -50,6 +50,13 @@ const DEFAULTS = {
     numCtx: 16384,
     maxInputBytes: 12000,
   },
+  context: {
+    defaultLimitTokens: 16384,
+    warningRatio: 0.70,
+    autoRatio: 0.80,
+    hardRatio: 0.95,
+    checkpointRecentTurns: 8,
+  },
   memory: {
     vaultPath: "~/.vera/memory", // Obsidian 兼容 vault，仓库外（api-contract.md Memory 一节）
     residentIndexMaxLines: 25, // 常驻索引截断行数
@@ -111,6 +118,11 @@ function positiveInt(value, fallback) {
 function boundedPositiveInt(value, fallback, maximum) {
   const parsed = positiveInt(value, fallback);
   return parsed <= maximum ? parsed : fallback;
+}
+
+function ratio(value, fallback) {
+  const parsed = num(value, fallback);
+  return parsed > 0 && parsed < 1 ? parsed : fallback;
 }
 
 function timeZone(value, fallback) {
@@ -195,6 +207,29 @@ export function loadConfig(env = process.env) {
       numCtx: positiveInt(env.VERA_OLLAMA_NUM_CTX, DEFAULTS.ollama.numCtx),
       maxInputBytes: positiveInt(env.VERA_OLLAMA_MAX_INPUT_BYTES, DEFAULTS.ollama.maxInputBytes),
     },
+    context: (() => {
+      const warningRatio = ratio(env.VERA_CONTEXT_WARNING_RATIO, DEFAULTS.context.warningRatio);
+      const autoRatio = ratio(env.VERA_CONTEXT_AUTO_RATIO, DEFAULTS.context.autoRatio);
+      const hardRatio = ratio(env.VERA_CONTEXT_HARD_RATIO, DEFAULTS.context.hardRatio);
+      const thresholds = warningRatio < autoRatio && autoRatio < hardRatio
+        ? { warningRatio, autoRatio, hardRatio }
+        : {
+            warningRatio: DEFAULTS.context.warningRatio,
+            autoRatio: DEFAULTS.context.autoRatio,
+            hardRatio: DEFAULTS.context.hardRatio,
+          };
+      return {
+        defaultLimitTokens: positiveInt(
+          env.VERA_CONTEXT_DEFAULT_LIMIT_TOKENS,
+          DEFAULTS.context.defaultLimitTokens,
+        ),
+        checkpointRecentTurns: positiveInt(
+          env.VERA_CONTEXT_CHECKPOINT_RECENT_TURNS,
+          DEFAULTS.context.checkpointRecentTurns,
+        ),
+        ...thresholds,
+      };
+    })(),
     memory: {
       vaultPath: expandHome(env.VERA_MEMORY_VAULT_PATH || DEFAULTS.memory.vaultPath),
       residentIndexMaxLines: num(env.VERA_MEMORY_INDEX_MAX_LINES, DEFAULTS.memory.residentIndexMaxLines),

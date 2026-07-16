@@ -158,6 +158,25 @@ test("space.updated keeps the shared bootstrap projection current", async () => 
   runtime.close();
 });
 
+test("space-session.created advances the canonical active session pointer", async () => {
+  const sources = [];
+  const platform = {
+    async getGatewayUrl() { return "https://vera.test"; },
+    async fetch() { return jsonResponse({ agents: [], accounts: [], spaces: [{ id: "spc_1", activeSpaceSessionId: "sps_old" }], agentStates: [], seq: 1 }); },
+    createEventSource(url) { const source = { url, close() {} }; sources.push(source); return source; },
+  };
+  const runtime = createAppRuntime({ platform });
+  await runtime.start();
+  await flushAsyncWork();
+  sources[0].onmessage({ data: JSON.stringify({
+    seq: 2,
+    type: "space-session.created",
+    data: { spaceId: "spc_1", spaceSession: { id: "sps_new" } },
+  }) });
+  assert.equal(runtime.getBootstrap().spaces[0].activeSpaceSessionId, "sps_new");
+  runtime.close();
+});
+
 test("local Space merges and presence events update the canonical bootstrap projection", async () => {
   const sources = [];
   const platform = {

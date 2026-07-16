@@ -1,7 +1,8 @@
 // Native Codex CLI adapter (verified with codex-cli 0.144.2).
 //
 // - accepts only Account kind=cli, provider=codex;
-// - chat uses non-interactive `codex exec --json`, with sessionState={threadId};
+// - chat uses non-interactive `codex exec --json`, with a versioned CLI
+//   provider binding whose providerState is {threadId};
 // - Codex has no token-delta JSONL event, so completed agent_message items map once
 //   to onDelta and command/tool items map to Activity;
 // - digestMemory always uses a fresh ephemeral temp cwd, read-only/never policy,
@@ -215,12 +216,16 @@ export function createCodexAdapter({ config = {} }) {
     }
   }
 
-  async function runAttempt(ctx, threadId = null) {
+  async function runAttempt(ctx, providerBinding = null) {
     const binary = resolveBinary(ctx.account);
     await assertBinary(binary, "unavailable");
     const directory = await mkdtemp(join(tmpdir(), "vera-codex-chat-"));
     const outputPath = join(directory, "last-message.txt");
+    const threadId = providerBinding?.providerState?.threadId ?? null;
     let nextThreadId = threadId;
+    let nextProviderBinding = providerBinding;
+    let persistPromise = null;
+    let persistError = null;
     let content = "";
     const workspacePath = ctx.workspacePath || process.cwd();
     const args = ["-C", workspacePath, "-a", "never", "-s", chatSandbox, "exec"];
@@ -236,7 +241,19 @@ export function createCodexAdapter({ config = {} }) {
         onEvent(event) {
           if (event?.type === "thread.started" && typeof event.thread_id === "string") {
             nextThreadId = event.thread_id;
-            ctx.persistSessionState?.({ threadId: nextThreadId });
+            if (ctx.sessionMode !== "isolated" && event.thread_id !== threadId) {
+              try {
+                persistPromise = Promise.resolve(ctx.persistProviderBinding?.(
+                  { threadId: nextThreadId },
+                  providerBinding?.version ?? null,
+                )).then(
+                  (saved) => { nextProviderBinding = saved ?? null; },
+                  (error) => { persistError = error; },
+                );
+              } catch (error) {
+                persistError = error;
+              }
+            }
           }
           if (event?.type !== "item.completed") return;
           const item = event.item ?? {};
@@ -252,7 +269,9 @@ export function createCodexAdapter({ config = {} }) {
         try { content = await readFile(outputPath, "utf8"); } catch {}
       }
       if (!nextThreadId) throw new AdapterError("provider_error", "Codex CLI did not return a thread id");
-      return { content, sessionState: { threadId: nextThreadId } };
+      await persistPromise;
+      if (persistError) throw persistError;
+      return nextProviderBinding ? { content, providerBinding: nextProviderBinding } : { content };
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -265,23 +284,26 @@ export function createCodexAdapter({ config = {} }) {
       throw new AdapterError("provider_error", "Codex current prompt exceeds the configured input capacity");
     };
     let prompt = ctx.prompt;
-    let threadId = null;
-    if (ctx.sessionState != null) {
-      if (typeof ctx.sessionState?.threadId === "string" && ctx.sessionState.threadId) threadId = ctx.sessionState.threadId;
-      else {
-        ctx.onActivity?.({ phase: "error", label: "session-reset", detail: "Codex session state was invalid and has been reset" });
-        prompt = await ctx.recompileForNewSession?.({ reason: "invalid" }) ?? prompt;
-      }
+    let providerBinding = ctx.sessionMode === "isolated" ? null : ctx.providerBinding;
+    if (providerBinding != null && (
+      !Number.isInteger(providerBinding?.version) || providerBinding.version < 1 ||
+      typeof providerBinding?.providerState?.threadId !== "string" || !providerBinding.providerState.threadId
+    )) {
+      ctx.onActivity?.({ phase: "error", label: "session-reset", detail: "Codex provider binding was invalid and has been reset" });
+      const rotated = await ctx.rotateProviderBinding?.({ reason: "invalid" });
+      prompt = rotated?.prompt ?? prompt;
+      providerBinding = rotated?.providerBinding ?? null;
     }
     assertPromptCapacity(prompt);
     try {
-      return await runAttempt({ ...ctx, prompt }, threadId);
+      return await runAttempt({ ...ctx, prompt }, providerBinding);
     } catch (error) {
-      if (!threadId || !error?.missingThread) throw error;
+      if (!providerBinding || !error?.missingThread) throw error;
       ctx.onActivity?.({ phase: "error", label: "session-reset", detail: "Codex thread was unavailable and has been reset" });
-      const prompt = await ctx.recompileForNewSession?.({ reason: "missing" }) ?? ctx.prompt;
+      const rotated = await ctx.rotateProviderBinding?.({ reason: "missing" });
+      const prompt = rotated?.prompt ?? ctx.prompt;
       assertPromptCapacity(prompt);
-      return runAttempt({ ...ctx, prompt }, null);
+      return runAttempt({ ...ctx, prompt }, rotated?.providerBinding ?? null);
     }
   }
 

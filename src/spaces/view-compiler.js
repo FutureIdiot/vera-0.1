@@ -14,6 +14,8 @@
 // 模块级无可变状态。同一输入两次产出同一 text。本模块不持有 hub / agentStates / 副作用依赖，
 // 便于 Phase 5.5 把它从 run-controller 拆到 daemon prompt 路径。
 
+import { checkpointTurnText } from "./run-context.js";
+
 function compareCreated(a, b) {
   // 同毫秒用 _seq 兜底：先按 createdAt 比较，平局按 _seq。
   const ta = Date.parse(a.createdAt ?? "");
@@ -118,27 +120,29 @@ function buildGroupDelta({ kept, truncated, config, store, agentId }) {
 }
 
 export async function compilePrompt({
-  store, space, seat, agent, account, triggerMessage, memoryRetrieval,
-  memorySessionId = null, priorSessionState, runId, config,
+  store, space, seat, agent, triggerMessage, memoryRetrieval,
+  agentSessionId, generation, spaceSessionId, includeResidentIndex = false,
+  apiHistory = null, checkpoint = null, runId, config,
 }) {
   // seat 可由调用方传入（messages.js 已知当前 seat），也可由编译层自己从 space.seats
   // 找——run-controller 不传 seat 时走后者。blockAgentIds 来自 seat。
   const resolvedSeat = seat ?? (space?.seats ?? []).find((s) => s.agentId === agent.id) ?? null;
   const blockAgentIds = resolvedSeat?.blockAgentIds ?? null;
 
-  const resolvedPriorSessionState = priorSessionState === undefined
-    ? store.getSessionState(account.id, space.id)
-    : priorSessionState;
-
-  // 常驻索引块：text仅在无sessionState时注入；同时始终返回当前候选，
-  // 供API adapter在provider私有state非法、必须重置时恢复稳定前缀。
+  // 常驻索引块只由 AgentSession generation 的首次 Run 注入。是否首次由持有
+  // generation 真值的 context service 判定，编译层不再读取 provider state。
   let residentBlock = null;
-  try { residentBlock = await memoryRetrieval?.residentIndex(agent.id) ?? null; }
+  try {
+    residentBlock = typeof memoryRetrieval?.residentIndexForSession === "function" && agentSessionId && generation
+      ? await memoryRetrieval.residentIndexForSession({ agentId: agent.id, agentSessionId, generation })
+      : await memoryRetrieval?.residentIndex(agent.id) ?? null;
+  }
   catch { residentBlock = null; }
-  const injectedResidentBlock = resolvedPriorSessionState === null ? residentBlock : null;
+  const injectedResidentBlock = includeResidentIndex ? residentBlock : null;
 
   // 群聊声告段：从 store 临时派生，幂等。
-  const spaceMessages = store.list("messages").filter((m) => m.spaceId === space.id);
+  const spaceMessages = store.list("messages").filter((m) =>
+    m.spaceId === space.id && m.spaceSessionId === spaceSessionId);
   const marker = findLastOwnMarker(spaceMessages, agent.id);
   const candidates = pickCandidates({ messages: spaceMessages, marker, agentId: agent.id, triggerMessage, blockAgentIds });
   const { kept, truncated } = applyLimits({
@@ -153,12 +157,13 @@ export async function compilePrompt({
   // 缺哪段哪段连同其后的空行一起省略，不留前导/尾部空行。
   const triggerText = triggerMessage.content ?? "";
   let retrievalBlock = null;
-  if (memorySessionId && typeof memoryRetrieval?.searchForInjection === "function") {
+  if (agentSessionId && Number.isInteger(generation) && typeof memoryRetrieval?.searchForInjection === "function") {
     try {
       const retrieval = await memoryRetrieval.searchForInjection({
         context: {
           agentId: agent.id,
-          memorySessionId,
+          agentSessionId,
+          generation,
           runId,
           spaceId: space.id,
           triggerMessageId: triggerMessage.id,
@@ -177,18 +182,42 @@ export async function compilePrompt({
   turnParts.push(triggerText);
   if (retrievalBlock) turnParts.push(retrievalBlock);
   const turnText = turnParts.join("\n\n");
-  const historyEnvelopeText = [triggerText, retrievalBlock].filter(Boolean).join("\n\n");
   const parts = [];
   if (injectedResidentBlock) parts.push(injectedResidentBlock);
+  if (checkpoint?.summary) parts.push(`=== Vera 上下文检查点 ===\n${checkpoint.summary}`);
+  for (const checkpointTurn of checkpoint?.recentTurns ?? []) {
+    const rendered = checkpointTurnText(checkpointTurn);
+    if (rendered) parts.push(rendered);
+  }
   parts.push(turnText);
   const text = parts.join("\n\n");
+
+  const apiMessages = [];
+  if (residentBlock) apiMessages.push({ role: "system", content: residentBlock });
+  if (checkpoint?.summary) {
+    apiMessages.push({ role: "system", content: `=== Vera 上下文检查点 ===\n${checkpoint.summary}` });
+  }
+  for (const turn of apiHistory?.turns ?? []) {
+    if (turn?.input) apiMessages.push({ role: "user", content: JSON.stringify(turn.input) });
+    for (const item of turn?.assistant ?? []) {
+      if (typeof item?.content === "string") apiMessages.push({ role: "assistant", content: item.content });
+    }
+  }
+  apiMessages.push({
+    role: "user",
+    content: `${JSON.stringify({
+      author: triggerMessage.author,
+      target: triggerMessage.target,
+      sourceMessageId: triggerMessage.id,
+    })}\n\n${turnText}`,
+  });
 
   return {
     text,
     turnText,
     historyUserText: triggerMessage.author?.type === "user" ? triggerText : null,
-    historyEnvelopeText,
     residentBlock,
     retrievalBlock,
+    apiMessages,
   };
 }

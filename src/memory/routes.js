@@ -134,7 +134,7 @@ export function registerMemoryRoutes(router, {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         throw new ApiError("invalid_request", "digest body must be an object");
       }
-      const allowed = new Set(["spaceId", "mode", "fromMessageId", "toMessageId"]);
+      const allowed = new Set(["spaceId", "spaceSessionId", "mode", "fromMessageId", "toMessageId"]);
       for (const key of Object.keys(body)) {
         if (!allowed.has(key)) throw new ApiError("invalid_request", `unknown digest field: ${key}`);
       }
@@ -142,6 +142,7 @@ export function registerMemoryRoutes(router, {
         agentId: params.agentId,
         trigger: "manual",
         spaceId: body?.spaceId,
+        spaceSessionId: body?.spaceSessionId,
         mode: body?.mode,
         fromMessageId: body?.fromMessageId,
         toMessageId: body?.toMessageId,

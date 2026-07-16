@@ -168,7 +168,7 @@ updatedAt: 2026-07-08T00:00:00.000Z
       .join(" ");
     assert(
       !/Vera 记忆库常驻索引/.test(reply2),
-      `second reply should NOT contain resident index header (sessionState already set), got: ${reply2}`,
+      `second reply should NOT contain resident index header (generation already has a provider binding), got: ${reply2}`,
     );
   });
 

@@ -177,7 +177,7 @@ export async function runReal(ctx) {
       assert(reply?.content?.includes("CODEX_GATEWAY_CHAT_OK"), "real Codex chat must complete");
 
       const queued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, mode: "range",
+        spaceId: space.id, spaceSessionId: posted.json.message.spaceSessionId, mode: "range",
         fromMessageId: posted.json.message.id, toMessageId: posted.json.message.id,
       });
       const job = await waitForJob(request, agent.id, queued.json.job.id, sleep, 300000);
@@ -186,8 +186,12 @@ export async function runReal(ctx) {
       assert(memories.some((memory) => memory.sourceCount >= 1), "real digest must apply a sourced Memory");
 
       await sleep(300);
-      const states = JSON.parse(await readFile(join(dir, "data", "session-states.json"), "utf8"));
-      assert(typeof states[`${account.id}:${space.id}`].threadId === "string", "real chat must persist threadId");
+      const bindings = JSON.parse(await readFile(join(dir, "data", "provider-bindings.json"), "utf8"));
+      const binding = bindings.find((item) =>
+        item.agentSessionId === posted.json.runs[0].agentSessionId &&
+        item.generation === posted.json.runs[0].contextGeneration &&
+        item.accountId === account.id);
+      assert(typeof binding?.providerState?.threadId === "string", "real chat must persist generation binding threadId");
 
       const abortAdapter = createCodexAdapter({
         config: { binary, chatSandbox: "read-only", watchdogMs: 300000, maxInputBytes: 12000 },
@@ -196,7 +200,9 @@ export async function runReal(ctx) {
       const pending = abortAdapter.run({
         agent, account,
         prompt: { text: "Wait before replying. Do not use tools.", turnText: "", historyUserText: null, residentBlock: null },
-        sessionState: null, workspacePath: dir, signal: controller.signal,
+        spaceSessionId: "sps_real_abort", agentSessionId: "ags_real_abort",
+        contextGeneration: 1, sessionMode: "main", providerBinding: null,
+        workspacePath: dir, signal: controller.signal,
       });
       pending.catch(() => {});
       setTimeout(() => controller.abort(), 100);

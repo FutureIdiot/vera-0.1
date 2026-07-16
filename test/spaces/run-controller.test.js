@@ -1,6 +1,3 @@
-// 常驻索引注入行为（api-contract.md「常驻索引注入」）：外部会话首条消息头部
-// 注入 residentIndex() 的块；已有 sessionState 的后续消息不重复注入。
-
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -8,8 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStore } from "../../src/store/store.js";
 import { createEventHub } from "../../src/api/sse.js";
-import { createMemoryVault } from "../../src/memory/memory.js";
-import { executeRun } from "../../src/spaces/run-controller.js";
+import { AdapterError } from "../../src/core/errors.js";
+import { executeRun, recoverInterruptedRuns } from "../../src/spaces/run-controller.js";
+import { getActiveContext } from "../../src/spaces/context-sessions.js";
+import { getTimeline } from "../../src/spaces/timeline.js";
+import {
+  compareAndSetApiHistory,
+  getApiHistory,
+  getProviderBinding,
+  providerFingerprintForAccount,
+  rotateContextGeneration,
+} from "../../src/spaces/context-state.js";
+import { withAccountExecutionLock } from "../../src/spaces/execution-lock.js";
 
 const CONFIG = {
   bubbles: { boundaryPattern: "\\n\\s*\\n", minLength: 1, maxLength: 800 },
@@ -20,6 +27,13 @@ const CONFIG = {
     groupDeltaHeader: "=== 群内最近发言 ===",
     groupDeltaUserLabel: "用户",
     groupDeltaOmittedHint: "（更早的发言数量已达上限）",
+  },
+  context: {
+    defaultLimitTokens: 100_000,
+    warningRatio: 0.70,
+    autoRatio: 0.80,
+    hardRatio: 0.95,
+    checkpointRecentTurns: 4,
   },
 };
 
@@ -32,7 +46,7 @@ function waitFor(hub, predicate, timeoutMs = 2000) {
     }, timeoutMs);
     const unsubscribe = hub.subscribe({
       write(frame) {
-        const dataLine = frame.split("\n").find((l) => l.startsWith("data: "));
+        const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
         if (!dataLine) return;
         const envelope = JSON.parse(dataLine.slice("data: ".length));
         seen.push(envelope.type);
@@ -46,417 +60,516 @@ function waitFor(hub, predicate, timeoutMs = 2000) {
   });
 }
 
-function fakeAdapter(capture) {
-  return {
-    async run(ctx) {
-      capture.push(ctx.prompt.text);
-      return { content: "reply text", sessionState: { turn: (ctx.sessionState?.turn ?? 0) + 1 } };
+function captureEvents(hub) {
+  const events = [];
+  const unsubscribe = hub.subscribe({
+    write(frame) {
+      const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
+      if (dataLine) events.push(JSON.parse(dataLine.slice("data: ".length)));
     },
-  };
+  });
+  return { events, unsubscribe };
 }
 
-function createMemoryRetrievalStub(memory) {
-  const sessions = new Map();
-  let sequence = 0;
-  const keyFor = ({ agentId, accountId, spaceId }) => `${agentId}:${accountId}:${spaceId}`;
+function memoryRetrievalStub({ resident = null, retrieval = null } = {}) {
   return {
-    async ensureSession(input) {
-      const key = keyFor(input);
-      if (input.reset) sessions.delete(key);
-      if (!sessions.has(key)) sessions.set(key, { id: `mrs_test_${++sequence}` });
-      return sessions.get(key);
-    },
-    async resetSession(input) {
-      sessions.delete(keyFor(input));
-    },
-    async residentIndex(agentId) {
-      const active = (await memory.listMemories(agentId)).filter((item) => item.status === "active");
-      if (active.length === 0) return null;
-      return [
-        "Vera 记忆库常驻索引：",
-        "相关时调用 Vera Memory MCP 的 memory_fetch_detail 展开 [[slug]] 查看详情。",
-        "",
-        ...active.map((item) => `- [[${item.slug}]] — ${item.description}`),
-      ].join("\n");
-    },
+    async ensureSession() { return { id: "mrs_test" }; },
+    async residentIndex() { return resident; },
     async searchForInjection() {
-      return { block: null, response: { items: [], cursor: null } };
+      return { block: retrieval, response: { items: [], cursor: null } };
     },
   };
 }
 
-async function withFixture(fn) {
-  const dir = await mkdtemp(join(tmpdir(), "vera-run-controller-test-"));
-  const store = await createStore({ dataPath: join(dir, "store.json"), debounceMs: 10 });
-  const memory = createMemoryVault({ vaultPath: join(dir, "vault") });
-  const memoryRetrieval = createMemoryRetrievalStub(memory);
+async function fixture(fn, { kind = "cli", suffix = "a" } = {}) {
+  const root = await mkdtemp(join(tmpdir(), "vera-run-controller-test-"));
+  const store = await createStore({ dataPath: join(root, "data"), debounceMs: 5 });
   const hub = createEventHub({ bufferSize: 100 });
+  const agent = store.insert("agents", {
+    id: `agt_${suffix}`,
+    name: `Agent ${suffix}`,
+    createdAt: "2026-07-15T00:00:00.000Z",
+  });
+  const account = store.insert("accounts", {
+    id: `acc_${suffix}`,
+    owningAgentId: agent.id,
+    kind,
+    provider: kind === "api" ? "ollama" : "codex",
+    connection: {},
+    model: "test-model",
+    createdAt: "2026-07-15T00:00:00.000Z",
+  });
+  const space = store.insert("spaces", {
+    id: `spc_${suffix}`,
+    name: `Space ${suffix}`,
+    topic: "context test",
+    seats: [{ agentId: agent.id, responseMode: "default" }],
+    createdAt: "2026-07-15T00:00:00.000Z",
+  });
+  const { spaceSession, agentSession } = getActiveContext(store, {
+    spaceId: space.id,
+    agentId: agent.id,
+  });
+
+  function insertMessage({
+    id = `msg_${suffix}_${store.list("messages").length + 1}`,
+    content = "hello",
+    author = { type: "user" },
+    target = { type: "broadcast" },
+    createdAt = new Date(Date.parse("2026-07-15T00:00:01.000Z") + store.list("messages").length * 1000).toISOString(),
+  } = {}) {
+    return store.insert("messages", {
+      id,
+      spaceId: space.id,
+      spaceSessionId: spaceSession.id,
+      author,
+      target,
+      content,
+      runId: null,
+      status: "completed",
+      createdAt,
+    });
+  }
+
   try {
-    await fn({ store, memory, memoryRetrieval, hub, vaultPath: join(dir, "vault") });
+    await fn({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage });
   } finally {
     await store.close();
-    await rm(dir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 }
 
-test("prepends resident index to prompt when no sessionState exists yet", async () => {
-  await withFixture(async ({ store, memory, memoryRetrieval, hub }) => {
-    await memory.saveMemory("agt_test1", {
-      slug: "project-rule-one",
-      type: "project_rule",
-      description: "常驻钩子示例",
-      content: "细节正文",
-    });
-
-    const agent = { id: "agt_test1" };
-    const account = { id: "acc_test1" };
-    const space = { id: "spc_test1", seats: [] };
-    const triggerMessage = { id: "msg_test1", content: "hello agent" };
-    const captured = [];
-    const adapter = fakeAdapter(captured);
-
-    const run = executeRun({ store, hub, config: CONFIG, agent, account, space, triggerMessage, adapter, agentStates: null, memoryRetrieval });
-    await waitFor(hub, (e) => e.type === "run.ended" && e.data.run.id === run.id);
-
-    assert.equal(captured.length, 1);
-    assert.match(captured[0], /Vera 记忆库常驻索引/);
-    assert.match(captured[0], /\[\[project-rule-one\]\] — 常驻钩子示例/);
-    assert.match(captured[0], /调用 Vera Memory MCP 的 memory_fetch_detail 展开 \[\[slug\]\]/);
-    assert.doesNotMatch(captured[0], /文件库：|\.vera\/memory/, "prompt must not expose the vault path");
-    assert.ok(captured[0].endsWith("hello agent"), "original message content should trail the injected block");
-  });
-});
-
-test("does not inject resident index once sessionState is already persisted", async () => {
-  await withFixture(async ({ store, memory, memoryRetrieval, hub }) => {
-    await memory.saveMemory("agt_test2", {
-      slug: "project-rule-two",
-      type: "project_rule",
-      description: "不该被注入",
-      content: "细节正文",
-    });
-
-    const agent = { id: "agt_test2" };
-    const account = { id: "acc_test2" };
-    const space = { id: "spc_test2", seats: [] };
-    const captured = [];
-    const adapter = fakeAdapter(captured);
-
-    // 第一条消息建立 sessionState
-    const firstRun = executeRun({
-      store,
-      hub,
-      config: CONFIG,
-      agent,
-      account,
-      space,
-      triggerMessage: { id: "msg_first", content: "first message" },
-      adapter,
-      agentStates: null,
-      memoryRetrieval,
-    });
-    await waitFor(hub, (e) => e.type === "run.ended" && e.data.run.id === firstRun.id);
-    assert.match(captured[0], /Vera 记忆库常驻索引/, "first message of a fresh session should be prefixed");
-
-    await memory.saveMemory(agent.id, {
-      slug: "late-session-rule", type: "project_rule",
-      description: "只应在下个外部会话出现", content: "late authority",
-    });
-
-    // 第二条消息：sessionState 已存在，不应再注入
-    const secondRun = executeRun({
-      store,
-      hub,
-      config: CONFIG,
-      agent,
-      account,
-      space,
-      triggerMessage: { id: "msg_second", content: "second message" },
-      adapter,
-      agentStates: null,
-      memoryRetrieval,
-    });
-    await waitFor(hub, (e) => e.type === "run.ended" && e.data.run.id === secondRun.id);
-
-    assert.equal(captured.length, 2);
-    assert.equal(captured[1], "second message", "no injection once sessionState already exists");
-
-    const nextSpace = { id: "spc_test2_next", seats: [] };
-    const thirdRun = executeRun({
-      store, hub, config: CONFIG, agent, account, space: nextSpace,
-      triggerMessage: { id: "msg_third", content: "third message" },
-      adapter, agentStates: null, memoryRetrieval,
-    });
-    await waitFor(hub, (e) => e.type === "run.ended" && e.data.run.id === thirdRun.id);
-    assert.match(captured[2], /late-session-rule/u, "a new external session should batch-publish the edited resident index");
-  });
-});
-
-test("injection only decorates the prompt; stored Message.content stays unpolluted", async () => {
-  await withFixture(async ({ store, memory, memoryRetrieval, hub }) => {
-    await memory.saveMemory("agt_test4", {
-      slug: "project-rule-store",
-      type: "project_rule",
-      description: "只该进 prompt，不该进 store",
-      content: "细节正文",
-    });
-
-    const agent = { id: "agt_test4" };
-    const account = { id: "acc_test4" };
-    const space = { id: "spc_test4", seats: [] };
-    // 按 postMessage 的真实流程：trigger 消息先落 store，再交给 executeRun
-    const triggerMessage = store.insert("messages", {
-      id: "msg_stored1",
-      spaceId: space.id,
-      author: { type: "user" },
-      target: { type: "broadcast" },
-      content: "original user words",
-      runId: null,
-      status: "completed",
-      createdAt: new Date().toISOString(),
-    });
-    const captured = [];
-    const adapter = fakeAdapter(captured);
-
-    const run = executeRun({ store, hub, config: CONFIG, agent, account, space, triggerMessage, adapter, agentStates: null, memoryRetrieval });
-    await waitFor(hub, (e) => e.type === "run.ended" && e.data.run.id === run.id);
-
-    // prompt 里有注入块
-    assert.match(captured[0], /Vera 记忆库常驻索引/);
-    assert.ok(captured[0].endsWith("original user words"));
-    // store 里的触发消息原样未动，且没有任何一条消息（含 agent 回复气泡）
-    // 被注入内容污染
-    assert.equal(store.find("messages", "msg_stored1").content, "original user words");
-    for (const msg of store.list("messages")) {
-      assert.ok(!msg.content.includes("Vera 记忆库常驻索引"), `message ${msg.id} must not contain injected block`);
-    }
-  });
-});
-
-test("memory being absent (undefined) does not crash prompt assembly", async () => {
-  await withFixture(async ({ store, hub }) => {
-    const agent = { id: "agt_test3" };
-    const account = { id: "acc_test3" };
-    const space = { id: "spc_test3", seats: [] };
-    const captured = [];
-    const adapter = fakeAdapter(captured);
-
-    const run = executeRun({
-      store,
-      hub,
-      config: CONFIG,
-      agent,
-      account,
-      space,
-      triggerMessage: { id: "msg_test3", content: "no memory wired" },
-      adapter,
-      agentStates: null,
-      memoryRetrieval: undefined,
-    });
-    await waitFor(hub, (e) => e.type === "run.ended" && e.data.run.id === run.id);
-    assert.equal(captured[0], "no memory wired");
-  });
-});
-
-test("structured prompt snapshot fixes resident, group, trigger, and retrieval physical order", async () => {
-  await withFixture(async ({ store, hub }) => {
-    const agent = { id: "agt_api", name: "Gemma" };
-    const account = { id: "acc_api" };
-    const space = { id: "spc_api", seats: [] };
-    store.insert("messages", {
-      id: "msg_other", spaceId: space.id, author: { type: "agent", agentId: "agt_other" },
-      target: { type: "broadcast" }, content: "temporary group context", status: "completed",
-      createdAt: "2026-07-14T00:00:00.000Z",
-    });
-    const triggerMessage = store.insert("messages", {
-      id: "msg_user", spaceId: space.id, author: { type: "user" }, target: { type: "broadcast" },
-      content: "raw user question", status: "completed", createdAt: "2026-07-14T00:00:01.000Z",
-    });
-    let captured;
-    let searchInput;
-    const memoryRetrieval = {
-      async ensureSession() { return { id: "mrs_snapshot" }; },
-      async resetSession() {},
-      async residentIndex() { return "RESIDENT"; },
-      async searchForInjection(input) {
-        searchInput = input;
-        return { block: "RETRIEVAL", response: { items: [{ slug: "rule" }], cursor: null } };
-      },
-    };
+test("Run pending -> running freezes space, session, agent, and account identifiers", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
+    const triggerMessage = insertMessage();
+    let release;
+    let capturedContext;
+    const gate = new Promise((resolve) => { release = resolve; });
     const adapter = {
       async run(ctx) {
-        captured = ctx.prompt;
-        return { content: "answer", sessionState: { ok: true } };
+        capturedContext = ctx;
+        await gate;
+        return { content: "reply" };
       },
     };
-    const run = executeRun({ store, hub, config: CONFIG, agent, account, space, triggerMessage, adapter, memoryRetrieval });
-    await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === run.id);
-
-    const group = "=== 群内最近发言 ===\n- agent: temporary group context";
-    assert.equal(captured.text, `RESIDENT\n\n${group}\n\nraw user question\n\nRETRIEVAL`);
-    assert.equal(captured.turnText, `${group}\n\nraw user question\n\nRETRIEVAL`);
-    assert.equal(captured.historyUserText, "raw user question");
-    assert.equal(captured.historyEnvelopeText, "raw user question\n\nRETRIEVAL");
-    assert.equal(captured.residentBlock, "RESIDENT");
-    assert.equal(captured.retrievalBlock, "RETRIEVAL");
-    assert.deepEqual(searchInput, {
-      context: {
-        agentId: agent.id,
-        memorySessionId: "mrs_snapshot",
-        runId: run.id,
-        spaceId: space.id,
-        triggerMessageId: triggerMessage.id,
-      },
-      query: "raw user question",
+    const startedPromise = waitFor(hub, (event) => event.type === "run.started");
+    const run = executeRun({
+      store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+      triggerMessage, adapter,
     });
+
+    assert.equal(run.status, "pending");
+    assert.deepEqual(
+      [run.spaceSessionId, run.agentSessionId, run.contextGeneration, run.agentId, run.accountId],
+      [spaceSession.id, agentSession.id, 1, agent.id, account.id],
+    );
+    const started = await startedPromise;
+    assert.deepEqual(
+      [
+        started.data.run.spaceSessionId,
+        started.data.run.agentSessionId,
+        started.data.run.contextGeneration,
+        started.data.run.agentId,
+        started.data.run.accountId,
+      ],
+      [spaceSession.id, agentSession.id, 1, agent.id, account.id],
+    );
+    assert.deepEqual(
+      [
+        capturedContext.spaceSessionId,
+        capturedContext.agentSessionId,
+        capturedContext.contextGeneration,
+        capturedContext.agent.id,
+        capturedContext.account.id,
+      ],
+      [spaceSession.id, agentSession.id, 1, agent.id, account.id],
+    );
+    release();
+    const ended = await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === run.id);
+    assert.equal(ended.data.run.status, "completed");
+    assert.equal(ended.data.run.spaceSessionId, spaceSession.id);
+    assert.equal(ended.data.run.agentSessionId, agentSession.id);
   });
 });
 
-test("automatic retrieval failure omits the block without failing the run", async () => {
-  await withFixture(async ({ store, hub }) => {
-    const agent = { id: "agt_failopen" };
-    const account = { id: "acc_failopen" };
-    const space = { id: "spc_failopen", seats: [] };
-    const captured = [];
-    const memoryRetrieval = {
-      async ensureSession() { return { id: "mrs_failopen" }; },
-      async resetSession() {},
-      async residentIndex() { return null; },
-      async searchForInjection() { throw new Error("derived index unavailable"); },
-    };
+test("startup recovery terminalizes orphaned Runs and their in-flight records", async () => {
+  await fixture(async ({ store, agent, account, space, spaceSession, agentSession }) => {
+    store.insert("runs", {
+      id: "run_interrupted", agentId: agent.id, accountId: account.id, role: "main", parentRunId: null,
+      spaceId: space.id, spaceSessionId: spaceSession.id, agentSessionId: agentSession.id,
+      contextGeneration: 1, triggerMessageId: "msg_trigger", replyMessageIds: [], status: "running",
+      createdAt: "2026-07-15T00:00:00.000Z", endedAt: null,
+    });
+    store.insert("messages", {
+      id: "msg_streaming", spaceId: space.id, spaceSessionId: spaceSession.id,
+      author: { type: "agent", agentId: agent.id }, target: { type: "broadcast" },
+      content: "partial", runId: "run_interrupted", status: "streaming", createdAt: "2026-07-15T00:00:01.000Z",
+    });
+    store.insert("activities", {
+      id: "act_pending", spaceId: space.id, spaceSessionId: spaceSession.id, runId: "run_interrupted",
+      agentId: agent.id, phase: "tool", label: "work", toolStatus: "running", createdAt: "2026-07-15T00:00:01.000Z",
+    });
+    store.insert("approvals", {
+      id: "apr_pending", spaceId: space.id, spaceSessionId: spaceSession.id, runId: "run_interrupted",
+      agentId: agent.id, prompt: "approve", options: ["allow", "deny"], status: "pending", answer: null,
+      createdAt: "2026-07-15T00:00:01.000Z",
+    });
+    recoverInterruptedRuns(store, { now: "2026-07-16T00:00:00.000Z" });
+    assert.equal(store.find("runs", "run_interrupted").status, "failed");
+    assert.deepEqual(store.find("runs", "run_interrupted").replyMessageIds, ["msg_streaming"]);
+    assert.equal(store.find("messages", "msg_streaming").status, "failed");
+    assert.equal(store.find("activities", "act_pending").toolStatus, "failed");
+    assert.deepEqual(
+      [store.find("approvals", "apr_pending").status, store.find("approvals", "apr_pending").answer],
+      ["expired", "deny"],
+    );
+  }, { suffix: "startup_recovery" });
+});
+
+test("a Run queued behind Account work refreshes the AgentSession generation before start", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
+    let releaseLock;
+    let lockEntered;
+    const entered = new Promise((resolve) => { lockEntered = resolve; });
+    const gate = new Promise((resolve) => { releaseLock = resolve; });
+    const priorWork = withAccountExecutionLock(account.id, async () => {
+      lockEntered();
+      await gate;
+      rotateContextGeneration(store, {
+        agentSessionId: agentSession.id,
+        fromGeneration: 1,
+        checkpoint: { schemaVersion: 1, summary: "prior", sourceMessageIds: [], recentTurns: [] },
+      });
+    });
+    await entered;
+    let observedGeneration = null;
     const run = executeRun({
-      store, hub, config: CONFIG, agent, account, space,
-      triggerMessage: { id: "msg_failopen", content: "chat must continue" },
-      adapter: fakeAdapter(captured), memoryRetrieval,
+      store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+      triggerMessage: insertMessage(),
+      adapter: { async run(ctx) { observedGeneration = ctx.contextGeneration; return { content: "reply" }; } },
+    });
+    releaseLock();
+    await priorWork;
+    const ended = await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === run.id);
+    assert.equal(ended.data.run.status, "completed");
+    assert.equal(ended.data.run.contextGeneration, 2);
+    assert.equal(observedGeneration, 2);
+  }, { suffix: "queued_generation" });
+});
+
+test("CLI provider binding is generation-scoped, continuous, and CAS protected", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
+    const seenBindings = [];
+    const persistedVersions = [];
+    const adapter = {
+      async run(ctx) {
+        seenBindings.push(ctx.providerBinding);
+        const currentVersion = ctx.providerBinding?.version ?? 0;
+        const saved = ctx.persistProviderBinding({ threadId: "thr_stable" }, currentVersion);
+        persistedVersions.push(saved.version);
+        return { content: `reply ${seenBindings.length}` };
+      },
+    };
+
+    for (const content of ["first", "second"]) {
+      const triggerMessage = insertMessage({ content });
+      const run = executeRun({
+        store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+        triggerMessage, adapter,
+      });
+      const ended = await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === run.id);
+      assert.equal(ended.data.run.status, "completed");
+    }
+
+    assert.equal(seenBindings[0], null);
+    assert.deepEqual(seenBindings[1].providerState, { threadId: "thr_stable" });
+    assert.deepEqual(persistedVersions, [1, 2], "the resumed thread advances its binding CAS version");
+    assert.equal(getProviderBinding(store, {
+      agentSessionId: agentSession.id,
+      generation: 1,
+      accountId: account.id,
+    }).version, 2);
+
+    let staleError;
+    const staleAdapter = {
+      async run(ctx) {
+        try {
+          ctx.persistProviderBinding({ threadId: "thr_conflict" }, 0);
+        } catch (error) {
+          staleError = error;
+        }
+        return { content: "binding unchanged" };
+      },
+    };
+    const staleRun = executeRun({
+      store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+      triggerMessage: insertMessage({ content: "stale CAS" }), adapter: staleAdapter,
+    });
+    await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === staleRun.id);
+    assert.equal(staleError?.code, "conflict");
+    assert.deepEqual(getProviderBinding(store, {
+      agentSessionId: agentSession.id, generation: 1, accountId: account.id,
+    }).providerState, { threadId: "thr_stable" });
+  });
+});
+
+test("CLI missing binding rotates generation and starts a fresh CAS/binding context", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
+    const memoryRetrieval = memoryRetrievalStub({ resident: "RESIDENT INDEX" });
+    const first = executeRun({
+      store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+      triggerMessage: insertMessage({ content: "establish thread" }),
+      memoryRetrieval,
+      adapter: {
+        async run(ctx) {
+          ctx.persistProviderBinding({ threadId: "thr_old" }, 0);
+          return { content: "established" };
+        },
+      },
+    });
+    await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === first.id);
+
+    let rotation;
+    const second = executeRun({
+      store, hub, config: CONFIG, agent, account, space, spaceSession,
+      agentSession: store.find("agentSessions", agentSession.id),
+      triggerMessage: insertMessage({ content: "resume missing" }),
+      memoryRetrieval,
+      adapter: {
+        async run(ctx) {
+          assert.deepEqual(ctx.providerBinding.providerState, { threadId: "thr_old" });
+          rotation = await ctx.rotateProviderBinding({ reason: "missing" });
+          assert.equal(rotation.generation, 2);
+          assert.match(rotation.prompt.text, /^RESIDENT INDEX/u);
+          await assert.rejects(
+            ctx.rotateProviderBinding({ reason: "missing" }),
+            (error) => error.code === "conflict",
+          );
+          const saved = ctx.persistProviderBinding({ threadId: "thr_new" }, 0);
+          assert.equal(saved.version, 1);
+          return { content: "recovered" };
+        },
+      },
+    });
+    const ended = await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === second.id);
+    assert.equal(ended.data.run.status, "completed");
+    assert.equal(store.find("agentSessions", agentSession.id).generation, 2);
+    assert.deepEqual(getProviderBinding(store, {
+      agentSessionId: agentSession.id, generation: 1, accountId: account.id,
+    }).providerState, { threadId: "thr_old" }, "old generation remains frozen");
+    assert.deepEqual(getProviderBinding(store, {
+      agentSessionId: agentSession.id, generation: 2, accountId: account.id,
+    }).providerState, { threadId: "thr_new" });
+  });
+});
+
+test("ordinary CLI provider failures never rotate context generation", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
+    const fingerprint = providerFingerprintForAccount(account);
+    const establishingRun = executeRun({
+      store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+      triggerMessage: insertMessage({ content: "establish" }),
+      adapter: {
+        async run(ctx) {
+          ctx.persistProviderBinding({ threadId: "thr_kept" }, 0);
+          return { content: "ok" };
+        },
+      },
+    });
+    await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === establishingRun.id);
+
+    const failedRun = executeRun({
+      store, hub, config: CONFIG, agent, account, space, spaceSession,
+      agentSession: store.find("agentSessions", agentSession.id),
+      triggerMessage: insertMessage({ content: "provider fails" }),
+      adapter: {
+        async run() { throw new AdapterError("provider_failed", "temporary provider failure"); },
+      },
+    });
+    const ended = await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === failedRun.id);
+    assert.equal(ended.data.run.status, "failed");
+    assert.equal(ended.data.run.contextGeneration, 1);
+    assert.equal(store.find("agentSessions", agentSession.id).generation, 1);
+    const binding = getProviderBinding(store, {
+      agentSessionId: agentSession.id, generation: 1, accountId: account.id,
+    });
+    assert.equal(binding.providerFingerprint, fingerprint);
+    assert.deepEqual(binding.providerState, { threadId: "thr_kept" });
+  });
+});
+
+test("crossing the auto watermark queues compaction at the completed Run safe point", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
+    const compactCalls = [];
+    const run = executeRun({
+      store,
+      hub,
+      config: {
+        ...CONFIG,
+        context: { ...CONFIG.context, defaultLimitTokens: 1000, warningRatio: 0.1, autoRatio: 0.2 },
+      },
+      agent,
+      account,
+      space,
+      spaceSession,
+      agentSession,
+      triggerMessage: insertMessage({ content: "small prompt" }),
+      contextCompaction: {
+        async compactAgent(input) {
+          compactCalls.push(input);
+          return store.find("agentSessions", agentSession.id);
+        },
+      },
+      adapter: { async run() { return { content: "x".repeat(900) }; } },
+    });
+    await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === run.id);
+    assert.equal(compactCalls.length, 1);
+    assert.equal(compactCalls[0].spaceId, space.id);
+    assert.equal(compactCalls[0].agentId, agent.id);
+    assert.match(compactCalls[0].requestId, new RegExp(`^auto:${agentSession.id}:1:${run.id}$`, "u"));
+  });
+});
+
+test("API history commits complete turns by CAS and excludes resident/group/Recall volatile text", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
+    store.insert("agents", { id: "agt_other", name: "Other" });
+    insertMessage({
+      id: "msg_other",
+      content: "temporary group context",
+      author: { type: "agent", agentId: "agt_other" },
+    });
+    const triggerMessage = insertMessage({ id: "msg_api_input", content: "raw user question" });
+    const captured = [];
+    const run = executeRun({
+      store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+      triggerMessage,
+      memoryRetrieval: memoryRetrievalStub({ resident: "RESIDENT", retrieval: "RECALL" }),
+      adapter: {
+        async run(ctx) {
+          captured.push(ctx.prompt);
+          return {
+            content: "api answer",
+            usage: { inputTokens: 42 },
+            toolTranscript: [{ callId: "call_1", name: "safe_tool", status: "completed" }],
+          };
+        },
+      },
     });
     const ended = await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === run.id);
     assert.equal(ended.data.run.status, "completed");
-    assert.deepEqual(captured, ["chat must continue"]);
-  });
+    assert.match(captured[0].turnText, /temporary group context/u);
+    assert.match(captured[0].turnText, /RECALL/u);
+    assert.equal(captured[0].apiMessages[0].content, "RESIDENT");
+
+    const history = getApiHistory(store, { agentSessionId: agentSession.id, generation: 1 });
+    assert.equal(history.version, 1);
+    assert.equal(history.turns.length, 1);
+    assert.equal(history.turns[0].input.content, "raw user question");
+    assert.equal(history.turns[0].assistant[0].content, "api answer");
+    const measuredSession = store.find("agentSessions", agentSession.id);
+    assert.equal(measuredSession.context.estimatedInputTokens, 42);
+    assert.equal(measuredSession.context.measurement, "provider_reported");
+    const stableHistoryText = JSON.stringify(history);
+    assert.doesNotMatch(stableHistoryText, /RESIDENT|temporary group context|RECALL/u);
+
+    assert.throws(() => compareAndSetApiHistory(store, {
+      agentSessionId: agentSession.id,
+      generation: 1,
+      baseHistoryVersion: 0,
+      turn: { ...history.turns[0], runId: "run_stale" },
+    }), (error) => error.code === "history_conflict");
+    assert.deepEqual(getApiHistory(store, {
+      agentSessionId: agentSession.id, generation: 1,
+    }), history, "stale CAS keeps canonical history unchanged");
+  }, { kind: "api", suffix: "api" });
 });
 
-test("one Memory recall session deduplicates automatic injection across provider turns", async () => {
-  await withFixture(async ({ store, hub }) => {
-    const agent = { id: "agt_dedupe" };
-    const account = { id: "acc_dedupe" };
-    const space = { id: "spc_dedupe", seats: [] };
-    const ensureCalls = [];
-    const delivered = new Set();
-    const memoryRetrieval = {
-      async ensureSession(input) {
-        ensureCalls.push(input);
-        return { id: "mrs_shared" };
-      },
-      async resetSession() {},
-      async residentIndex() { return null; },
-      async searchForInjection({ context }) {
-        if (delivered.has(context.memorySessionId)) return { block: null, response: { items: [] } };
-        delivered.add(context.memorySessionId);
-        return { block: "MEMORY ONCE", response: { items: [{ slug: "once" }] } };
-      },
-    };
-    const captured = [];
-    const adapter = fakeAdapter(captured);
-    const first = executeRun({
-      store, hub, config: CONFIG, agent, account, space,
-      triggerMessage: { id: "msg_dedupe_1", content: "first" }, adapter, memoryRetrieval,
-    });
-    await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === first.id);
-    const second = executeRun({
-      store, hub, config: CONFIG, agent, account, space,
-      triggerMessage: { id: "msg_dedupe_2", content: "second" }, adapter, memoryRetrieval,
-    });
-    await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === second.id);
-
-    assert.deepEqual(captured, ["first\n\nMEMORY ONCE", "second"]);
-    assert.deepEqual(ensureCalls.map((call) => call.reset), [true, false]);
-    assert.ok(ensureCalls.every((call) => call.accountId === account.id && call.spaceId === space.id));
-  });
-});
-
-test("recompileForNewSession resets once and returns one fresh prompt Promise", async () => {
-  await withFixture(async ({ store, hub }) => {
-    const agent = { id: "agt_recompile" };
-    const account = { id: "acc_recompile" };
-    const space = { id: "spc_recompile", seats: [] };
-    store.setSessionState(account.id, space.id, { externalSessionId: "old" });
-    const ensureCalls = [];
-    const resetCalls = [];
-    const searchedSessions = [];
-    let sequence = 0;
-    const memoryRetrieval = {
-      async ensureSession(input) {
-        ensureCalls.push(input);
-        return { id: `mrs_recompile_${++sequence}` };
-      },
-      async resetSession(input) {
-        assert.equal(store.getSessionState(account.id, space.id), null, "provider state must clear before recall reset");
-        resetCalls.push(input);
-      },
-      async residentIndex() { return "FRESH RESIDENT"; },
-      async searchForInjection({ context }) {
-        searchedSessions.push(context.memorySessionId);
-        return { block: `MEMORY ${context.memorySessionId}`, response: { items: [] } };
-      },
-    };
-    let initialPrompt;
-    let freshPrompt;
-    let identicalPromise = false;
-    const adapter = {
-      async run(ctx) {
-        initialPrompt = ctx.prompt;
-        const first = ctx.recompileForNewSession({ reason: "missing" });
-        const second = ctx.recompileForNewSession({ reason: "invalid" });
-        identicalPromise = first === second;
-        freshPrompt = await first;
-        assert.strictEqual(await second, freshPrompt);
-        return { content: "fresh answer", sessionState: { externalSessionId: "new" } };
-      },
-    };
-    const triggerMessage = { id: "msg_recompile", content: "same frozen trigger" };
+test("a competing API history CAS fails the Run without appending its assistant turn", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
+    const triggerMessage = insertMessage({ content: "race" });
     const run = executeRun({
-      store, hub, config: CONFIG, agent, account, space, triggerMessage, adapter, memoryRetrieval,
+      store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+      triggerMessage,
+      adapter: {
+        async run() {
+          compareAndSetApiHistory(store, {
+            agentSessionId: agentSession.id,
+            generation: 1,
+            baseHistoryVersion: 0,
+            turn: {
+              runId: "run_competitor",
+              input: { sourceMessageId: "msg_competitor", content: "other" },
+              assistant: [{ messageId: "msg_competitor_reply", content: "other reply" }],
+            },
+          });
+          return { content: "must not commit" };
+        },
+      },
+    });
+    const ended = await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === run.id);
+    assert.equal(ended.data.run.status, "failed");
+    assert.equal(ended.data.run.error.code, "history_conflict");
+    const history = getApiHistory(store, { agentSessionId: agentSession.id, generation: 1 });
+    assert.equal(history.version, 1);
+    assert.deepEqual(history.turns.map((turn) => turn.runId), ["run_competitor"]);
+  }, { kind: "api", suffix: "race" });
+});
+
+test("Message, Run, Activity and Approval write events inherit one spaceSessionId", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
+    const { events, unsubscribe } = captureEvents(hub);
+    const triggerMessage = insertMessage({ content: "emit everything" });
+    const run = executeRun({
+      store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+      triggerMessage,
+      adapter: {
+        async run(ctx) {
+          ctx.onActivity({ callId: "call_a", phase: "started", label: "work" });
+          ctx.requestApproval({ callId: "call_a", type: "tool", summary: "approve" });
+          ctx.onDelta("streamed reply");
+          return { content: "streamed reply" };
+        },
+      },
     });
     await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === run.id);
+    unsubscribe();
 
-    assert.equal(identicalPromise, true);
-    assert.equal(resetCalls.length, 1);
-    assert.deepEqual(ensureCalls.map((call) => call.reset), [false, false]);
-    assert.deepEqual(searchedSessions, ["mrs_recompile_1", "mrs_recompile_2"]);
-    assert.equal(initialPrompt.text, "same frozen trigger\n\nMEMORY mrs_recompile_1");
-    assert.equal(freshPrompt.text, "FRESH RESIDENT\n\nsame frozen trigger\n\nMEMORY mrs_recompile_2");
-    assert.equal(freshPrompt.historyEnvelopeText, "same frozen trigger\n\nMEMORY mrs_recompile_2");
-    assert.deepEqual(store.getSessionState(account.id, space.id), { externalSessionId: "new" });
+    const domainEvents = events.filter((event) =>
+      ["run.started", "run.ended", "activity.created", "approval.requested", "message.created", "message.delta", "message.completed"]
+        .includes(event.type));
+    assert(domainEvents.length >= 6, `expected domain write events, got ${domainEvents.map((event) => event.type)}`);
+    for (const event of domainEvents) {
+      const record = event.data.run ?? event.data.activity ?? event.data.approval ?? event.data.message;
+      const sessionId = record?.spaceSessionId ?? event.data.spaceSessionId;
+      assert.equal(sessionId, spaceSession.id, `${event.type} must carry spaceSessionId`);
+    }
+    const timeline = getTimeline(store, space.id, { spaceSessionId: spaceSession.id, limit: 50 });
+    assert.equal(timeline.runs.length, 1);
+    assert.equal(timeline.runs[0].id, run.id);
+    assert.equal(timeline.runs[0].status, "completed");
   });
 });
 
-test("prompt setup failure ends the Run and releases Agent state before adapter execution", async () => {
-  await withFixture(async ({ store, hub }) => {
-    const agent = { id: "agt_setupfail" };
-    const account = { id: "acc_setupfail" };
-    const space = { id: "spc_setupfail", seats: [] };
+test("prompt compilation failure ends the pending Run without entering Agent working state", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
     let adapterCalled = false;
     const states = [];
-    const memoryRetrieval = {
-      async ensureSession() { throw new Error("sidecar setup failed at /private/secret/path"); },
-      async resetSession() {},
-      async residentIndex() { return null; },
-      async searchForInjection() { return { block: null }; },
-    };
     const run = executeRun({
-      store, hub, config: CONFIG, agent, account, space,
-      triggerMessage: { id: "msg_setupfail", content: "hello" },
+      store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+      triggerMessage: insertMessage(),
       adapter: { async run() { adapterCalled = true; return { content: "unexpected" }; } },
       agentStates: { setWorking() { states.push("working"); }, setIdle() { states.push("idle"); } },
-      memoryRetrieval,
+      memoryRetrieval: {
+        async ensureSession() { throw new Error("sidecar setup failed at /private/secret/path"); },
+        async residentIndex() { return null; },
+        async searchForInjection() { return { block: null }; },
+      },
     });
     const ended = await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === run.id);
     assert.equal(ended.data.run.status, "failed");
     assert.equal(ended.data.run.error.code, "internal");
-    assert.equal(ended.data.run.error.message, "prompt compilation failed");
     assert.doesNotMatch(JSON.stringify(ended.data.run.error), /private|secret|path/u);
     assert.equal(adapterCalled, false);
-    assert.deepEqual(states, ["working", "idle"]);
-    assert.equal(store.find("runs", run.id).status, "failed");
+    assert.deepEqual(states, []);
   });
 });

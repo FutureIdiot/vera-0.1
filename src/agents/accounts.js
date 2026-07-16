@@ -85,6 +85,8 @@ export function deleteAccount(store, id) {
   if (ownerExists && ownerAccounts.length === 1) {
     throw new ApiError("conflict", `account ${id} is the only account for agent ${account.owningAgentId}`);
   }
-  store.clearSessionStatesForAccount(id);
+  for (const binding of [...store.list("providerBindings")]) {
+    if (binding.accountId === id) store.remove("providerBindings", binding.id);
+  }
   store.remove("accounts", id);
 }

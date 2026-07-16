@@ -267,13 +267,15 @@
 ### P5-C1 — SpaceSession / AgentSession 与上下文压缩
 
 - [x] **C1契约先行（2026-07-15）**：Space 1:N SpaceSession且唯一active；SpaceSession 1:N AgentSession且每Agent独立generation。Message/Run/Activity/Approval绑定`spaceSessionId`，Run冻结`agentSessionId + generation + agentId + accountId`。API Agent的规范history/checkpoint由gateway持有；CLI thread/resume id只作为generation的provider binding。
-- [ ] 一次迁移既有Space与消息运行记录；旧opaque `sessionState`只在能唯一证明归属时迁为CLI provider binding，否则失效重建。迁移后删除旧collection、`sync-state`与双读双写。
-- [ ] 实现容量测量、warning 70% / auto 80% / hard 95%三档水位和per-Agent安全点压缩。补齐daemon-only `agent-session.compact.requested`与target result CAS：CLI native返回压缩后binding，checkpoint/API模式返回checkpoint且下一generation重新建binding/history。compact成功令generation递增并重建稳定前缀/Recall sidecar；失败明确返回`context_capacity`且不依赖provider静默截断。
-- [ ] 实现分型`run.requested`与API结果CAS：CLI只收promptText/binding，API只收messages/historyVersion；API main Run必须先以reply Message ids提交完整trigger+assistant turn，CAS成功后才能completed。subagent Run的session字段为空且只用isolated临时上下文，不污染主AgentSession。
-- [ ] 实现裸`/compact`与`/new`控制命令及API：群聊`/compact`默认逐Agent独立执行；`/new`只在无在途Run/compact时原子归档当前SpaceSession全部AgentSession并新建active窗口。命令不成为Message、不触发Run、Digest或Dream。
-- [ ] 实现SpaceSession只读历史：可查看归档消息、Activity和运行状态，不可恢复或追加；Space归档/恢复仍是另一套房间级操作。补齐API/CLI、私聊/群聊、并发、失败和迁移黑盒测试。
+- [x] 一次迁移既有Space与消息运行记录；旧opaque `sessionState`只在能唯一证明归属时迁为CLI provider binding，否则失效重建。迁移后删除旧collection、`sync-state`与双读双写。
+- [x] 实现容量测量、warning 70% / auto 80% / hard 95%三档水位和per-Agent安全点压缩；当前进程内gateway以确定性checkpoint继承上一代摘要并保留最近完整Run轮次，再通过target CAS换代；compact成功令generation递增并重建稳定前缀/Recall sidecar，失败明确返回`context_capacity`且不依赖provider静默截断。Phase 5.5再把隔离、无Tools的模型总结及已冻结target/result语义搬到daemon的`agent-session.compact.requested`传输，不在本阶段提前造daemon。
+- [x] 实现当前进程内分型adapter input与API结果CAS：CLI只收promptText/binding，API只收messages/historyVersion；API main Run以reply Message ids形成完整trigger+assistant turn，CAS成功后才能completed。Phase 5.5的`run.requested`/`api-result`线协议只迁移执行位置；subagent daemon执行仍按Phase 5.5实现。
+- [x] 实现裸`/compact`与`/new`控制命令及API：群聊`/compact`默认逐Agent独立执行；`/new`只在无在途Run/compact时原子归档当前SpaceSession全部AgentSession并新建active窗口。命令不成为Message、不触发Run、Digest或Dream。
+- [x] 实现SpaceSession只读历史：可查看归档消息、Activity和运行状态，不可恢复或追加；Space归档/恢复仍是另一套房间级操作。补齐API/CLI、私聊/群聊、并发、失败和迁移测试。
 
 **C1验收**：一个Agent可在多个私聊/群聊Space各自保持唯一active AgentSession；群内不同Agent容量与compact互不连带；`/new`后旧窗口只读且新generation不继承旧API history、CLI binding、checkpoint、Recall delivered/cursor；API Agent重启后由gateway继续规范history，CLI只恢复已冻结provider binding；达到hard水位时不丢当前消息。
+
+**C1当前进程内验收（2026-07-16）**：SpaceSession/AgentSession迁移、generation级CLI binding与API history CAS、Account进程内排他队列、容量水位、自动/手动compact、`/new`、归档历史页面以及Message/Run/Activity/Approval的`spaceSessionId`已接入。普通`npm test`为260通过、2个真实provider smoke默认skip；`npm run analyze:web`通过，默认chat gzip 20234/204800。`node scripts/verify.mjs`已尝试，但当前执行沙箱在`127.0.0.1` listen处返回`EPERM`，因此临时gateway逐帧黑盒未在本窗口实跑；检查已接入脚本，须在可监听环境补跑，不能把本记录冒充daemon/Tailscale/真实provider验收。
 
 ### P5-M3.1 — 真实 embedding 召回与 merged slug 修复
 

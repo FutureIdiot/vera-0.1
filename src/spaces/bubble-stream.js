@@ -9,7 +9,7 @@ function stripInternal({ _seq, ...rest }) {
   return rest;
 }
 
-export function createBubbleStream({ store, hub, config, spaceId, runId, agentId }) {
+export function createBubbleStream({ store, hub, config, spaceId, spaceSessionId, runId, agentId }) {
   const splitter = createBubbleSplitter(config.bubbles);
   const replyMessageIds = [];
   let current = null;
@@ -19,6 +19,7 @@ export function createBubbleStream({ store, hub, config, spaceId, runId, agentId
     const message = {
       id: newMessageId(),
       spaceId,
+      spaceSessionId,
       author: { type: "agent", agentId },
       target: { type: "broadcast" },
       content: initialContent,
@@ -31,7 +32,7 @@ export function createBubbleStream({ store, hub, config, spaceId, runId, agentId
     hub.publish("message.created", { message: stripInternal(stored) });
     current = stored;
     if (initialContent) {
-      hub.publish("message.delta", { messageId: stored.id, spaceId, delta: initialContent });
+      hub.publish("message.delta", { messageId: stored.id, spaceId, spaceSessionId, delta: initialContent });
     }
   }
 
@@ -49,7 +50,7 @@ export function createBubbleStream({ store, hub, config, spaceId, runId, agentId
     if (completed.length === 0) {
       if (!current) open();
       current = store.update("messages", current.id, { content: current.content + text });
-      hub.publish("message.delta", { messageId: current.id, spaceId, delta: text });
+      hub.publish("message.delta", { messageId: current.id, spaceId, spaceSessionId, delta: text });
       return;
     }
 

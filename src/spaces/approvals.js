@@ -17,10 +17,11 @@ function stripInternal({ _seq, ...rest }) {
 }
 
 // 提权申请：由 run-controller 包一层 ctx.requestApproval 调用。
-export function requestApproval({ store, hub, spaceId, runId, agentId, req }) {
+export function requestApproval({ store, hub, spaceId, spaceSessionId, runId, agentId, req }) {
   const approval = {
     id: newApprovalId(),
     spaceId,
+    spaceSessionId,
     runId,
     agentId,
     prompt: req?.prompt ?? "",

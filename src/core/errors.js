@@ -2,9 +2,16 @@
 
 export const STATUS_BY_CODE = {
   invalid_request: 400,
+  control_command_required: 400,
+  unauthorized: 401,
+  forbidden: 403,
   invalid_memory_file: 422,
   not_found: 404,
   conflict: 409,
+  account_busy: 409,
+  session_busy: 409,
+  context_capacity: 409,
+  history_conflict: 409,
   memory_cursor_invalid: 400,
   memory_cursor_expired: 410,
   memory_retrieval_unavailable: 503,

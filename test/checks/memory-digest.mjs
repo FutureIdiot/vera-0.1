@@ -14,6 +14,7 @@ export async function run(ctx) {
     assert(message, "expected one completed Message in the shared verify Space");
     requestBody = {
       spaceId: space.id,
+      spaceSessionId: timeline.json.spaceSession.id,
       mode: "range",
       fromMessageId: message.id,
       toMessageId: message.id,

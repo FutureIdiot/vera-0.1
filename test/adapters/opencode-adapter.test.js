@@ -218,10 +218,11 @@ after(async () => {
   await rm(binDir, { recursive: true, force: true });
 });
 
-function makeCtx({ text = "hi", sessionState = null, recompileForNewSession } = {}) {
+function makeCtx({ text = "hi", providerBinding = null, rotateProviderBinding } = {}) {
   const deltas = [];
   const activities = [];
   const persisted = [];
+  const rotations = [];
   const controller = new AbortController();
   return {
     ctx: {
@@ -237,18 +238,26 @@ function makeCtx({ text = "hi", sessionState = null, recompileForNewSession } = 
         model: "",
       },
       prompt: { text },
-      sessionState,
+      sessionMode: "main",
+      providerBinding,
       workspacePath: tmpdir(),
       onDelta: (d) => deltas.push(d),
       onActivity: (evt) => activities.push(evt),
       requestApproval: async () => "deny",
-      persistSessionState: (state) => persisted.push(state),
-      ...(recompileForNewSession ? { recompileForNewSession } : {}),
+      persistProviderBinding: async (providerState, ifVersion) => {
+        persisted.push({ providerState, ifVersion });
+        return { version: persisted.length, providerState };
+      },
+      rotateProviderBinding: rotateProviderBinding ?? (async (input) => {
+        rotations.push(input);
+        return { prompt: { text: `ROTATED ${input.reason}` }, providerBinding: null, generation: 2 };
+      }),
       signal: controller.signal,
     },
     deltas,
     activities,
     persisted,
+    rotations,
     controller,
   };
 }
@@ -311,12 +320,16 @@ test("normal streaming with a valid existing session", async () => {
   });
 
   const { ctx, deltas, activities, persisted } = makeCtx({
-    sessionState: { externalSessionId: "ses_known" },
+    providerBinding: { version: 1, providerState: { externalSessionId: "ses_known" } },
   });
   const result = await adapter.run(ctx);
 
   assert.equal(result.content, "你好，世界"); // delta 累积优先于 stdout
-  assert.deepEqual(result.sessionState, { externalSessionId: "ses_known" });
+  assert.deepEqual(result, {
+    content: "你好，世界",
+    providerBinding: { version: 1, providerState: { externalSessionId: "ses_known" } },
+  });
+  assert.equal("sessionState" in result, false);
   assert.deepEqual(deltas, ["你好", "，世界"]);
   assert.equal(persisted.length, 0, "复用有效会话时不应重新持久化");
 
@@ -329,24 +342,29 @@ test("normal streaming with a valid existing session", async () => {
   assert.ok(!activities.some((a) => a.label === "session-reset"), "有效会话不应上报 session-reset");
 });
 
-test("first run without sessionState creates a session and persists it immediately", async () => {
+test("first run without provider binding creates a session and CAS-persists it immediately", async () => {
   stub.setRunHandler(async ({ sessionId }) => {
     stub.emit("message.part.delta", { sessionID: sessionId, field: "text", delta: "首答" });
     stub.emit("session.idle", { sessionID: sessionId });
     return {};
   });
 
-  const { ctx, activities, persisted } = makeCtx({ sessionState: null });
+  const { ctx, activities, persisted } = makeCtx({ providerBinding: null });
   const result = await adapter.run(ctx);
 
-  assert.equal(persisted.length, 1, "新会话必须立即 persistSessionState");
-  assert.match(persisted[0].externalSessionId, /^ses_stub_/);
-  assert.deepEqual(result.sessionState, persisted[0]);
+  assert.equal(persisted.length, 1, "新会话必须立即 persistProviderBinding");
+  assert.match(persisted[0].providerState.externalSessionId, /^ses_stub_/);
+  assert.equal(persisted[0].ifVersion, null);
+  assert.deepEqual(result.providerBinding, {
+    version: 1,
+    providerState: persisted[0].providerState,
+  });
+  assert.equal("sessionState" in result, false);
   assert.equal(result.content, "首答");
   assert.ok(!activities.some((a) => a.label === "session-reset"), "首建不是失效重建，不应上报 session-reset");
 });
 
-test("invalid non-null session state recompiles before creating and persisting a replacement", async () => {
+test("invalid non-null binding rotates before creating and persisting a replacement", async () => {
   let runnerPrompt = null;
   stub.setRunHandler(async ({ sessionId, prompt }) => {
     runnerPrompt = prompt;
@@ -357,20 +375,25 @@ test("invalid non-null session state recompiles before creating and persisting a
   const order = [];
   const { ctx, activities, persisted } = makeCtx({
     text: "INVALID STATE PROMPT",
-    sessionState: { externalSessionId: 42 },
-    recompileForNewSession: async (reason) => {
-      order.push({ type: "recompile", reason });
-      return { text: "FRESH INVALID-STATE PROMPT" };
+    providerBinding: { version: 1, providerState: { externalSessionId: 42 } },
+    rotateProviderBinding: async (reason) => {
+      order.push({ type: "rotate", reason });
+      return { prompt: { text: "FRESH INVALID-STATE PROMPT" }, providerBinding: null, generation: 2 };
     },
   });
-  ctx.persistSessionState = (state) => { order.push({ type: "persist" }); persisted.push(state); };
+  ctx.persistProviderBinding = async (providerState, ifVersion) => {
+    order.push({ type: "persist", ifVersion });
+    persisted.push({ providerState, ifVersion });
+    return { version: 1, providerState };
+  };
   const result = await adapter.run(ctx);
   assert.deepEqual(order, [
-    { type: "recompile", reason: { reason: "invalid" } },
-    { type: "persist" },
+    { type: "rotate", reason: { reason: "invalid" } },
+    { type: "persist", ifVersion: null },
   ]);
   assert.equal(runnerPrompt, "FRESH INVALID-STATE PROMPT");
-  assert.equal(result.sessionState.externalSessionId, persisted[0].externalSessionId);
+  assert.equal(result.providerBinding.providerState.externalSessionId, persisted[0].providerState.externalSessionId);
+  assert.equal("sessionState" in result, false);
   assert.match(activities.find((item) => item.label === "session-reset")?.detail ?? "", /invalid/u);
 });
 
@@ -386,25 +409,26 @@ test("stale session is rebuilt with a session-reset activity, not silently", asy
   const resetOrder = [];
   const { ctx, activities, persisted } = makeCtx({
     text: "STALE PROMPT",
-    sessionState: { externalSessionId: "ses_daemon_restarted_gone" },
-    recompileForNewSession: async (reason) => {
-      resetOrder.push({ type: "recompile", reason });
-      return { text: "FRESH OPENCODE PROMPT" };
+    providerBinding: { version: 1, providerState: { externalSessionId: "ses_daemon_restarted_gone" } },
+    rotateProviderBinding: async (reason) => {
+      resetOrder.push({ type: "rotate", reason });
+      return { prompt: { text: "FRESH OPENCODE PROMPT" }, providerBinding: null, generation: 2 };
     },
   });
-  ctx.persistSessionState = (state) => {
-    resetOrder.push({ type: "persist" });
-    persisted.push(state);
+  ctx.persistProviderBinding = async (providerState, ifVersion) => {
+    resetOrder.push({ type: "persist", ifVersion });
+    persisted.push({ providerState, ifVersion });
+    return { version: 1, providerState };
   };
   const result = await adapter.run(ctx);
 
   assert.deepEqual(resetOrder, [
-    { type: "recompile", reason: { reason: "missing" } },
-    { type: "persist" },
+    { type: "rotate", reason: { reason: "missing" } },
+    { type: "persist", ifVersion: null },
   ], "recall session must reset before the replacement provider session is persisted");
   assert.equal(persisted.length, 1);
-  assert.notEqual(persisted[0].externalSessionId, "ses_daemon_restarted_gone");
-  assert.equal(result.sessionState.externalSessionId, persisted[0].externalSessionId);
+  assert.notEqual(persisted[0].providerState.externalSessionId, "ses_daemon_restarted_gone");
+  assert.equal(result.providerBinding.providerState.externalSessionId, persisted[0].providerState.externalSessionId);
 
   const reset = activities.find((a) => a.label === "session-reset");
   assert.ok(reset, "失效重建必须上报 session-reset activity");
@@ -414,7 +438,7 @@ test("stale session is rebuilt with a session-reset activity, not silently", asy
   assert.equal(result.content, "重建后继续");
 });
 
-test("ordinary OpenCode provider errors do not recompile the Memory recall session", async () => {
+test("ordinary OpenCode provider errors do not rotate the provider binding", async () => {
   stub.seedSession("ses_provider_error");
   stub.setRunHandler(async ({ sessionId }) => {
     stub.emit("session.error", { sessionID: sessionId, error: "ordinary provider failure" });
@@ -422,10 +446,10 @@ test("ordinary OpenCode provider errors do not recompile the Memory recall sessi
   });
   const reasons = [];
   const { ctx } = makeCtx({
-    sessionState: { externalSessionId: "ses_provider_error" },
-    recompileForNewSession: async (reason) => {
+    providerBinding: { version: 1, providerState: { externalSessionId: "ses_provider_error" } },
+    rotateProviderBinding: async (reason) => {
       reasons.push(reason);
-      return { text: "ordinary errors must not use this" };
+      return { prompt: { text: "ordinary errors must not use this" }, providerBinding: null, generation: 2 };
     },
   });
   await assert.rejects(() => adapter.run(ctx), (error) => error.code === "provider_error");
@@ -438,7 +462,7 @@ test("cancel: abort SIGTERMs the child, throws cancelled, and removes the abort 
     await new Promise(() => {}); // 永不 idle、永不回 CLI
   });
 
-  const { ctx, deltas, controller } = makeCtx({ sessionState: null });
+  const { ctx, deltas, controller } = makeCtx({ providerBinding: null });
   const pending = adapter.run(ctx);
   await waitFor(() => deltas.length >= 1);
   controller.abort();
@@ -458,7 +482,7 @@ test("watchdog: run with no completion times out with timed_out", async () => {
     await new Promise(() => {}); // 永不完成
   });
 
-  const { ctx } = makeCtx({ sessionState: null });
+  const { ctx } = makeCtx({ providerBinding: null });
   await assert.rejects(
     () => timeoutAdapter.run(ctx),
     (err) => {
@@ -473,7 +497,7 @@ test("missing binary fails fast with unavailable", async () => {
   const brokenAdapter = createOpencodeAdapter({
     config: adapterConfig({ binary: "/nonexistent/path/opencode" }),
   });
-  const { ctx } = makeCtx({ sessionState: null });
+  const { ctx } = makeCtx({ providerBinding: null });
   await assert.rejects(
     () => brokenAdapter.run(ctx),
     (err) => {
@@ -503,7 +527,10 @@ test("runner args carry -s <sessionId>, --dangerously-skip-permissions and the p
   });
 
   stub.seedSession("ses_args_check");
-  const { ctx } = makeCtx({ text: "只回一个字：好", sessionState: { externalSessionId: "ses_args_check" } });
+  const { ctx } = makeCtx({
+    text: "只回一个字：好",
+    providerBinding: { version: 1, providerState: { externalSessionId: "ses_args_check" } },
+  });
   const result = await adapter.run(ctx);
 
   assert.equal(seenArgs.sessionId, "ses_args_check");
@@ -511,6 +538,21 @@ test("runner args carry -s <sessionId>, --dangerously-skip-permissions and the p
   assert.ok(seenArgs.args.includes("-c"));
   assert.equal(seenArgs.prompt, "只回一个字：好");
   assert.equal(result.content, "done", "零 delta 时 content 用 stdout 兜底");
+});
+
+test("isolated CLI run creates a one-shot session without binding callbacks or result", async () => {
+  stub.setRunHandler(async ({ sessionId }) => {
+    stub.emit("session.idle", { sessionID: sessionId });
+    return { stdout: "isolated" };
+  });
+  const { ctx } = makeCtx({
+    providerBinding: { version: 1, providerState: { externalSessionId: "ses_known" } },
+  });
+  ctx.sessionMode = "isolated";
+  ctx.persistProviderBinding = () => { throw new Error("isolated run must not persist"); };
+  ctx.rotateProviderBinding = () => { throw new Error("isolated run must not rotate"); };
+  const result = await adapter.run(ctx);
+  assert.deepEqual(result, { content: "isolated" });
 });
 
 test("digestMemory uses a fresh isolated session and directory with wildcard/tool deny and structured output", async () => {

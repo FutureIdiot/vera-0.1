@@ -112,7 +112,11 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   save.className = "vera-primary-button";
   save.textContent = "保存设置";
   form.append(basic, participants, notifications, error, save);
-  root.appendChild(form);
+  const historyLink = document.createElement("a");
+  historyLink.className = "vera-text-button";
+  historyLink.href = `#/spaces/${encodeURIComponent(space.id)}/history`;
+  historyLink.textContent = "查看历史对话";
+  root.append(form, historyLink);
 
   function applyExternalSpace(nextSpace) {
     space = nextSpace;

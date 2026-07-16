@@ -11,6 +11,8 @@ const ARRAY_FILES = new Set([
   "memoryDigestJobs.json", "memoryRecallSessions.json", "memorySignals.json",
   "unitBindings.json", "memoryConfigs.json", "memoryTaskVerifications.json",
   "memoryDreamJobs.json",
+  "spaceSessions.json", "agentSessions.json", "providerBindings.json",
+  "apiHistories.json", "contextCompactionJobs.json", "contextControlRequests.json",
 ]);
 const OBJECT_FILES = new Set(["session-states.json", "meta.json", "settings.json"]);
 const RECOGNIZED_FILES = new Set([...ARRAY_FILES, ...OBJECT_FILES]);

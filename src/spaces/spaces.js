@@ -2,6 +2,7 @@
 
 import { newSpaceId } from "../core/id.js";
 import { ApiError } from "../core/errors.js";
+import { ensureActiveSpaceSession, ensureAgentSession } from "./context-sessions.js";
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
@@ -105,7 +106,12 @@ export function createSpace(store, body) {
     archivedAt: null,
     createdAt: new Date().toISOString(),
   };
-  return stripInternal(store.insert("spaces", space));
+  const stored = store.insert("spaces", space);
+  const spaceSession = ensureActiveSpaceSession(store, stored.id);
+  for (const seat of stored.seats) {
+    ensureAgentSession(store, { spaceSessionId: spaceSession.id, agentId: seat.agentId });
+  }
+  return normalizeSpace(store.find("spaces", stored.id));
 }
 
 export function updateSpace(store, id, patch) {
@@ -126,6 +132,12 @@ export function updateSpace(store, id, patch) {
   if (patch.seats !== undefined) next.seats = normalizeSeats(store, patch.seats);
   if (patch.notifications !== undefined) next.notifications = normalizeNotifications(patch.notifications);
   const updated = store.update("spaces", id, next);
+  if (next.seats) {
+    const spaceSession = ensureActiveSpaceSession(store, id);
+    for (const seat of next.seats) {
+      ensureAgentSession(store, { spaceSessionId: spaceSession.id, agentId: seat.agentId });
+    }
+  }
   return normalizeSpace(updated);
 }
 
@@ -134,9 +146,15 @@ export function archiveSpace(store, id) {
   if (!space) throw new ApiError("not_found", `space ${id} does not exist`);
   if (space.archivedAt) return normalizeSpace(space); // 幂等
   // 有未结束 Run 时拒绝（api-contract.md 263）
-  const runningRuns = store.list("runs").filter((r) => r.spaceId === id && r.status === "running");
+  const runningRuns = store.list("runs").filter((r) =>
+    r.spaceId === id && ["pending", "running"].includes(r.status));
   if (runningRuns.length > 0) {
     throw new ApiError("conflict", `space ${id} has ${runningRuns.length} running run(s), cancel or wait before archiving`);
+  }
+  const activeCompactions = store.list("contextCompactionJobs").filter((job) =>
+    job.spaceId === id && ["queued", "running"].includes(job.status));
+  if (activeCompactions.length > 0) {
+    throw new ApiError("conflict", `space ${id} has an active context compaction`);
   }
   const updated = store.update("spaces", id, { archivedAt: new Date().toISOString() });
   return normalizeSpace(updated);

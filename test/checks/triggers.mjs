@@ -12,7 +12,7 @@ export async function run(ctx) {
   const { check, httpRequest, sse, assertEqual, assert, sleep } = ctx;
   const { space } = ctx;
 
-  await check("g. sessionState counter increments across successive messages", async () => {
+  await check("g. generation-scoped CLI provider binding continues across successive messages", async () => {
     const { status, json } = await httpRequest("POST", `/api/spaces/${space.id}/messages`, {
       author: { type: "user" },
       target: { type: "broadcast" },

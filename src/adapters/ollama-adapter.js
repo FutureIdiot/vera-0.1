@@ -1,7 +1,7 @@
 // Native Ollama HTTP adapter (implemented against Ollama 0.23.2 / gemma4:e4b).
 //
 // - accepts only Account kind=api, provider=ollama; baseUrl/model are Account data;
-// - session continuity is a JSON-serializable { history } array owned by the Account;
+// - chat consumes only gateway-compiled bounded apiMessages and owns no history;
 // - /api/chat NDJSON message.content maps one-for-one to onDelta; no tool Activity;
 // - digestMemory uses an isolated non-streaming request and a provider-compatible
 //   projection of Vera's authoritative proposal schema; gateway validation remains final;
@@ -147,27 +147,6 @@ function resolveAccount(account, taskModel = null) {
   return { baseUrl: url.toString().replace(/\/$/u, ""), model };
 }
 
-function validSessionState(value) {
-  if (!value || value.schemaVersion !== 1 || (value.stablePrefix !== null && typeof value.stablePrefix !== "string")) return false;
-  if (!Array.isArray(value.history) || value.history.length % 2 !== 0) return false;
-  return value.history.every((message, index) => {
-    const role = index % 2 === 0 ? "user" : "assistant";
-    return message && typeof message === "object" && message.role === role && typeof message.content === "string";
-  });
-}
-
-function trimHistory(history, stablePrefix, turnText, maxInputBytes) {
-  const currentBytes = inputByteLength(stablePrefix) + inputByteLength(turnText);
-  if (currentBytes > maxInputBytes) throw new AdapterError("provider_error", "Ollama current prompt exceeds the configured input capacity");
-  const next = history.map(({ role, content }) => ({ role, content }));
-  let total = currentBytes + next.reduce((sum, message) => sum + inputByteLength(message.content), 0);
-  while (total > maxInputBytes && next.length >= 2) {
-    total -= inputByteLength(next[0].content) + inputByteLength(next[1].content);
-    next.splice(0, 2);
-  }
-  return next;
-}
-
 function requestControl(externalSignal, timeoutMs, shutdownSignal) {
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), timeoutMs);
@@ -210,20 +189,17 @@ export function createOllamaAdapter({ config }) {
     assertOpen("unavailable");
     const { baseUrl, model } = resolveAccount(ctx.account);
     if (ctx.signal?.aborted) throw new AdapterError("cancelled", "Ollama run cancelled");
-    let prompt = ctx.prompt;
-    const stateValid = ctx.sessionState == null || validSessionState(ctx.sessionState);
-    if (!stateValid) {
-      ctx.onActivity?.({ phase: "error", label: "session-reset", detail: "Ollama history state was invalid and has been reset" });
-      prompt = await ctx.recompileForNewSession?.({ reason: "invalid" }) ?? prompt;
+    const messages = ctx.prompt?.apiMessages;
+    if (!Array.isArray(messages) || messages.some((message) => (
+      !message || typeof message !== "object" || typeof message.role !== "string" ||
+      typeof message.content !== "string"
+    ))) {
+      throw new AdapterError("provider_error", "Ollama API messages are invalid");
     }
-    const turnText = String(prompt?.turnText ?? prompt?.text ?? "");
-    const stablePrefix = stateValid && ctx.sessionState
-      ? ctx.sessionState.stablePrefix
-      : (typeof prompt?.residentBlock === "string" ? prompt.residentBlock : null);
-    let history = stateValid && ctx.sessionState ? ctx.sessionState.history : [];
-    history = trimHistory(history, stablePrefix, turnText, maxInputBytes);
-    const persistedBeforeRun = { schemaVersion: 1, stablePrefix, history };
-    await ctx.persistSessionState?.(persistedBeforeRun);
+    const inputBytes = messages.reduce((sum, message) => sum + inputByteLength(message.content), 0);
+    if (inputBytes > maxInputBytes) {
+      throw new AdapterError("provider_error", "Ollama current API messages exceed the configured input capacity");
+    }
 
     const control = requestControl(ctx.signal, watchdogMs, shutdownController.signal);
     let response;
@@ -235,11 +211,7 @@ export function createOllamaAdapter({ config }) {
           model,
           stream: true,
           think: false,
-          messages: [
-            ...(stablePrefix ? [{ role: "system", content: stablePrefix }] : []),
-            ...history,
-            { role: "user", content: turnText },
-          ],
+          messages,
           options: { num_ctx: numCtx },
         }),
         signal: control.signal,
@@ -273,17 +245,7 @@ export function createOllamaAdapter({ config }) {
       buffer += decoder.decode();
       consume(buffer);
       if (!done || !content) throw new Error("incomplete_stream");
-      const historyEnvelopeText = typeof prompt?.historyEnvelopeText === "string"
-        ? prompt.historyEnvelopeText
-        : (typeof prompt?.historyUserText === "string" ? prompt.historyUserText : null);
-      const sessionState = {
-        schemaVersion: 1,
-        stablePrefix,
-        history: historyEnvelopeText
-          ? [...history, { role: "user", content: historyEnvelopeText }, { role: "assistant", content }]
-          : history,
-      };
-      return { content, sessionState };
+      return { content };
     } catch (error) {
       if (ctx.signal?.aborted) throw new AdapterError("cancelled", "Ollama run cancelled");
       if (control.timedOut()) throw new AdapterError("timed_out", "Ollama run timed out");

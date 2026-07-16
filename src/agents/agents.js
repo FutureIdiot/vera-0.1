@@ -48,8 +48,19 @@ export function deleteAgent(store, id) {
   if (hasHistory) {
     throw new ApiError("conflict", `agent ${id} has message history and cannot be deleted`);
   }
+  const agentSessionIds = new Set(
+    store.list("agentSessions").filter((session) => session.agentId === id).map((session) => session.id),
+  );
+  for (const binding of [...store.list("providerBindings")]) {
+    if (agentSessionIds.has(binding.agentSessionId)) store.remove("providerBindings", binding.id);
+  }
+  for (const history of [...store.list("apiHistories")]) {
+    if (agentSessionIds.has(history.agentSessionId)) store.remove("apiHistories", history.id);
+  }
+  for (const session of [...store.list("agentSessions")]) {
+    if (session.agentId === id) store.remove("agentSessions", session.id);
+  }
   for (const account of store.list("accounts").filter((item) => item.owningAgentId === id)) {
-    store.clearSessionStatesForAccount(account.id);
     store.remove("accounts", account.id);
   }
   store.remove("agents", id);

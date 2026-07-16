@@ -2,8 +2,8 @@
 // 前端在无真实 CLI 时测试。
 //
 // - 内容带两个段落，配合 bubble-splitter 验证多气泡切分。
-// - sessionState 存一个自增计数器 { count }，并把计数带进回复文本，用来验证
-//   同一 (agent, Space) 连续对话时会话状态确实被 gateway 原样存取奉还。
+// - CLI provider binding 存一个自增计数器 { count }，并把计数带进回复文本，
+//   用来黑盒验证同一 AgentSession generation 的CAS连续性。
 // - 演示一条 phase:"tool" 的 activity，同一 callId 从 pending 原地更新到
 //   completed，验证时间线的“同一条记录原地更新”规则。
 // - 可注入延迟（chunkDelayMs，来自 core/config.js 的 mock.delayMs）与错误
@@ -42,7 +42,8 @@ function delay(ms, signal) {
 export function createMockAdapter({ chunkDelayMs = 30, approvalTimeoutMs = 15000 } = {}) {
   return {
     async run(ctx) {
-      const { prompt, sessionState, onDelta, onActivity, requestApproval, signal } = ctx;
+      let { prompt } = ctx;
+      const { onDelta, onActivity, requestApproval, signal } = ctx;
 
       if (signal?.aborted) {
         throw new AdapterError("cancelled", "aborted before start");
@@ -51,7 +52,16 @@ export function createMockAdapter({ chunkDelayMs = 30, approvalTimeoutMs = 15000
         throw new AdapterError("provider_error", "mock adapter induced provider_error");
       }
 
-      const count = (sessionState?.count ?? 0) + 1;
+      let providerBinding = ctx.sessionMode === "isolated" ? null : ctx.providerBinding;
+      if (providerBinding != null && (
+        !Number.isInteger(providerBinding?.version) || providerBinding.version < 1 ||
+        !Number.isInteger(providerBinding?.providerState?.count) || providerBinding.providerState.count < 0
+      )) {
+        const rotated = await ctx.rotateProviderBinding?.({ reason: "invalid" });
+        prompt = rotated?.prompt ?? prompt;
+        providerBinding = rotated?.providerBinding ?? null;
+      }
+      const count = (providerBinding?.providerState?.count ?? 0) + 1;
       const paragraph1 = `回声第 ${count} 次：${prompt.text}`;
       const callId = "mock-bash-1";
 
@@ -92,7 +102,14 @@ export function createMockAdapter({ chunkDelayMs = 30, approvalTimeoutMs = 15000
         throw new AdapterError("cancelled", "aborted after streaming");
       }
 
-      return { content: `${paragraph1}\n\n${paragraph2}`, sessionState: { count } };
+      if (ctx.sessionMode !== "isolated") {
+        providerBinding = await ctx.persistProviderBinding?.(
+          { count },
+          providerBinding?.version ?? null,
+        ) ?? null;
+      }
+      const content = `${paragraph1}\n\n${paragraph2}`;
+      return providerBinding ? { content, providerBinding } : { content };
     },
   };
 }

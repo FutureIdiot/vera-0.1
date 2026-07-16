@@ -46,36 +46,30 @@ test("persists split files to the data dir and reloads on next createStore call"
   await withTempDataDir(async (dataPath) => {
     const store = await createStore({ dataPath, debounceMs: 10 });
     store.insert("spaces", { id: "spc_1", name: "vera-dev" });
-    // session-states 键按 (accountId, spaceId) 存（4.1 起），用 acc_ 前缀避免
-    // 触发启动迁移把 agt_ 键重映射到 acc_。
-    store.setSessionState("acc_1", "spc_1", { count: 7 });
+    store.insert("spaceSessions", { id: "sps_1", spaceId: "spc_1", status: "active" });
     store.setEventSeqWatermark(123);
     await store.close(); // flush
 
     assert.ok(await exists(join(dataPath, "spaces.json")), "spaces.json should be written");
-    assert.ok(await exists(join(dataPath, "session-states.json")));
+    assert.ok(await exists(join(dataPath, "spaceSessions.json")));
     assert.ok(await exists(join(dataPath, "meta.json")));
 
     const reloaded = await createStore({ dataPath, debounceMs: 10 });
     const found = reloaded.find("spaces", "spc_1");
     assert.ok(found, "space should survive reload");
     assert.equal(found.name, "vera-dev");
-    assert.deepEqual(reloaded.getSessionState("acc_1", "spc_1"), { count: 7 });
+    assert.equal(reloaded.find("spaceSessions", "sps_1").spaceId, "spc_1");
     assert.equal(reloaded.getEventSeqWatermark(), 123);
     await reloaded.close();
   });
 });
 
-test("sessionState get/set is per (agentId, spaceId)", async () => {
+test("legacy sessionState accessors are removed after P5-C1", async () => {
   await withTempDataDir(async (dataPath) => {
     const store = await createStore({ dataPath, debounceMs: 10 });
-    assert.equal(store.getSessionState("agt_1", "spc_1"), null);
-
-    store.setSessionState("agt_1", "spc_1", { count: 1 });
-    store.setSessionState("agt_1", "spc_2", { count: 99 });
-
-    assert.deepEqual(store.getSessionState("agt_1", "spc_1"), { count: 1 });
-    assert.deepEqual(store.getSessionState("agt_1", "spc_2"), { count: 99 });
+    assert.equal("getSessionState" in store, false);
+    assert.equal("setSessionState" in store, false);
+    assert.equal("clearSessionStatesForAccount" in store, false);
     await store.close();
   });
 });
@@ -116,9 +110,8 @@ test("migration a: dataPath pointing at a legacy single file becomes a split dir
     // 老数据完整迁入
     assert.equal(store.find("agents", "agt_old").name, "Iota");
     assert.equal(store.find("messages", "msg_old").content, "老数据");
-    // 4.1 起 session-states 键按 (accountId, spaceId) 存，启动迁移把 agt_old
-    // 重映射到派生 account id acc_old（deriveOwningAccountId）。
-    assert.deepEqual(store.getSessionState("acc_old", "spc_x"), { externalSessionId: "ses_legacy" });
+    // 没有对应 Space/seat 的 opaque legacy state 无法唯一映射，按 C1 契约失效。
+    assert.equal(store.list("providerBindings").length, 0);
     assert.equal(store.getEventSeqWatermark(), 42);
     assert.equal(store.insert("runs", { id: "run_new" })._seq, 6, "_seq 从旧值继续");
 

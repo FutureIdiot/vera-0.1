@@ -12,6 +12,7 @@ import { createMemoryDigestService } from "../../src/memory/memory-digest-servic
 
 const AGENT = "agt_alpha";
 const SPACE = "spc_alpha";
+const SPACE_SESSION = "sps_alpha";
 
 function createFakeStore(records = {}) {
   const data = {
@@ -36,7 +37,7 @@ function createFakeStore(records = {}) {
 
 function message(id, seq, content, overrides = {}) {
   return {
-    id, _seq: seq, spaceId: SPACE, status: "completed", content,
+    id, _seq: seq, spaceId: SPACE, spaceSessionId: SPACE_SESSION, status: "completed", content,
     author: { type: "user" }, target: { type: "broadcast" },
     createdAt: `2026-07-13T00:00:0${seq}.000Z`, ...overrides,
   };
@@ -76,7 +77,7 @@ test("range counts Unicode code points, chunks deterministically, and filters th
     message("msg_own", 5, "own", { author: { type: "agent", agentId: AGENT }, target: { type: "direct", agentIds: ["agt_other"] } }),
   ];
   const store = createFakeStore({ messages });
-  const result = resolveDigestRange({ store, agentId: AGENT, spaceId: SPACE, fromMessageId: "msg_user", toMessageId: "msg_own" });
+  const result = resolveDigestRange({ store, agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, fromMessageId: "msg_user", toMessageId: "msg_own" });
   assert.deepEqual(result.messages.map((item) => item.id), ["msg_user", "msg_direct_me", "msg_own"]);
   assert.equal(result.range.charCount, 12);
   assert.equal(countUnicodeCodePoints("A😀"), 2);
@@ -94,11 +95,35 @@ test("incremental watermark does not rewind when later visibility rules hide its
   ];
   const store = createFakeStore({ messages });
   const jobs = [{
-    agentId: AGENT, spaceId: SPACE, mode: "incremental", status: "succeeded",
+    agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "incremental", status: "succeeded",
     range: { toMessageId: "msg_two", toSeq: 2 },
   }];
-  const resolved = resolveIncrementalDigestRange({ store, jobs, agentId: AGENT, spaceId: SPACE });
+  const resolved = resolveIncrementalDigestRange({ store, jobs, agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION });
   assert.deepEqual(resolved.messages.map((item) => item.id), ["msg_three"]);
+});
+
+test("digest ranges and incremental watermarks are isolated by SpaceSession", () => {
+  const previous = "sps_previous";
+  const messages = [
+    message("msg_old_one", 1, "old one", { spaceSessionId: previous }),
+    message("msg_old_two", 2, "old two", { spaceSessionId: previous }),
+    message("msg_new", 3, "new window"),
+  ];
+  const store = createFakeStore({ messages });
+  const jobs = [{
+    agentId: AGENT, spaceId: SPACE, spaceSessionId: previous, mode: "incremental", status: "succeeded",
+    range: { toMessageId: "msg_old_one", toSeq: 1 },
+  }];
+  assert.deepEqual(resolveIncrementalDigestRange({
+    store, jobs, agentId: AGENT, spaceId: SPACE, spaceSessionId: previous,
+  }).messages.map((item) => item.id), ["msg_old_two"]);
+  assert.deepEqual(resolveIncrementalDigestRange({
+    store, jobs, agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION,
+  }).messages.map((item) => item.id), ["msg_new"]);
+  assert.throws(() => resolveDigestRange({
+    store, agentId: AGENT, spaceId: SPACE, spaceSessionId: previous,
+    fromMessageId: "msg_old_one", toMessageId: "msg_new",
+  }), /SpaceSession/);
 });
 
 test("executor chunks expose only Message evidence fields and omit internal chunk metadata", async () => {
@@ -109,7 +134,7 @@ test("executor chunks expose only Message evidence fields and omit internal chun
     return { proposals: [{ action: "skip", evidenceMessageIds: ["msg_one"], skipReason: "no_reusable_fact" }] };
   }, async ({ service }) => {
     const queued = service.enqueue({
-      agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual",
+      agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual",
       fromMessageId: "msg_one", toMessageId: "msg_one",
     });
     const job = await waitForJob(service, queued.id);
@@ -141,7 +166,7 @@ test("all proposals are validated before apply and invalid evidence leaves the v
     },
     { action: "skip", evidenceMessageIds: ["msg_outside"], skipReason: "no_reusable_fact" },
   ] }), async ({ service, memory }) => {
-    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
+    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
     const done = await waitForJob(service, job.id);
     assert.equal(done.status, "failed");
     assert.deepEqual(await memory.listMemories(AGENT), []);
@@ -162,7 +187,7 @@ test("semantic target preflight also happens before the first Memory write", asy
       content: "Cannot be targeted.",
     },
   ] }), async ({ service, memory }) => {
-    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
+    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
     assert.equal((await waitForJob(service, job.id)).status, "failed");
     assert.deepEqual(await memory.listMemories(AGENT), []);
   });
@@ -180,10 +205,10 @@ test("same persisted fact keeps its slug, merges sources, and duplicate enqueue 
       type: "decision", description: "Project storage uses Markdown", content: "Use Markdown as the storage format.",
     }] };
   }, async ({ service, memory }) => {
-    const first = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
-    assert.equal(service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" }).id, first.id);
+    const first = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
+    assert.equal(service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" }).id, first.id);
     assert.equal((await waitForJob(service, first.id)).status, "succeeded");
-    const second = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_two", toMessageId: "msg_two" });
+    const second = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_two", toMessageId: "msg_two" });
     assert.equal((await waitForJob(service, second.id)).status, "succeeded");
     assert.deepEqual((await memory.listMemories(AGENT)).map((item) => item.slug), ["project-format"]);
     assert.deepEqual((await memory.getMemory(AGENT, "project-format")).sources.map((source) => source.messageId), ["msg_one", "msg_two"]);
@@ -209,10 +234,10 @@ test("targetFactId matches the same fact across different wording and semantic s
       type: "preference", description: "默认使用中文回复", content: "默认使用中文回复。",
     }] };
   }, async ({ service, memory }) => {
-    const first = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
+    const first = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
     const firstDone = await waitForJob(service, first.id);
     targetFactId = firstDone.result.facts[0].factId;
-    const second = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_two", toMessageId: "msg_two" });
+    const second = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_two", toMessageId: "msg_two" });
     assert.equal((await waitForJob(service, second.id)).status, "succeeded");
     assert.deepEqual((await memory.listMemories(AGENT)).map((item) => item.slug), ["response-language"]);
     assert.equal((await memory.getMemory(AGENT, "response-language")).content, "默认使用中文回复。");
@@ -235,7 +260,7 @@ test("an unmapped manual Memory can be adopted without creating a duplicate slug
     await memory.saveMemory(AGENT, {
       slug: "manual-rule", type: "decision", description: "Manual entry", content: "Original manual body.",
     });
-    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
+    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
     const done = await waitForJob(service, job.id);
     assert.equal(done.status, "succeeded");
     assert.deepEqual((await memory.listMemories(AGENT)).map((item) => item.slug), ["manual-rule"]);
@@ -282,7 +307,7 @@ test("fact catalogs remain isolated when two Agents use the same slug", async ()
     },
   });
   try {
-    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_alpha", toMessageId: "msg_alpha" });
+    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_alpha", toMessageId: "msg_alpha" });
     assert.equal((await waitForJob(service, job.id)).status, "succeeded");
     assert.equal(receivedFacts.some((fact) => fact.factId === betaFact.factId), false);
     assert.equal(receivedFacts.find((fact) => fact.slug === "same-slug").unmapped, true);
@@ -309,12 +334,12 @@ test("stale fact receipts cannot overwrite an owner edit", async () => {
       type: "decision", description: "Digest overwrite", content: "Digest overwrite.",
     }] };
   }, async ({ service, memory }) => {
-    const first = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
+    const first = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
     const firstDone = await waitForJob(service, first.id);
     targetFactId = firstDone.result.facts[0].factId;
     const current = await memory.getMemory(AGENT, "format-rule");
     await memory.updateMemory(AGENT, "format-rule", { ifMatch: current.version, content: "Owner edited authority." });
-    const second = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_two", toMessageId: "msg_two" });
+    const second = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_two", toMessageId: "msg_two" });
     const failed = await waitForJob(service, second.id);
     assert.equal(failed.status, "failed");
     assert.equal(failed.error.code, "write_conflict");
@@ -336,7 +361,7 @@ test("two different facts cannot overwrite one suggested slug in the same job", 
       suggestedSlug: "shared-slug", type: "fact", description: "Second fact", content: "Second.",
     },
   ] }), async ({ service, memory }) => {
-    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
+    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
     assert.equal((await waitForJob(service, job.id)).status, "failed");
     assert.deepEqual(await memory.listMemories(AGENT), []);
   });
@@ -366,13 +391,13 @@ test("supersede updates the same slug with explicit correction evidence and arch
       { action: "skip", evidenceMessageIds: [], skipReason: "no_reusable_fact" },
     ] };
   }, async ({ service, memory }) => {
-    const first = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_old", toMessageId: "msg_old" });
+    const first = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_old", toMessageId: "msg_old" });
     const firstDone = await waitForJob(service, first.id);
     assert.equal(firstDone.status, "succeeded");
     targetFactId = firstDone.result.facts[0].factId;
-    const second = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_fix", toMessageId: "msg_fix" });
+    const second = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_fix", toMessageId: "msg_fix" });
     assert.equal((await waitForJob(service, second.id)).status, "succeeded");
-    const third = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_archive", toMessageId: "msg_archive" });
+    const third = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_archive", toMessageId: "msg_archive" });
     assert.equal((await waitForJob(service, third.id)).status, "succeeded");
     const final = await memory.getMemory(AGENT, "project-format");
     assert.equal(final.content, "Use Markdown.");
@@ -384,7 +409,7 @@ test("supersede updates the same slug with explicit correction evidence and arch
 test("task unavailable fails with a stable safe code", async () => {
   const messages = [message("msg_one", 1, "Remember this")];
   await withService(messages, null, async ({ service }) => {
-    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
+    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
     const done = await waitForJob(service, job.id);
     assert.equal(done.status, "failed");
     assert.equal(done.error.code, "memory_task_unavailable");
@@ -396,7 +421,7 @@ test("executor failures expose only a stable safe error", async () => {
   await withService(messages, async () => {
     throw Object.assign(new Error("provider-secret-canary"), { code: "provider_error" });
   }, async ({ service }) => {
-    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
+    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
     const done = await waitForJob(service, job.id);
     assert.deepEqual(done.error, { code: "executor_failed", message: "Memory digest executor failed." });
     assert.equal(JSON.stringify(done).includes("provider-secret-canary"), false);
@@ -438,7 +463,7 @@ test("retry resumes a partially applied proposal batch without duplicate Memorie
   ] });
   const service = createMemoryDigestService({ store, memory, proposalExecutor: executor });
   try {
-    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_two" });
+    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_two" });
     assert.equal((await waitForJob(service, job.id)).status, "failed");
     service.retry(AGENT, job.id);
     assert.equal((await waitForJob(service, job.id)).status, "succeeded");
@@ -490,11 +515,11 @@ test("retry recognizes an update committed just before its receipt was lost", as
     },
   });
   try {
-    const first = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
+    const first = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
     const firstDone = await waitForJob(service, first.id);
     targetFactId = firstDone.result.facts[0].factId;
     throwAfterApply = true;
-    const second = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_two", toMessageId: "msg_two" });
+    const second = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_two", toMessageId: "msg_two" });
     assert.equal((await waitForJob(service, second.id)).status, "failed");
     assert.equal((await vault.getMemory(AGENT, "format-rule")).content, "Use JSON with detail.");
     service.retry(AGENT, second.id);
@@ -544,7 +569,7 @@ test("retry recognizes a manual adoption committed before its receipt was lost",
     },
   });
   try {
-    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
+    const job = service.enqueue({ agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, mode: "range", trigger: "manual", fromMessageId: "msg_one", toMessageId: "msg_one" });
     assert.equal((await waitForJob(service, job.id)).status, "failed");
     service.retry(AGENT, job.id);
     assert.equal((await waitForJob(service, job.id)).status, "succeeded");
@@ -560,7 +585,7 @@ test("strict proposal validator rejects model-controlled identity and invalid su
   const messages = [message("msg_one", 1, "ordinary statement")];
   assert.throws(() => validateDigestProposals({
     proposals: [{ action: "skip", evidenceMessageIds: [], skipReason: "none", agentId: "agt_evil" }],
-    messages, agentId: AGENT, spaceId: SPACE,
+    messages, agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION,
   }), /unknown proposal field/);
   assert.throws(() => validateDigestProposals({
     proposals: [{
@@ -568,6 +593,6 @@ test("strict proposal validator rejects model-controlled identity and invalid su
       fact: { subject: "rule", relation: "value", qualifiers: [], value: "new" },
       type: "decision", description: "New rule", content: "New body",
     }],
-    messages, agentId: AGENT, spaceId: SPACE,
+    messages, agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION,
   }), /explicit correction evidence/);
 });

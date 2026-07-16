@@ -51,6 +51,10 @@ export function createAppRuntime({
       bootstrap.spaces = space.archivedAt
         ? bootstrap.spaces.filter((candidate) => candidate.id !== space.id)
         : upsert(bootstrap.spaces, space);
+    } else if (envelope.type === "space-session.created" && envelope.data?.spaceId && envelope.data?.spaceSession?.id) {
+      bootstrap.spaces = bootstrap.spaces.map((space) => space.id === envelope.data.spaceId
+        ? { ...space, activeSpaceSessionId: envelope.data.spaceSession.id }
+        : space);
     } else if (envelope.type === "agent.updated" && envelope.data?.agent) {
       bootstrap.agents = upsert(bootstrap.agents, envelope.data.agent);
     } else if (envelope.type === "account.upserted" && envelope.data?.account) {

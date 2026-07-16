@@ -10,14 +10,14 @@ import { createStore } from "../../src/store/store.js";
 
 async function withMcp(fn) {
   const dir = await mkdtemp(join(tmpdir(), "vera-memory-mcp-test-"));
-  const message = { id: "msg_source01", spaceId: "spc_alpha" };
+  const message = { id: "msg_source01", spaceId: "spc_alpha", spaceSessionId: "sps_alpha" };
   const store = await createStore({ dataPath: join(dir, "data"), debounceMs: 5 });
   const memory = createMemoryVault({
     vaultPath: join(dir, "vault"),
     resolveSource: ({ messageId }) => messageId === message.id ? message : null,
   });
   const retrieval = createMemoryRetrievalService({ store, memory });
-  const recall = await retrieval.ensureSession({ agentId: "agt_alpha", accountId: "acc_alpha", spaceId: message.spaceId });
+  const recall = await retrieval.ensureSession({ agentId: "agt_alpha", agentSessionId: "ags_alpha", generation: 1 });
   try {
     await fn({
       memory,
@@ -25,8 +25,10 @@ async function withMcp(fn) {
       mcp: createMemoryMcpDispatcher({ memory, retrieval }),
       context: {
         agentId: "agt_alpha",
-        memorySessionId: recall.id,
+        agentSessionId: recall.agentSessionId,
+        generation: recall.generation,
         spaceId: message.spaceId,
+        spaceSessionId: message.spaceSessionId,
         sourceRefs: [{ kind: "message", spaceId: message.spaceId, messageId: message.id }],
       },
     });
@@ -45,11 +47,37 @@ test("Memory MCP schemas never let tool arguments select identity or sources", a
     ]);
     for (const spec of tools) {
       const properties = spec.inputSchema.properties;
-      for (const forbidden of ["agentId", "memorySessionId", "scope", "origin", "sources", "sourceRefs"]) {
+      for (const forbidden of ["agentId", "agentSessionId", "generation", "spaceSessionId", "scope", "origin", "sources", "sourceRefs"]) {
         assert.equal(forbidden in properties, false, `${spec.name} must not expose ${forbidden}`);
       }
       assert.equal(spec.inputSchema.additionalProperties, false);
     }
+  });
+});
+
+test("MCP binds Digest to the trusted SpaceSession", async () => {
+  await withMcp(async ({ memory, retrieval, context }) => {
+    const calls = [];
+    const mcp = createMemoryMcpDispatcher({
+      memory,
+      retrieval,
+      digestService: { enqueue(input) { calls.push(input); return { id: "mdj_trusted" }; } },
+    });
+    const result = await mcp.callTool({
+      context: { ...context, triggerMessageId: "msg_source01" },
+      name: "memory_digest",
+      arguments: { mode: "incremental" },
+    });
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(calls, [{
+      agentId: context.agentId,
+      spaceId: context.spaceId,
+      spaceSessionId: context.spaceSessionId,
+      mode: "incremental",
+      trigger: "manual",
+      fromMessageId: undefined,
+      toMessageId: "msg_source01",
+    }]);
   });
 });
 

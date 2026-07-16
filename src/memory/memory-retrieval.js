@@ -235,7 +235,7 @@ export function createMemoryRetrievalService({
       retrievalId: opaque("mrt"), pipelineVersion: MEMORY_PIPELINE_VERSION,
       indexGeneration: null, direction: "all", items: remaining, directions: [], cached: null,
     }) : null;
-    const prior = hasUsage(context.memorySessionId, slug, "detail_opened");
+    const prior = hasUsage(context, slug, "detail_opened");
     if (!prior) addUsage(context, null, [{ slug }], "detail_opened");
     addDelivered(session, [slug]);
     const { stains, scope, schemaVersion, ...safe } = full;
@@ -268,8 +268,28 @@ export function createMemoryRetrievalService({
     return ["Vera 记忆库常驻索引：", "相关时调用 Vera Memory MCP 的 memory_fetch_detail 展开 [[slug]] 查看详情。",
       ...selected.map((item) => `- [[${item.slug}]] — ${item.description}`)].join("\n");
   }
+  async function residentIndexForSession(identity) {
+    const session = findSession(identity);
+    return state.withSessionLock(session.id, async () => {
+      const current = findSession(identity);
+      if (Object.hasOwn(current, "residentBlock")) return current.residentBlock;
+      const selected = isRecallEnabled(identity.agentId) ? await residentItems(identity.agentId) : [];
+      const residentBlock = selected.length
+        ? ["Vera 记忆库常驻索引：", "相关时调用 Vera Memory MCP 的 memory_fetch_detail 展开 [[slug]] 查看详情。",
+            ...selected.map((item) => `- [[${item.slug}]] — ${item.description}`)].join("\n")
+        : null;
+      store.update("memoryRecallSessions", current.id, {
+        residentBlock,
+        residentSlugs: selected.map((item) => item.slug),
+        deliveredSlugs: [...new Set([...(current.deliveredSlugs ?? []), ...selected.map((item) => item.slug)])],
+        updatedAt: now(),
+      });
+      return residentBlock;
+    });
+  }
   return {
-    ensureSession, resetSession, residentIndex, search, searchForInjection, fetchMore, fetchDetail,
+    ensureSession, resetSession, residentIndex, residentIndexForSession,
+    search, searchForInjection, fetchMore, fetchDetail,
     getPin, setPinned, recordUserEdit, listSignals: state.listSignals,
     setResidentIndexMaxLines: (value) => { residentIndexMaxLines = value; },
     setInjectionTokenBudget: (value) => { injectionTokenBudget = value; },

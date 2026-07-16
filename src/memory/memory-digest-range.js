@@ -17,21 +17,23 @@ function isVisibleToAgent(message, agentId, blockedAgentIds) {
   return !(message.author?.type === "agent" && blockedAgentIds.has(message.author.agentId));
 }
 
-function orderedCompletedMessages(store, spaceId, agentId) {
+function orderedCompletedMessages(store, spaceId, spaceSessionId, agentId) {
   const space = store.find("spaces", spaceId);
   if (!space) throw new ApiError("not_found", `Space ${spaceId} does not exist`);
   const seat = space.seats?.find((candidate) => candidate.agentId === agentId);
   if (!seat) throw invalid(`agent ${agentId} is not seated in Space ${spaceId}`);
   const blocked = new Set(seat.blockAgentIds ?? []);
   return store.list("messages")
-    .filter((message) => message.spaceId === spaceId && message.status === "completed" && isVisibleToAgent(message, agentId, blocked))
+    .filter((message) => message.spaceId === spaceId && message.spaceSessionId === spaceSessionId &&
+      message.status === "completed" && isVisibleToAgent(message, agentId, blocked))
     .sort((left, right) => (left._seq ?? 0) - (right._seq ?? 0));
 }
 
-export function resolveDigestRange({ store, agentId, spaceId, fromMessageId, toMessageId }) {
+export function resolveDigestRange({ store, agentId, spaceId, spaceSessionId, fromMessageId, toMessageId }) {
   if (!store || typeof store.list !== "function") throw new Error("resolveDigestRange requires store");
   if (typeof agentId !== "string" || !agentId) throw invalid("agentId is required");
   if (typeof spaceId !== "string" || !spaceId) throw invalid("spaceId is required");
+  if (typeof spaceSessionId !== "string" || !spaceSessionId) throw invalid("spaceSessionId is required");
   if (typeof fromMessageId !== "string" || !fromMessageId) throw invalid("fromMessageId is required");
   if (typeof toMessageId !== "string" || !toMessageId) throw invalid("toMessageId is required");
 
@@ -40,7 +42,11 @@ export function resolveDigestRange({ store, agentId, spaceId, fromMessageId, toM
   const to = all.find((message) => message.id === toMessageId);
   if (!from || !to) throw new ApiError("not_found", "digest range Message does not exist");
   if (from.spaceId !== spaceId || to.spaceId !== spaceId) throw invalid("digest range must belong to the bound Space");
-  const visible = orderedCompletedMessages(store, spaceId, agentId);
+  if (!from.spaceSessionId || !to.spaceSessionId) throw invalid("digest range Messages must carry spaceSessionId");
+  if (from.spaceSessionId !== spaceSessionId || to.spaceSessionId !== spaceSessionId) {
+    throw invalid("digest range must belong to the bound SpaceSession");
+  }
+  const visible = orderedCompletedMessages(store, spaceId, spaceSessionId, agentId);
   if (!visible.some((message) => message.id === from.id) || !visible.some((message) => message.id === to.id)) {
     throw invalid("digest range boundaries must be completed Messages visible to the Agent");
   }
@@ -62,14 +68,16 @@ export function resolveDigestRange({ store, agentId, spaceId, fromMessageId, toM
   };
 }
 
-export function resolveIncrementalDigestRange({ store, jobs = [], agentId, spaceId, toMessageId }) {
-  const completed = orderedCompletedMessages(store, spaceId, agentId);
+export function resolveIncrementalDigestRange({ store, jobs = [], agentId, spaceId, spaceSessionId, toMessageId }) {
+  if (typeof spaceSessionId !== "string" || !spaceSessionId) throw invalid("spaceSessionId is required");
+  const completed = orderedCompletedMessages(store, spaceId, spaceSessionId, agentId);
   if (completed.length === 0) return null;
   const to = toMessageId ? completed.find((message) => message.id === toMessageId) : completed.at(-1);
   if (!to) throw invalid("incremental toMessageId must be a completed Message in the bound Space");
 
   const succeededWatermarks = jobs
-    .filter((job) => job.agentId === agentId && job.spaceId === spaceId && job.mode === "incremental" && job.status === "succeeded")
+    .filter((job) => job.agentId === agentId && job.spaceSessionId === spaceSessionId &&
+      job.mode === "incremental" && job.status === "succeeded")
     .map((job) => job.range?.toSeq ?? store.find("messages", job.range?.toMessageId)?._seq)
     .filter(Number.isFinite);
   const watermark = succeededWatermarks.length > 0 ? Math.max(...succeededWatermarks) : -Infinity;
@@ -79,6 +87,7 @@ export function resolveIncrementalDigestRange({ store, jobs = [], agentId, space
     store,
     agentId,
     spaceId,
+    spaceSessionId,
     fromMessageId: window[0].id,
     toMessageId: window.at(-1).id,
   });

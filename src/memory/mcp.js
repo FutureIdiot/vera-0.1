@@ -140,8 +140,9 @@ export function createMemoryMcpDispatcher({ memory, retrieval, digestService = n
       const args = validateArguments(name, rawArguments);
       const trusted = requireContext(context, { sources: name === "memory_create" });
       if (["memory_search", "memory_fetch_more", "memory_fetch_detail"].includes(name)) {
-        if (typeof trusted.memorySessionId !== "string" || !trusted.memorySessionId) {
-          throw invalid(`${name} requires trusted memorySessionId`);
+        if (typeof trusted.agentSessionId !== "string" || !trusted.agentSessionId ||
+            !Number.isInteger(trusted.generation) || trusted.generation < 1) {
+          throw invalid(`${name} requires trusted agentSessionId and generation`);
         }
         if (!retrieval) throw new ApiError("memory_retrieval_unavailable", "Memory retrieval is unavailable");
       }
@@ -196,6 +197,9 @@ export function createMemoryMcpDispatcher({ memory, retrieval, digestService = n
         if (typeof trusted.spaceId !== "string" || !trusted.spaceId) {
           throw invalid("trusted Memory MCP context requires spaceId for memory_digest");
         }
+        if (typeof trusted.spaceSessionId !== "string" || !trusted.spaceSessionId) {
+          throw invalid("trusted Memory MCP context requires spaceSessionId for memory_digest");
+        }
         if (args.mode === "range" && (!args.fromMessageId || !args.toMessageId)) {
           throw invalid("memory_digest range mode requires fromMessageId and toMessageId");
         }
@@ -204,6 +208,7 @@ export function createMemoryMcpDispatcher({ memory, retrieval, digestService = n
         const job = await digestService.enqueue({
           agentId: trusted.agentId,
           spaceId: trusted.spaceId,
+          spaceSessionId: trusted.spaceSessionId,
           mode: args.mode,
           trigger: "manual",
           fromMessageId: args.fromMessageId,

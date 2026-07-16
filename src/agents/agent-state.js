@@ -5,10 +5,8 @@
 // 独立记录）是 Phase 5.5.1。当前实现先满足 /api/agent-states 的 ?spaceId /
 // ?agentId 过滤和契约输出形状（spaceId / detail 字段），不改跟踪模型。
 //
-// 判断记录：本轮任务的 src/store/ 持久化集合按主线程指令只列了
-// agents/spaces/messages/activities/approvals/runs/sessionStates（不含
-// agentStates），所以这里把 AgentState 实现为进程内存中的派生状态
-// （不落盘），由 run 的开始/结束驱动更新，满足 /api/agent-states、
+// AgentState不是store持久化集合，所以这里把它实现为进程内存中的派生状态
+// （不落盘），由run的开始/结束驱动更新，满足/api/agent-states、
 // /api/bootstrap 和 agent.state.updated 事件的契约形状。
 
 export function createAgentStateTracker({ hub }) {

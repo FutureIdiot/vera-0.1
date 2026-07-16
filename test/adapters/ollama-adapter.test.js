@@ -40,28 +40,25 @@ function account(baseUrl, overrides = {}) {
 function makeCtx(baseUrl, overrides = {}) {
   const deltas = [];
   const activities = [];
-  const persisted = [];
   const controller = new AbortController();
   return {
     ctx: {
       agent: { id: "agt_ollama", name: "Gemma" },
       account: account(baseUrl),
       prompt: {
-        text: "INDEX\n\nGROUP\n\nquestion",
-        turnText: "GROUP\n\nquestion",
-        historyUserText: "question",
-        residentBlock: "INDEX",
+        apiMessages: [
+          { role: "system", content: "INDEX" },
+          { role: "user", content: "GROUP\n\nquestion" },
+        ],
       },
-      sessionState: null,
+      sessionMode: "main",
       onDelta: (value) => deltas.push(value),
       onActivity: (value) => activities.push(value),
-      persistSessionState: (value) => persisted.push(value),
       signal: controller.signal,
       ...overrides,
     },
     deltas,
     activities,
-    persisted,
     controller,
   };
 }
@@ -121,7 +118,7 @@ test("kind/provider, model, base URL and secret mismatch fail before HTTP", asyn
   );
 });
 
-test("chat streams fragmented NDJSON and persists only stable user history", async (t) => {
+test("chat streams fragmented NDJSON and sends only gateway-compiled API messages", async (t) => {
   const stub = await startStub(t, async ({ res, body, index }) => {
     assert.equal(body.stream, true);
     assert.equal(body.think, false);
@@ -137,114 +134,81 @@ test("chat streams fragmented NDJSON and persists only stable user history", asy
   const adapter = createOllamaAdapter({ config: {} });
   const first = makeCtx(stub.baseUrl);
   const firstResult = await adapter.run(first.ctx);
-  assert.equal(firstResult.content, "你好，世界");
+  assert.deepEqual(firstResult, { content: "你好，世界" });
+  assert.equal("sessionState" in firstResult, false);
+  assert.equal("providerBinding" in firstResult, false);
   assert.deepEqual(first.deltas, ["你好", "，世界"]);
   assert.deepEqual(stub.requests[0].body.messages, [
     { role: "system", content: "INDEX" },
     { role: "user", content: "GROUP\n\nquestion" },
   ]);
-  assert.deepEqual(firstResult.sessionState, {
-    schemaVersion: 1,
-    stablePrefix: "INDEX",
-    history: [{ role: "user", content: "question" }, { role: "assistant", content: "你好，世界" }],
-  });
-  assert.deepEqual(first.persisted, [{ schemaVersion: 1, stablePrefix: "INDEX", history: [] }]);
-
   const second = makeCtx(stub.baseUrl, {
     prompt: {
-      text: "NEW GROUP\n\nsecond\n\nRETRIEVAL",
-      turnText: "NEW GROUP\n\nsecond\n\nRETRIEVAL",
-      historyUserText: "second",
-      historyEnvelopeText: "second\n\nRETRIEVAL",
-      residentBlock: "NEW INDEX",
+      apiMessages: [
+        { role: "system", content: "INDEX" },
+        { role: "user", content: "question" },
+        { role: "assistant", content: "你好，世界" },
+        { role: "user", content: "NEW GROUP\n\nsecond\n\nRETRIEVAL" },
+      ],
     },
-    sessionState: firstResult.sessionState,
   });
   const secondResult = await adapter.run(second.ctx);
-  assert.deepEqual(stub.requests[1].body.messages.slice(0, 3), [
+  assert.deepEqual(stub.requests[1].body.messages, [
     { role: "system", content: "INDEX" },
     { role: "user", content: "question" },
     { role: "assistant", content: "你好，世界" },
+    { role: "user", content: "NEW GROUP\n\nsecond\n\nRETRIEVAL" },
   ]);
   assert.equal(JSON.stringify(stub.requests[1].body.messages).includes("GROUP\n\nquestion"), false);
-  assert.deepEqual(secondResult.sessionState.history.slice(-2), [
-    { role: "user", content: "second\n\nRETRIEVAL" },
-    { role: "assistant", content: "续轮" },
-  ]);
+  assert.deepEqual(secondResult, { content: "续轮" });
 });
 
-test("invalid state resets, history prunes oldest pairs, and oversized current turn never fetches", async (t) => {
+test("API messages are one-shot, legacy context fields are ignored, and oversized input never fetches", async (t) => {
   const stub = await startStub(t, async ({ res }) => {
     res.writeHead(200, { "content-type": "application/x-ndjson" });
     res.end(`${JSON.stringify({ message: { content: "ok" }, done: false })}\n${JSON.stringify({ done: true, message: { content: "" } })}\n`);
   });
   const adapter = createOllamaAdapter({ config: { maxInputBytes: 18 } });
-  const resetReasons = [];
-  const invalid = makeCtx(stub.baseUrl, {
-    prompt: { text: "old", turnText: "old", historyUserText: "old", residentBlock: "OLD" },
-    sessionState: { broken: true },
-    recompileForNewSession: async (input) => {
-      resetReasons.push(input);
-      return {
-        text: "F\n\nnew2",
-        turnText: "new2",
-        historyUserText: "legacy",
-        historyEnvelopeText: "env",
-        residentBlock: "F",
-      };
+  const oneShot = makeCtx(stub.baseUrl, {
+    sessionMode: "isolated",
+    prompt: {
+      apiMessages: [{ role: "user", content: "new2" }],
+      text: "must-not-be-used",
+      turnText: "must-not-be-used",
+      historyUserText: "must-not-be-used",
+      residentBlock: "must-not-be-used",
     },
+    providerBinding: { version: 1, providerState: { history: [] } },
+    rotateProviderBinding: () => { throw new Error("API adapter must not rotate CLI bindings"); },
+    persistProviderBinding: () => { throw new Error("API adapter must not persist CLI bindings"); },
   });
-  const invalidResult = await adapter.run(invalid.ctx);
-  assert.equal(invalid.activities[0].label, "session-reset");
-  assert.deepEqual(resetReasons, [{ reason: "invalid" }]);
+  const oneShotResult = await adapter.run(oneShot.ctx);
+  assert.deepEqual(oneShotResult, { content: "ok" });
+  assert.deepEqual(oneShot.activities, []);
   assert.deepEqual(stub.requests[0].body.messages, [
-    { role: "system", content: "F" },
     { role: "user", content: "new2" },
   ]);
-  assert.deepEqual(invalid.persisted, [{ schemaVersion: 1, stablePrefix: "F", history: [] }]);
-  assert.deepEqual(invalidResult.sessionState.history, [
-    { role: "user", content: "env" },
-    { role: "assistant", content: "ok" },
-  ]);
-
-  const pruned = makeCtx(stub.baseUrl, {
-    prompt: { text: "new", turnText: "new", historyUserText: "new", residentBlock: "ignored" },
-    sessionState: {
-      schemaVersion: 1,
-      stablePrefix: "fresh",
-      history: [
-        { role: "user", content: "old1" }, { role: "assistant", content: "old2" },
-        { role: "user", content: "keep" }, { role: "assistant", content: "ok" },
-      ],
-    },
-  });
-  await adapter.run(pruned.ctx);
-  assert.equal(JSON.stringify(stub.requests[1].body.messages).includes("old1"), false);
-  assert.equal(JSON.stringify(stub.requests[1].body.messages).includes("keep"), true);
 
   const oversized = makeCtx(stub.baseUrl, {
-    prompt: { text: "x".repeat(19), turnText: "x".repeat(19), historyUserText: "x", residentBlock: null },
+    prompt: { apiMessages: [{ role: "user", content: "x".repeat(19) }] },
   });
   await assert.rejects(() => adapter.run(oversized.ctx), (error) => error.code === "provider_error");
-  assert.equal(stub.requests.length, 2);
+  const invalidMessages = makeCtx(stub.baseUrl, { prompt: { text: "legacy-only" } });
+  await assert.rejects(() => adapter.run(invalidMessages.ctx), (error) => error.code === "provider_error");
+  assert.equal(stub.requests.length, 1);
 });
 
-test("ordinary Ollama provider errors do not recompile the Memory recall session", async (t) => {
+test("ordinary Ollama provider errors do not invoke any binding callback", async (t) => {
   const stub = await startStub(t, async ({ res }) => {
     res.writeHead(500, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "ordinary failure" }));
   });
   const adapter = createOllamaAdapter({ config: {} });
-  const reasons = [];
   const input = makeCtx(stub.baseUrl, {
-    sessionState: { schemaVersion: 1, stablePrefix: "INDEX", history: [] },
-    recompileForNewSession: async (reason) => {
-      reasons.push(reason);
-      return { text: "fresh", turnText: "fresh", historyEnvelopeText: "fresh", residentBlock: null };
-    },
+    rotateProviderBinding: () => { throw new Error("API adapter must not rotate CLI bindings"); },
+    persistProviderBinding: () => { throw new Error("API adapter must not persist CLI bindings"); },
   });
   await assert.rejects(() => adapter.run(input.ctx), (error) => error.code === "provider_error");
-  assert.deepEqual(reasons, []);
 });
 
 test("chat abort, timeout, provider errors and shutdown expose stable codes", async (t) => {

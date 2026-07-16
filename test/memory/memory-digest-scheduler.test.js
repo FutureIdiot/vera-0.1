@@ -7,7 +7,7 @@ import {
 } from "../../src/memory/memory-digest-scheduler.js";
 
 function fixture({ trigger = "manual", schedule = "* * * * *", threshold = 4, now = "2026-07-13T03:00:30" } = {}) {
-  const data = { spaces: [], messages: [], memoryDigestJobs: [] };
+  const data = { spaces: [], spaceSessions: [], agentSessions: [], messages: [], memoryDigestJobs: [] };
   const calls = [];
   const timers = [];
   let current = new Date(now);
@@ -40,12 +40,16 @@ function fixture({ trigger = "manual", schedule = "* * * * *", threshold = 4, no
   };
 }
 
-function addSpace(f, id = "spc_one", agentIds = ["agt_one"]) {
+function addSpace(f, id = "spc_one", agentIds = ["agt_one"], spaceSessionId = `sps_${id.slice(4)}`) {
   f.data.spaces.push({ id, seats: agentIds.map((agentId) => ({ agentId })) });
+  f.data.spaceSessions.push({ id: spaceSessionId, spaceId: id, status: "active" });
+  for (const agentId of new Set(agentIds)) {
+    f.data.agentSessions.push({ id: `ags_${spaceSessionId}_${agentId}`, spaceSessionId, agentId, generation: 1 });
+  }
 }
 
-function addMessage(f, { id, spaceId = "spc_one", content, status = "completed", seq }) {
-  const message = { id, spaceId, content, status, _seq: seq };
+function addMessage(f, { id, spaceId = "spc_one", spaceSessionId = `sps_${spaceId.slice(4)}`, content, status = "completed", seq }) {
+  const message = { id, spaceId, spaceSessionId, content, status, _seq: seq };
   f.data.messages.push(message);
   return message;
 }
@@ -69,8 +73,8 @@ test("scheduled start catches up pending windows once and schedules the next min
   await f.settle();
 
   assert.deepEqual(f.calls, [
-    { agentId: "agt_one", spaceId: "spc_one", trigger: "scheduled", toMessageId: "msg_one" },
-    { agentId: "agt_two", spaceId: "spc_one", trigger: "scheduled", toMessageId: "msg_one" },
+    { agentId: "agt_one", spaceId: "spc_one", spaceSessionId: "sps_one", trigger: "scheduled", toMessageId: "msg_one" },
+    { agentId: "agt_two", spaceId: "spc_one", spaceSessionId: "sps_one", trigger: "scheduled", toMessageId: "msg_one" },
   ]);
   assert.equal(f.timers.length, 1);
   assert.equal(f.timers[0].delay, 30_000);
@@ -88,7 +92,7 @@ test("scheduled catch-up skips a window already covered by a succeeded increment
   addSpace(f);
   addMessage(f, { id: "msg_done", content: "done", seq: 1 });
   f.data.memoryDigestJobs.push({
-    id: "mdj_done", agentId: "agt_one", spaceId: "spc_one", mode: "incremental",
+    id: "mdj_done", agentId: "agt_one", spaceId: "spc_one", spaceSessionId: "sps_one", mode: "incremental",
     status: "succeeded", range: { toMessageId: "msg_done" },
   });
   f.scheduler.start();
@@ -96,12 +100,28 @@ test("scheduled catch-up skips a window already covered by a succeeded increment
   assert.deepEqual(f.calls, []);
 });
 
+test("scheduled catch-up preserves archived SpaceSession backlog after new window", async () => {
+  const f = fixture({ trigger: "scheduled" });
+  addSpace(f, "spc_one", ["agt_one"], "sps_old");
+  f.data.spaceSessions[0].status = "archived";
+  f.data.spaceSessions.push({ id: "sps_new", spaceId: "spc_one", status: "active" });
+  f.data.agentSessions.push({ id: "ags_new", spaceSessionId: "sps_new", agentId: "agt_one", generation: 1 });
+  addMessage(f, { id: "msg_old", spaceSessionId: "sps_old", content: "old backlog", seq: 1 });
+  addMessage(f, { id: "msg_new", spaceSessionId: "sps_new", content: "new backlog", seq: 2 });
+  f.scheduler.start();
+  await f.settle();
+  assert.deepEqual(f.calls, [
+    { agentId: "agt_one", spaceId: "spc_one", spaceSessionId: "sps_old", trigger: "scheduled", toMessageId: "msg_old" },
+    { agentId: "agt_one", spaceId: "spc_one", spaceSessionId: "sps_new", trigger: "scheduled", toMessageId: "msg_new" },
+  ]);
+});
+
 test("realtime threshold counts Unicode code points after the successful watermark", async () => {
   const f = fixture({ trigger: "realtime", threshold: 3 });
   addSpace(f);
   const old = addMessage(f, { id: "msg_old", content: "旧内容", seq: 1 });
   f.data.memoryDigestJobs.push({
-    id: "mdj_old", agentId: "agt_one", spaceId: "spc_one", mode: "incremental",
+    id: "mdj_old", agentId: "agt_one", spaceId: "spc_one", spaceSessionId: "sps_one", mode: "incremental",
     status: "succeeded", range: { toMessageId: old.id },
   });
   f.scheduler.start();
@@ -114,7 +134,7 @@ test("realtime threshold counts Unicode code points after the successful waterma
   f.scheduler.onMessageCommitted(last);
   await f.settle();
   assert.deepEqual(f.calls, [{
-    agentId: "agt_one", spaceId: "spc_one", trigger: "realtime", toMessageId: "msg_last",
+    agentId: "agt_one", spaceId: "spc_one", spaceSessionId: "sps_one", trigger: "realtime", toMessageId: "msg_last",
   }]);
 });
 
@@ -124,7 +144,7 @@ test("failed jobs do not advance realtime watermarks and non-completed Messages 
   addMessage(f, { id: "msg_failed_state", content: "xxxx", status: "failed", seq: 1 });
   addMessage(f, { id: "msg_evidence", content: "abcd", seq: 2 });
   f.data.memoryDigestJobs.push({
-    id: "mdj_failed", agentId: "agt_one", spaceId: "spc_one", mode: "incremental",
+    id: "mdj_failed", agentId: "agt_one", spaceId: "spc_one", spaceSessionId: "sps_one", mode: "incremental",
     status: "failed", range: { toMessageId: "msg_evidence" },
   });
   const committed = f.data.messages[1];
@@ -174,7 +194,9 @@ test("an unrelated Settings refresh does not bypass cron with an immediate catch
 test("onMessageCommitted never waits for or surfaces digest failures", async () => {
   const data = {
     spaces: [{ id: "spc_one", seats: [{ agentId: "agt_one" }] }],
-    messages: [{ id: "msg_one", spaceId: "spc_one", content: "x", status: "completed", _seq: 1 }],
+    spaceSessions: [{ id: "sps_one", spaceId: "spc_one", status: "active" }],
+    agentSessions: [{ id: "ags_one", spaceSessionId: "sps_one", agentId: "agt_one", generation: 1 }],
+    messages: [{ id: "msg_one", spaceId: "spc_one", spaceSessionId: "sps_one", content: "x", status: "completed", _seq: 1 }],
     memoryDigestJobs: [],
   };
   const errors = [];

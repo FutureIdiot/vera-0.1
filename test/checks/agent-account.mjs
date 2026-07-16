@@ -90,10 +90,10 @@ export async function run(ctx) {
     assertEqual(sole.json.error.code, "conflict");
   });
 
-  await check("b. 多 agent 同 Space 各自驾驶 own account：sessionState 按 (accountId, spaceId) 隔离", async () => {
+  await check("b. 多 Agent 同 Space 的 AgentSession/provider binding 各自隔离", async () => {
     // 4.4 起 Seat 不再携带 accountId（账户归属改登录级 / 默认 owning account）。
-    // 两 agent 各自走 owning account → sessionState 按 (accountId, spaceId) 隔离
-    // → 各 counter 从 1 开始，不再像 4.1 那样共享同一 account 接龙 1→2。
+    // 两个 Agent 各自拥有 `(spaceSessionId, agentId)` AgentSession，generation 1
+    // 的 provider binding 都从空开始，因此各 counter 都从 1 开始。
     const agent2Resp = await httpRequest("POST", "/api/agents", {
       name: "VerifyMock2b",
       kind: "cli",
@@ -131,7 +131,7 @@ export async function run(ctx) {
     assertEqual(end1.data.run.status, "completed");
     assertEqual(end2.data.run.status, "completed");
 
-    // 两 reply 都是 "回声第 1 次"——sessionState 按 account 隔离
+    // 两 reply 都是 "回声第 1 次"——provider binding 按 AgentSession 隔离。
     const allReplies = ctx.sse.events
       .filter(
         (e) =>
@@ -142,7 +142,7 @@ export async function run(ctx) {
       .join(" ");
     assert(
       /回声第 1 次/.test(allReplies) && !/回声第 2 次/.test(allReplies),
-      `expected both runs' counters isolated at 1 (per-account sessionState), got: ${allReplies}`,
+      `expected both runs' counters isolated at 1 (per-AgentSession binding), got: ${allReplies}`,
     );
   });
 }

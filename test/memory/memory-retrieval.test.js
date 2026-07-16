@@ -28,21 +28,25 @@ async function save(memory, agentId, slug, overrides = {}) {
 }
 
 async function session(retrieval, agentId = "agt_alpha1") {
-  return retrieval.ensureSession({ agentId, accountId: `acc_${agentId.slice(4)}`, spaceId: "spc_shared1" });
+  return retrieval.ensureSession({ agentId, agentSessionId: `ags_${agentId.slice(4)}`, generation: 1 });
 }
 
-test("recall session persists across turns and explicit reset invalidates the old session", async () => {
-  await withFixture(async ({ retrieval }) => {
+test("recall sidecar is reused within one generation and frozen on generation change", async () => {
+  await withFixture(async ({ store, retrieval }) => {
     const first = await session(retrieval);
     const same = await session(retrieval);
     assert.equal(same.id, first.id);
-    await retrieval.resetSession({ agentId: "agt_alpha1", accountId: "acc_alpha1", spaceId: "spc_shared1" });
-    const fresh = await session(retrieval);
+    const fresh = await retrieval.ensureSession({ agentId: "agt_alpha1", agentSessionId: first.agentSessionId, generation: 2 });
     assert.notEqual(fresh.id, first.id);
+    assert.equal(store.find("memoryRecallSessions", first.id).status, "frozen");
     await assert.rejects(
-      () => retrieval.search({ context: { agentId: "agt_alpha1", memorySessionId: first.id }, query: "规则" }),
+      () => retrieval.search({ context: {
+        agentId: "agt_alpha1", agentSessionId: first.agentSessionId, generation: 1,
+      }, query: "规则" }),
       (error) => error.code === "memory_cursor_invalid",
     );
+    assert.deepEqual(Object.keys(store.find("memoryRecallSessions", fresh.id)).filter((key) =>
+      ["accountId", "spaceId", "memorySessionId"].includes(key)), []);
   });
 });
 
@@ -64,12 +68,31 @@ test("resident index is Agent-scoped, pin-first, active-only, and hot-budgeted",
   });
 });
 
+test("resident index is frozen for one AgentSession generation", async () => {
+  await withFixture(async ({ memory, retrieval }) => {
+    await save(memory, "agt_alpha1", "alpha-first");
+    const recall = await session(retrieval);
+    const identity = {
+      agentId: "agt_alpha1",
+      agentSessionId: recall.agentSessionId,
+      generation: recall.generation,
+    };
+    const first = await retrieval.residentIndexForSession(identity);
+    await save(memory, "agt_alpha1", "alpha-later");
+    assert.equal(await retrieval.residentIndexForSession(identity), first);
+    assert.doesNotMatch(first, /alpha-later/u);
+
+    await retrieval.ensureSession({ ...identity, generation: 2 });
+    assert.match(await retrieval.residentIndexForSession({ ...identity, generation: 2 }), /alpha-later/u);
+  });
+});
+
 test("resident index orders non-pinned Memory by derived weight before slug", async () => {
   await withFixture(async ({ store, memory, retrieval }) => {
     await save(memory, "agt_alpha1", "alpha-cold");
     await save(memory, "agt_alpha1", "zeta-hot");
     store.insert("memorySignals", {
-      id: "signal-hot", agentId: "agt_alpha1", memorySessionId: "mrs_old",
+      id: "signal-hot", agentId: "agt_alpha1", agentSessionId: "ags_old", generation: 1,
       slug: "zeta-hot", kind: "detail_opened", createdAt: new Date().toISOString(),
     });
     retrieval.setResidentIndexMaxLines(1);
@@ -88,14 +111,14 @@ test("default exploration seed stays stable across runs and recall sessions", as
     for (const [slug, type] of fixtures) await save(memory, "agt_alpha1", slug, {
       type, description: "orion shared constraint", content: `${slug} unique body`,
     });
-    const firstSession = await retrieval.ensureSession({ agentId: "agt_alpha1", accountId: "acc_alpha1", spaceId: "spc_seed_a" });
-    const secondSession = await retrieval.ensureSession({ agentId: "agt_alpha1", accountId: "acc_alpha1", spaceId: "spc_seed_b" });
+    const firstSession = await retrieval.ensureSession({ agentId: "agt_alpha1", agentSessionId: "ags_seed_a", generation: 1 });
+    const secondSession = await retrieval.ensureSession({ agentId: "agt_alpha1", agentSessionId: "ags_seed_b", generation: 1 });
     const first = await retrieval.search({
-      context: { agentId: "agt_alpha1", memorySessionId: firstSession.id, runId: "run_one" },
+      context: { agentId: "agt_alpha1", agentSessionId: firstSession.agentSessionId, generation: 1, runId: "run_one" },
       query: "orion shared constraint",
     });
     const second = await retrieval.search({
-      context: { agentId: "agt_alpha1", memorySessionId: secondSession.id, runId: "run_two" },
+      context: { agentId: "agt_alpha1", agentSessionId: secondSession.agentSessionId, generation: 1, runId: "run_two" },
       query: "orion shared constraint",
     });
     assert.deepEqual(first.nodes.map((item) => item.slug), second.nodes.map((item) => item.slug));
@@ -106,7 +129,7 @@ test("automatic retrieval obeys its total token budget and never reinjects a del
   await withFixture(async ({ memory, retrieval }) => {
     for (let index = 0; index < 7; index += 1) await save(memory, "agt_alpha1", `rule-${index}`);
     const recall = await session(retrieval);
-    const context = { agentId: "agt_alpha1", memorySessionId: recall.id, runId: "run_one" };
+    const context = { agentId: "agt_alpha1", agentSessionId: recall.agentSessionId, generation: recall.generation, runId: "run_one" };
     const first = await retrieval.searchForInjection({ context, query: "规则 检索 稳定" });
     assert.ok(first.block);
     assert.ok(estimateMemoryTokens(first.block) <= 128);
@@ -121,7 +144,7 @@ test("concurrent channels serialize delivered-slug eligibility and validate quer
   await withFixture(async ({ memory, retrieval }) => {
     for (let index = 0; index < 6; index += 1) await save(memory, "agt_alpha1", `parallel-rule-${index}`);
     const recall = await session(retrieval);
-    const context = { agentId: "agt_alpha1", memorySessionId: recall.id };
+    const context = { agentId: "agt_alpha1", agentSessionId: recall.agentSessionId, generation: recall.generation };
     const [left, right] = await Promise.all([
       retrieval.search({ context, query: "规则 检索 稳定", tokenBudget: 64 }),
       retrieval.search({ context, query: "规则 检索 稳定", tokenBudget: 64 }),
@@ -143,7 +166,7 @@ test("frozen cursors paginate idempotently without leaking unsafe state", async 
   await withFixture(async ({ dataPath, store, memory, retrieval }) => {
     for (let index = 0; index < 10; index += 1) await save(memory, "agt_alpha1", `cursor-rule-${index}`);
     const recall = await session(retrieval);
-    const context = { agentId: "agt_alpha1", memorySessionId: recall.id, runId: "run_cursor" };
+    const context = { agentId: "agt_alpha1", agentSessionId: recall.agentSessionId, generation: recall.generation, runId: "run_cursor" };
     const result = await retrieval.search({ context, query: "规则 检索 稳定", tokenBudget: 64 });
     assert.ok(result.cursor);
     const storedSession = store.find("memoryRecallSessions", recall.id);
@@ -178,7 +201,7 @@ test("frozen cursors paginate idempotently without leaking unsafe state", async 
       await readFile(join(dataPath, "memoryRecallSessions.json"), "utf8"),
       await readFile(join(dataPath, "memorySignals.json"), "utf8"),
     ].join("\n");
-    assert.doesNotMatch(persisted, /#A1B2C3|stains|provider|sessionState|规则 检索/u);
+    assert.doesNotMatch(persisted, /#A1B2C3|stains|provider|sessionState|memorySessionId|accountId|spaceId|规则 检索/u);
   });
 });
 
@@ -188,7 +211,7 @@ test("fetch_detail is Agent-safe, one-hop, stain-free, and records one usage per
     await save(memory, "agt_alpha1", "root-rule", { description: "根规则", content: "根正文 [[linked-rule]]" });
     await save(memory, "agt_beta2", "root-rule", { description: "另一个Agent秘密", content: "不得读取" });
     const recall = await session(retrieval);
-    const context = { agentId: "agt_alpha1", memorySessionId: recall.id };
+    const context = { agentId: "agt_alpha1", agentSessionId: recall.agentSessionId, generation: recall.generation };
     const first = await retrieval.fetchDetail({ context, slug: "root-rule" });
     assert.equal(first.memory.content, "根正文 [[linked-rule]]");
     assert.deepEqual(first.memory.links, [{ slug: "linked-rule", state: "active", type: "project_rule", description: "关联规则" }]);
@@ -212,7 +235,7 @@ test("fetch_detail paginates links beyond 32 through the same frozen cursor", as
       description: "大量一跳关联", content: [...slugs, "missing-linked"].map((slug) => `[[${slug}]]`).join(" "),
     });
     const recall = await session(retrieval);
-    const context = { agentId: "agt_alpha1", memorySessionId: recall.id };
+    const context = { agentId: "agt_alpha1", agentSessionId: recall.agentSessionId, generation: recall.generation };
     const detail = await retrieval.fetchDetail({ context, slug: "many-links" });
     assert.equal(detail.memory.links.length, 32);
     assert.equal(detail.memory.links.find((item) => item.slug === "linked-00").state, "archived");

@@ -11,8 +11,9 @@
 // - 去掉 `sawAnyTextPart || true` 废弃条件；
 // - SSE poller 断线后带延迟自动重连，不再依赖"下一次 acquire 重启"。
 //
-// 会话连续性：sessionState = { externalSessionId }。无或已失效 → 新建会话 →
-// 立即 ctx.persistSessionState() 持久化（防 run 中途崩溃丢 id）；失效重建时
+// 会话连续性：CLI provider binding 的 providerState={externalSessionId}。
+// 无或已失效 → 新建会话 → 立即 ctx.persistProviderBinding() CAS 持久化
+// （防 run 中途崩溃丢 id）；失效重建时
 // 通过 onActivity({ phase:"error", label:"session-reset" }) 上报降级，不静默。
 
 import { randomUUID } from "node:crypto";
@@ -487,8 +488,7 @@ export function createOpencodeAdapter({ config }) {
 
   async function run(ctx) {
     const {
-      agent, account, prompt, sessionState, workspacePath, onDelta, onActivity,
-      persistSessionState, recompileForNewSession, signal,
+      account, workspacePath, onDelta, onActivity, signal,
     } = ctx;
     assertAccount(account);
     if (signal?.aborted) throw new AdapterError("cancelled", "aborted before start");
@@ -507,25 +507,38 @@ export function createOpencodeAdapter({ config }) {
       await Promise.race([handle.pollerConnected, sleep(POLLER_CONNECT_WAIT_MS)]);
 
       // 会话：复用 -> 验证 -> 失效重建（必须上报，不得静默）
-      let runPrompt = prompt;
-      const stateValid = sessionState == null ||
-        (typeof sessionState?.externalSessionId === "string" && sessionState.externalSessionId);
-      sessionId = stateValid ? sessionState?.externalSessionId ?? null : null;
+      let runPrompt = ctx.prompt;
+      let providerBinding = ctx.sessionMode === "isolated" ? null : ctx.providerBinding;
+      const bindingValid = providerBinding == null || (
+        Number.isInteger(providerBinding?.version) && providerBinding.version > 0 &&
+        typeof providerBinding?.providerState?.externalSessionId === "string" &&
+        providerBinding.providerState.externalSessionId
+      );
+      sessionId = bindingValid ? providerBinding?.providerState?.externalSessionId ?? null : null;
       let staleSessionId = null;
       let resetDetail = null;
-      if (!stateValid) {
-        runPrompt = await recompileForNewSession?.({ reason: "invalid" }) ?? runPrompt;
-        resetDetail = "OpenCode session state was invalid and has been reset";
+      if (!bindingValid) {
+        const rotated = await ctx.rotateProviderBinding?.({ reason: "invalid" });
+        runPrompt = rotated?.prompt ?? runPrompt;
+        providerBinding = rotated?.providerBinding ?? null;
+        resetDetail = "OpenCode provider binding was invalid and has been reset";
       }
       if (sessionId && !(await sessionExists(handle, sessionId))) {
         staleSessionId = sessionId;
         sessionId = null;
-        runPrompt = await recompileForNewSession?.({ reason: "missing" }) ?? runPrompt;
+        const rotated = await ctx.rotateProviderBinding?.({ reason: "missing" });
+        runPrompt = rotated?.prompt ?? runPrompt;
+        providerBinding = rotated?.providerBinding ?? null;
         resetDetail = `opencode 会话 ${staleSessionId} 已失效（daemon 重启？），上下文已从头开始`;
       }
       if (!sessionId) {
         sessionId = await createSession(handle);
-        persistSessionState?.({ externalSessionId: sessionId });
+        if (ctx.sessionMode !== "isolated") {
+          providerBinding = await ctx.persistProviderBinding?.(
+            { externalSessionId: sessionId },
+            providerBinding?.version ?? null,
+          ) ?? null;
+        }
         if (resetDetail) {
           onActivity?.({
             phase: "error",
@@ -635,7 +648,7 @@ export function createOpencodeAdapter({ config }) {
       }
 
       const content = (cumulativeText || stripAnsi(stdoutText)).trim();
-      return { content, sessionState: { externalSessionId: sessionId } };
+      return providerBinding ? { content, providerBinding } : { content };
     } finally {
       if (abortHandler) signal?.removeEventListener("abort", abortHandler);
       if (watchdogTimer) clearTimeout(watchdogTimer);

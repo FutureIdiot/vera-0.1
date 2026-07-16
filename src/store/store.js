@@ -1,15 +1,17 @@
 // JSON 文件存储：启动加载、防抖写盘。集合形状按 api-contract.md 数据形状。
 //
 // 持久化布局（plan.md Phase 2 注 2）：dataPath 是一个**目录**，目录内按集合
-// 分文件——agents.json / spaces.json / … / session-states.json / meta.json，
+// 分文件——agents.json / spaces.json / … / agentSessions.json / meta.json，
 // 防 memory、profile 等数据增长后混存一个大 JSON。脏跟踪按文件：只重写发生
 // 变化的文件（插一条 message 只写 messages.json + meta.json）。
 //
 // 迁移拆分在 src/store/migrations/：
 //   - legacy-single-file.mjs：旧单文件 → 分文件的根级骨架（a/b 两类入口 +
 //     崩溃回灌）；详见该模块顶部注释
-//   - agent-account.mjs：分文件数据形状迁移（4.1 agent 连接字段拆 account +
-//     session-states 键重映射；4.4 seat.accountId 剥离）；详见该模块顶部注释
+//   - agent-account.mjs：分文件数据形状迁移（4.1 agent 连接字段拆 account、
+//     旧session-state键过渡重映射；4.4 seat.accountId 剥离）；详见该模块顶部注释
+//   - context-sessions.mjs：旧session-state过渡数据迁入generation级CLI binding，
+//     并建立SpaceSession / AgentSession / API history；迁移完成后退役旧文件
 // 本文件只保留读写层（集合内存结构 + flush）+ 启动加载协调（按检测结果调用
 // 上述两模块的入口）。
 //
@@ -37,22 +39,27 @@ import {
   migrateAgentAccountsAndSeats,
   backupSplitFilesAsLegacy,
 } from "./migrations/agent-account.mjs";
+import {
+  needsContextSessionsMigration,
+  migrateContextSessions,
+  retireLegacySessionStatesFile,
+} from "./migrations/context-sessions.mjs";
 
 const COLLECTIONS = [
   "agents", "accounts", "spaces", "messages", "activities", "approvals", "runs", "themes",
   "memoryDigestJobs", "memoryRecallSessions", "memorySignals", "unitBindings", "memoryConfigs",
   "memoryTaskVerifications", "memoryDreamJobs",
+  "spaceSessions", "agentSessions", "providerBindings", "apiHistories",
+  "contextCompactionJobs", "contextControlRequests",
 ];
 
 // 内存键 -> 目录内文件名
-const FILE_NAMES = {
-  sessionStates: "session-states.json",
-  meta: "meta.json",
-};
+const FILE_NAMES = { meta: "meta.json" };
+const LEGACY_SESSION_STATES_FILE = "session-states.json";
 for (const name of COLLECTIONS) FILE_NAMES[name] = `${name}.json`;
 
 function emptyData() {
-  const data = { sessionStates: {}, _seq: 0, eventSeqWatermark: 0 };
+  const data = { _seq: 0, eventSeqWatermark: 0, contextSessionsMigrationVersion: 0 };
   for (const name of COLLECTIONS) data[name] = [];
   return data;
 }
@@ -69,8 +76,11 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
   const siblingLegacyPath = `${dataPath}.legacy`; // 迁移 a 的让位文件
 
   function serialize(key) {
-    if (key === "meta") return { _seq: data._seq, eventSeqWatermark: data.eventSeqWatermark };
-    if (key === "sessionStates") return data.sessionStates;
+    if (key === "meta") return {
+      _seq: data._seq,
+      eventSeqWatermark: data.eventSeqWatermark,
+      contextSessionsMigrationVersion: data.contextSessionsMigrationVersion,
+    };
     return data[key];
   }
 
@@ -108,9 +118,9 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
 
   function markDirty(key) {
     if (Array.isArray(key)) {
-      for (const k of key) dirty.add(k);
+      for (const k of key) if (FILE_NAMES[k]) dirty.add(k);
     } else {
-      dirty.add(key);
+      if (FILE_NAMES[key]) dirty.add(key);
     }
     scheduleSave();
   }
@@ -123,11 +133,18 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
   // 迁移 a/b 与崩溃回灌（detectLegacySingleFile 检测出的三类 mode）共用本函数。
   async function rebuildFromLegacy(parsed) {
     adoptLegacyIntoData(data, parsed, COLLECTIONS);
+    data.sessionStates = parsed.sessionStates && typeof parsed.sessionStates === "object"
+      ? parsed.sessionStates
+      : {};
     if (needsMigration({ data })) {
       await migrateAgentAccountsAndSeats({ data, flush, markDirty });
     }
+    if (needsContextSessionsMigration({ data })) {
+      await migrateContextSessions({ data, markDirty });
+    }
     markAllDirty();
     await flush();
+    delete data.sessionStates;
   }
 
   // ---- 启动加载 + 协调迁移 ----
@@ -169,21 +186,50 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
       const arr = await readJsonIfExists(fileFor(name));
       if (Array.isArray(arr)) data[name] = arr;
     }
-    const sessionStates = await readJsonIfExists(fileFor("sessionStates"));
-    if (sessionStates && typeof sessionStates === "object") data.sessionStates = sessionStates;
+    const legacySessionStatesPath = join(dataPath, LEGACY_SESSION_STATES_FILE);
+    const sessionStates = await readJsonIfExists(legacySessionStatesPath);
+    data.sessionStates = sessionStates && typeof sessionStates === "object" ? sessionStates : {};
     const meta = await readJsonIfExists(fileFor("meta"));
     if (meta) {
       data._seq = meta._seq ?? 0;
       data.eventSeqWatermark = meta.eventSeqWatermark ?? 0;
+      data.contextSessionsMigrationVersion = meta.contextSessionsMigrationVersion ?? 0;
+    }
+    let collectionHighWatermark = 0;
+    for (const name of COLLECTIONS) {
+      for (const item of data[name]) {
+        if (Number.isInteger(item?._seq) && item._seq > collectionHighWatermark) {
+          collectionHighWatermark = item._seq;
+        }
+      }
+    }
+    if (collectionHighWatermark > data._seq) {
+      data._seq = collectionHighWatermark;
+      markDirty("meta");
     }
     if (needsMigration({ data })) {
       // 旧分文件已有实际数据，迁移前备份为 .legacy 作回滚锚点（幂等）。
       await backupSplitFilesAsLegacy({
         fileFor,
-        keys: ["agents", "accounts", "spaces", "sessionStates", "meta"],
+        keys: ["agents", "accounts", "spaces", "meta"],
       });
       await migrateAgentAccountsAndSeats({ data, flush, markDirty });
     }
+    const hasLegacyContextData = data.spaces.length > 0 || data.messages.length > 0 || data.runs.length > 0 ||
+      data.activities.length > 0 || data.approvals.length > 0 || Object.keys(data.sessionStates).length > 0;
+    if (!hasLegacyContextData && data.contextSessionsMigrationVersion === 0) {
+      data.contextSessionsMigrationVersion = 1;
+      markDirty("meta");
+    } else if (needsContextSessionsMigration({ data })) {
+      await backupSplitFilesAsLegacy({
+        fileFor,
+        keys: ["spaces", "messages", "activities", "approvals", "runs", "meta"],
+      });
+      await migrateContextSessions({ data, markDirty });
+      await flush();
+    }
+    if (sessionStates) await retireLegacySessionStatesFile(legacySessionStatesPath);
+    delete data.sessionStates;
   }
 
   function assertCollection(name) {
@@ -234,30 +280,6 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     return true;
   }
 
-  function sessionKey(accountId, spaceId) {
-    return `${accountId}:${spaceId}`;
-  }
-
-  function getSessionState(accountId, spaceId) {
-    return data.sessionStates[sessionKey(accountId, spaceId)] ?? null;
-  }
-
-  function setSessionState(accountId, spaceId, sessionState) {
-    data.sessionStates[sessionKey(accountId, spaceId)] = sessionState;
-    markDirty("sessionStates");
-  }
-
-  function clearSessionStatesForAccount(accountId) {
-    let changed = false;
-    for (const key of Object.keys(data.sessionStates)) {
-      if (key.startsWith(`${accountId}:`)) {
-        delete data.sessionStates[key];
-        changed = true;
-      }
-    }
-    if (changed) markDirty("sessionStates");
-  }
-
   // SSE seq 水位（api-contract.md「seq 跨重启单调」）：hub 每次 publish 后回写，
   // 重启时 server 用它算跳跃后的起始 seq。防抖落盘，最后 ~debounceMs 的推进
   // 可能丢失——跳跃量（缓冲长度）覆盖这个误差。
@@ -287,9 +309,6 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     update,
     remove,
     nextSeq,
-    getSessionState,
-    setSessionState,
-    clearSessionStatesForAccount,
     getEventSeqWatermark,
     setEventSeqWatermark,
     flush,

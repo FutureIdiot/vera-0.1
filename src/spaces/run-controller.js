@@ -1,33 +1,38 @@
-// Run 控制器：一次 agent 响应的完整执行——调用 adapter，把 onDelta 流切成
-// 多气泡，发出契约规定的 SSE 事件序列（run.started -> activity/message 序列 ->
-// run.ended），并驱动 approval 的请求/过期。
-//
-// executeRun 同步创建并返回 Run 记录（status: "running"），实际 adapter 调用
-// 在内部异步执行（fire-and-forget），这样 POST /api/spaces/:id/messages 可以
-// 立即在响应体里带上创建出的 runs，后续进展全部走 SSE
-// （api-contract.md 三、发消息 一节）。
+// One main Run binds one active AgentSession generation and one Account. The
+// gateway owns API history and CLI provider bindings; adapters only translate
+// the typed input they receive.
 
-import { newRunId, newActivityId } from "../core/id.js";
-import { AdapterError } from "../core/errors.js";
-import { createBubbleStream } from "./bubble-stream.js";
-import { requestApproval as requestApprovalRecord, expirePendingApprovalsForRun } from "./approvals.js";
+import { newRunId } from "../core/id.js";
+import { AdapterError, ApiError } from "../core/errors.js";
+import { expirePendingApprovalsForRun } from "./approvals.js";
 import { compilePrompt } from "./view-compiler.js";
+import { getActiveContext } from "./context-sessions.js";
+import {
+  assessContextPressure,
+  compareAndSetApiHistory,
+  compareAndSetProviderBinding,
+  getApiHistory,
+  getProviderBinding,
+  providerFingerprintForAccount,
+  rotateContextGeneration,
+  updateContextPressure,
+} from "./context-state.js";
+import { withAccountExecutionLock } from "./execution-lock.js";
+import {
+  boundApiMessages,
+  checkpointForAgent,
+  effectiveContextLimit,
+  estimateTokens,
+  latestCheckpoint,
+} from "./run-context.js";
+import { createRunOutput } from "./run-output.js";
 
-const abortControllers = new Map(); // runId -> AbortController
-const runQueues = new Map(); // `${accountId}:${spaceId}` -> 队尾 promise。同一
-// (account, Space) 的外部会话是同一条，并发投递会串线（api-contract.md Run 一节），
-// 因此 adapter 调用按触发顺序串行；Run 记录仍即时创建返回。
+const abortControllers = new Map();
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
 }
 
-function truncate(text, maxLength) {
-  if (typeof text !== "string" || text.length <= maxLength) return text ?? null;
-  return `${text.slice(0, maxLength)}\n…(输出截断)`;
-}
-
-// POST /api/runs/:id/cancel 用。返回是否找到了在飞的 run。
 export function cancelRun(runId) {
   const controller = abortControllers.get(runId);
   if (!controller) return false;
@@ -35,180 +40,357 @@ export function cancelRun(runId) {
   return true;
 }
 
+export function recoverInterruptedRuns(store, { now = new Date().toISOString() } = {}) {
+  const timestamp = typeof now === "function" ? now() : now;
+  for (const run of store.list("runs").filter((item) => ["pending", "running"].includes(item.status))) {
+    const replyMessages = store.list("messages").filter((message) => message.runId === run.id);
+    for (const message of replyMessages.filter((item) => item.status === "streaming")) {
+      store.update("messages", message.id, { status: "failed" });
+    }
+    for (const approval of store.list("approvals").filter((item) => item.runId === run.id && item.status === "pending")) {
+      store.update("approvals", approval.id, { status: "expired", answer: "deny" });
+    }
+    for (const activity of store.list("activities").filter((item) =>
+      item.runId === run.id && ["pending", "running"].includes(item.toolStatus))) {
+      store.update("activities", activity.id, {
+        phase: "error",
+        toolStatus: "failed",
+        detail: "Run interrupted by gateway restart",
+        updatedAt: timestamp,
+      });
+    }
+    store.update("runs", run.id, {
+      status: "failed",
+      endedAt: timestamp,
+      replyMessageIds: [...new Set([...(run.replyMessageIds ?? []), ...replyMessages.map((item) => item.id)])],
+      error: { code: "internal", message: "Run interrupted by gateway restart" },
+    });
+  }
+}
+
 export function executeRun({
-  store, hub, config, agent, account, space, triggerMessage, adapter, agentStates, memoryRetrieval,
-  memoryDigestScheduler,
+  store, hub, config, agent, account, space, spaceSession, agentSession,
+  triggerMessage, adapter, agentStates, memoryRetrieval, memoryDigestScheduler,
+  contextCompaction,
 }) {
-  const spaceId = space.id;
+  let activeSpaceSession = spaceSession;
+  let activeAgentSession = agentSession;
+  if (!activeSpaceSession || !activeAgentSession) {
+    const active = getActiveContext(store, { spaceId: space.id, agentId: agent.id });
+    activeSpaceSession = active.spaceSession;
+    activeAgentSession = active.agentSession;
+  }
+
   const run = {
     id: newRunId(),
     agentId: agent.id,
-    spaceId,
+    accountId: account.id,
+    parentRunId: null,
+    role: "main",
+    spaceId: space.id,
+    spaceSessionId: activeSpaceSession.id,
+    agentSessionId: activeAgentSession.id,
+    contextGeneration: activeAgentSession.generation,
     triggerMessageId: triggerMessage.id,
     replyMessageIds: [],
-    status: "running",
+    status: "pending",
     createdAt: new Date().toISOString(),
     endedAt: null,
   };
   const storedRun = store.insert("runs", run);
-  hub.publish("run.started", { run: stripInternal(storedRun) });
-  agentStates?.setWorking(agent.id, spaceId);
-
   const controller = new AbortController();
   abortControllers.set(storedRun.id, controller);
 
-  // 真正的 adapter 交互异步跑，不阻塞 HTTP 响应；同 (account, Space) 排队串行。
-  const queueKey = `${account.id}:${spaceId}`;
-  const tail = (runQueues.get(queueKey) ?? Promise.resolve()).then(runAsync);
-  runQueues.set(queueKey, tail);
-  const releaseQueue = () => {
-    if (runQueues.get(queueKey) === tail) runQueues.delete(queueKey);
-  };
-  void tail.then(releaseQueue, releaseQueue);
+  const operation = (async () => {
+    activeAgentSession = store.find("agentSessions", activeAgentSession.id) ?? activeAgentSession;
+    const pressure = assessContextPressure(activeAgentSession, config.context);
+    if (pressure.shouldCompact) {
+      if (!contextCompaction) {
+        if (pressure.mustCompact) throw new ApiError("context_capacity", "context compaction is unavailable");
+      } else {
+        try {
+          activeAgentSession = await contextCompaction.compactAgent({
+            spaceId: space.id,
+            agentId: agent.id,
+            requestId: `auto:${activeAgentSession.id}:${activeAgentSession.generation}:${storedRun.id}`,
+          });
+          store.update("runs", storedRun.id, { contextGeneration: activeAgentSession.generation });
+        } catch (error) {
+          // A compaction already queued for this AgentSession owns the same
+          // Account lock. Wait behind it, then refresh the generation below.
+          if (error?.code !== "session_busy" && pressure.mustCompact) throw error;
+        }
+      }
+    }
+    return withAccountExecutionLock(account.id, runWithLock);
+  })();
+  void operation.catch((error) => finishBeforeStart(error));
 
-  async function runAsync() {
-    // 常驻索引只在该 (account, Space) 尚无已持久化 sessionState 时前置注入
-    // （即将开启全新外部会话）——api-contract.md「常驻索引注入」：只随新会话
-    // 换代，不逐条消息刷新。已有 sessionState 的后续消息不重复注入。
-    // 群聊声告段（ground truth 2.3）也在编译层一起拼好——编译层无状态，每轮
-    // 临时查 messages 派生 delta。
-    let priorSessionState;
-    const memorySessionIdentity = { agentId: agent.id, accountId: account.id, spaceId };
-    let compileForSession;
-    let initialPrompt;
-    try {
-      priorSessionState = store.getSessionState(account.id, space.id);
-      const memorySession = await memoryRetrieval?.ensureSession({
-        ...memorySessionIdentity,
-        reset: priorSessionState === null,
-      }) ?? null;
-      compileForSession = (session, sessionState) => compilePrompt({
-        store, space, agent, account, triggerMessage, memoryRetrieval,
-        memorySessionId: session?.id ?? null,
-        priorSessionState: sessionState,
+  function finishBeforeStart(error) {
+    const current = store.find("runs", storedRun.id);
+    if (!current || current.status !== "pending") return;
+    abortControllers.delete(storedRun.id);
+    const code = controller.signal.aborted ? "cancelled" : error?.code ?? "internal";
+    const failed = store.update("runs", storedRun.id, {
+      status: code === "cancelled" ? "cancelled" : "failed",
+      endedAt: new Date().toISOString(),
+      error: { code, message: code === "context_capacity" ? error.message : "run could not start" },
+    });
+    hub.publish("run.ended", { run: stripInternal(failed) });
+  }
+
+  async function runWithLock() {
+    if (controller.signal.aborted) throw new AdapterError("cancelled", "run cancelled before start");
+    const refreshedSession = store.find("agentSessions", activeAgentSession.id);
+    if (!refreshedSession || refreshedSession.status !== "active" ||
+        refreshedSession.spaceSessionId !== activeSpaceSession.id) {
+      throw new ApiError("history_conflict", "AgentSession changed before Run start");
+    }
+    activeAgentSession = refreshedSession;
+    store.update("runs", storedRun.id, { contextGeneration: activeAgentSession.generation });
+    if (assessContextPressure(activeAgentSession, config.context).mustCompact) {
+      throw new ApiError("context_capacity", "AgentSession must be compacted before Run start");
+    }
+    let providerBinding = account.kind === "api" ? null : getProviderBinding(store, {
+      agentSessionId: activeAgentSession.id,
+      generation: activeAgentSession.generation,
+      accountId: account.id,
+    });
+    const providerFingerprint = providerFingerprintForAccount(account);
+    if (providerBinding && providerBinding.providerFingerprint !== providerFingerprint) {
+      const checkpoint = checkpointForAgent(store, {
+        spaceSessionId: activeSpaceSession.id,
+        agentId: agent.id,
+        recentTurnLimit: config.context.checkpointRecentTurns,
+        maxChars: config.viewCompiler.groupDeltaMaxChars,
+      });
+      activeAgentSession = rotateContextGeneration(store, {
+        agentSessionId: activeAgentSession.id,
+        fromGeneration: activeAgentSession.generation,
+        checkpoint,
+      });
+      providerBinding = null;
+      store.update("runs", storedRun.id, { contextGeneration: activeAgentSession.generation });
+    }
+
+    let apiHistory = account.kind === "api" ? getApiHistory(store, {
+      agentSessionId: activeAgentSession.id,
+      generation: activeAgentSession.generation,
+    }) : null;
+    let historyVersion = apiHistory?.version ?? 0;
+    const effectiveLimitTokens = effectiveContextLimit(config, account);
+
+    const compileCurrentPrompt = async () => {
+      await memoryRetrieval?.ensureSession({
+        agentId: agent.id,
+        agentSessionId: activeAgentSession.id,
+        generation: activeAgentSession.generation,
+      });
+      const prompt = await compilePrompt({
+        store,
+        space,
+        agent,
+        account,
+        triggerMessage,
+        memoryRetrieval,
+        spaceSessionId: activeSpaceSession.id,
+        agentSessionId: activeAgentSession.id,
+        generation: activeAgentSession.generation,
+        includeResidentIndex: account.kind !== "api" && providerBinding === null,
+        apiHistory,
+        checkpoint: latestCheckpoint(store, activeAgentSession.id),
         runId: storedRun.id,
         config,
       });
-      initialPrompt = await compileForSession(memorySession, priorSessionState);
-    } catch (error) {
-      abortControllers.delete(storedRun.id);
-      expirePendingApprovalsForRun(store, hub, storedRun.id);
-      agentStates?.setIdle(agent.id);
-      const failed = store.update("runs", storedRun.id, {
-        status: "failed",
-        endedAt: new Date().toISOString(),
-        replyMessageIds: [],
-        error: error instanceof AdapterError
-          ? { code: error.code, message: error.message }
-          : { code: "internal", message: "prompt compilation failed" },
-      });
-      hub.publish("run.ended", { run: stripInternal(failed) });
-      return;
-    }
-    let recompilePromise = null;
-
-    // Provider明确判定旧外部session无法续用时，同一Run只换代一次Memory
-    // recall session。普通adapter错误不会调用此回调；重复调用返回同一Promise。
-    function recompileForNewSession() {
-      if (recompilePromise) return recompilePromise;
-      recompilePromise = (async () => {
-        store.setSessionState(account.id, spaceId, null);
-        let freshMemorySession = null;
-        if (memoryRetrieval) {
-          await memoryRetrieval.resetSession(memorySessionIdentity);
-          freshMemorySession = await memoryRetrieval.ensureSession({ ...memorySessionIdentity, reset: false });
-        }
-        return compileForSession(freshMemorySession, null);
-      })();
-      return recompilePromise;
-    }
-
-    const bubbles = createBubbleStream({ store, hub, config, spaceId, runId: storedRun.id, agentId: agent.id });
-    const activityIndex = new Map(); // callId -> activity id
-
-    function onActivity(evt) {
-      const detail = truncate(evt?.detail, config.activity.detailMaxLength);
-      if (evt?.callId && activityIndex.has(evt.callId)) {
-        const activityId = activityIndex.get(evt.callId);
-        const updated = store.update("activities", activityId, {
-          phase: evt.phase,
-          label: evt.label,
-          detail,
-          toolStatus: evt.toolStatus ?? null,
-          updatedAt: new Date().toISOString(),
-        });
-        hub.publish("activity.updated", { activity: stripInternal(updated) });
-        return;
+      if (account.kind === "api") {
+        prompt.apiMessages = boundApiMessages(
+          prompt.apiMessages,
+          Math.floor(effectiveLimitTokens * config.context.hardRatio),
+        );
+      } else if (estimateTokens(prompt.text) > Math.floor(
+        effectiveLimitTokens * config.context.hardRatio,
+      )) {
+        throw new ApiError("context_capacity", "current message exceeds the AgentSession context capacity");
       }
-      const now = new Date().toISOString();
-      const activity = {
-        id: newActivityId(),
-        spaceId,
-        runId: storedRun.id,
-        agentId: agent.id,
-        phase: evt?.phase,
-        label: evt?.label,
-        detail,
-        toolStatus: evt.toolStatus ?? null,
-        createdAt: now,
-        updatedAt: now,
-      };
-      const stored = store.insert("activities", activity);
-      if (evt?.callId) activityIndex.set(evt.callId, stored.id);
-      hub.publish("activity.created", { activity: stripInternal(stored) });
+      return prompt;
+    };
+
+    let prompt;
+    try {
+      prompt = await compileCurrentPrompt();
+    } catch (error) {
+      throw error;
     }
 
-    function requestApproval(req) {
-      return requestApprovalRecord({ store, hub, spaceId, runId: storedRun.id, agentId: agent.id, req });
-    }
+    const running = store.update("runs", storedRun.id, {
+      status: "running",
+      contextGeneration: activeAgentSession.generation,
+    });
+    hub.publish("run.started", { run: stripInternal(running) });
+    agentStates?.setWorking(agent.id, space.id);
 
+    const output = createRunOutput({
+      store,
+      hub,
+      config,
+      spaceId: space.id,
+      spaceSessionId: activeSpaceSession.id,
+      runId: storedRun.id,
+      agentId: agent.id,
+    });
+    const { bubbles, onActivity, requestApproval } = output;
+
+    let bindingRotationUsed = false;
     const ctx = {
       agent,
       account,
-      prompt: initialPrompt,
-      sessionState: priorSessionState,
+      spaceSessionId: activeSpaceSession.id,
+      agentSessionId: activeAgentSession.id,
+      contextGeneration: activeAgentSession.generation,
+      sessionMode: "main",
+      prompt,
+      providerBinding,
+      historyVersion: account.kind === "api" ? historyVersion : undefined,
       workspacePath: process.cwd(),
       onDelta: (text) => bubbles.delta(text),
       onActivity,
       requestApproval,
-      // 可选回调（adapter-interface.md）：外部会话一建立就立即持久化，
-      // 不等 run 结束，防止 run 中途崩溃丢会话 id 导致重复建会话。
-      persistSessionState: (state) => store.setSessionState(account.id, spaceId, state),
-      recompileForNewSession,
+      persistProviderBinding: (providerState, ifVersion) => {
+        providerBinding = compareAndSetProviderBinding(store, {
+          agentSessionId: activeAgentSession.id,
+          generation: activeAgentSession.generation,
+          accountId: account.id,
+          providerFingerprint,
+          providerState,
+          ifVersion,
+        });
+        return providerBinding;
+      },
+      rotateProviderBinding: async ({ reason }) => {
+        if (!["missing", "invalid"].includes(reason)) {
+          throw new ApiError("invalid_request", "provider binding rotation reason is invalid");
+        }
+        if (bindingRotationUsed || bubbles.replyMessageIds.length > 0) {
+          throw new ApiError("conflict", "provider binding can rotate only once before the first reply");
+        }
+        bindingRotationUsed = true;
+        const checkpoint = checkpointForAgent(store, {
+          spaceSessionId: activeSpaceSession.id,
+          agentId: agent.id,
+          recentTurnLimit: config.context.checkpointRecentTurns,
+          maxChars: config.viewCompiler.groupDeltaMaxChars,
+        });
+        activeAgentSession = rotateContextGeneration(store, {
+          agentSessionId: activeAgentSession.id,
+          fromGeneration: activeAgentSession.generation,
+          checkpoint,
+        });
+        providerBinding = null;
+        store.update("runs", storedRun.id, { contextGeneration: activeAgentSession.generation });
+        apiHistory = null;
+        historyVersion = 0;
+        const nextPrompt = await compileCurrentPrompt();
+        ctx.agentSessionId = activeAgentSession.id;
+        ctx.contextGeneration = activeAgentSession.generation;
+        ctx.prompt = nextPrompt;
+        ctx.providerBinding = null;
+        return { prompt: nextPrompt, providerBinding: null, generation: activeAgentSession.generation };
+      },
       signal: controller.signal,
     };
 
     let status = "completed";
-    let error = null;
+    let runError = null;
     try {
       const result = await adapter.run(ctx);
       bubbles.finish(result?.content);
-      store.setSessionState(account.id, spaceId, result?.sessionState ?? null);
-    } catch (err) {
+      if (account.kind === "api") {
+        const replies = bubbles.replyMessageIds.map((id) => store.find("messages", id));
+        if (replies.length === 0 || replies.some((message) => message?.status !== "completed")) {
+          throw new ApiError("history_conflict", "API Run has no completed reply Messages");
+        }
+        const history = compareAndSetApiHistory(store, {
+          agentSessionId: activeAgentSession.id,
+          generation: activeAgentSession.generation,
+          baseHistoryVersion: historyVersion,
+          turn: {
+            runId: storedRun.id,
+            input: {
+              sourceMessageId: triggerMessage.id,
+              author: triggerMessage.author,
+              target: triggerMessage.target,
+              content: triggerMessage.content ?? "",
+              createdAt: triggerMessage.createdAt ?? null,
+            },
+            assistant: replies.map((message) => ({
+              messageId: message.id,
+              content: message.content,
+              createdAt: message.createdAt,
+            })),
+            ...(result?.toolTranscript ? { toolTranscript: result.toolTranscript } : {}),
+            ...(result?.usage ? { usage: result.usage } : {}),
+          },
+        });
+        apiHistory = history;
+        historyVersion = history.version;
+      }
+      const priorEstimate = account.kind === "api" ? 0 : activeAgentSession.context?.estimatedInputTokens ?? 0;
+      const providerInputTokens = result?.usage?.inputTokens;
+      const hasProviderMeasurement = Number.isFinite(providerInputTokens) && providerInputTokens >= 0;
+      const measured = hasProviderMeasurement
+        ? providerInputTokens
+        : account.kind === "api"
+          ? estimateTokens(apiHistory)
+          : priorEstimate + estimateTokens(prompt.text) + estimateTokens(result?.content ?? "");
+      activeAgentSession = updateContextPressure(store, {
+        agentSessionId: activeAgentSession.id,
+        generation: activeAgentSession.generation,
+        estimatedInputTokens: measured,
+        effectiveLimitTokens,
+        measurement: hasProviderMeasurement ? "provider_reported" : "estimate",
+      });
+      const nextPressure = assessContextPressure(activeAgentSession, config.context);
+      if (nextPressure.shouldCompact && contextCompaction) {
+        void contextCompaction.compactAgent({
+          spaceId: space.id,
+          agentId: agent.id,
+          requestId: `auto:${activeAgentSession.id}:${activeAgentSession.generation}:${storedRun.id}`,
+        }).catch(() => {});
+      }
+    } catch (error) {
       bubbles.finish();
-      if (err instanceof AdapterError) {
-        status = err.code === "cancelled" ? "cancelled" : "failed";
-        error = { code: err.code, message: err.message };
+      if (error instanceof AdapterError) {
+        status = error.code === "cancelled" ? "cancelled" : "failed";
+        runError = error;
       } else {
         status = "failed";
-        error = { code: "internal", message: err?.message ?? "unknown error" };
+        runError = error;
       }
-    } finally {
-      abortControllers.delete(storedRun.id);
-      expirePendingApprovalsForRun(store, hub, storedRun.id);
-      agentStates?.setIdle(agent.id);
-      const patch = {
-        status,
-        endedAt: new Date().toISOString(),
-        replyMessageIds: bubbles.replyMessageIds,
-      };
-      if (error) patch.error = error;
-      const updatedRun = store.update("runs", storedRun.id, patch);
-      hub.publish("run.ended", { run: stripInternal(updatedRun) });
-      for (const messageId of bubbles.replyMessageIds) {
-        const message = store.find("messages", messageId);
-        if (message?.status === "completed") memoryDigestScheduler?.onMessageCommitted(message);
-      }
+    }
+    await finishRunning({ status, error: runError, bubbles });
+  }
+
+  async function finishRunning({ status, error, bubbles }) {
+    abortControllers.delete(storedRun.id);
+    expirePendingApprovalsForRun(store, hub, storedRun.id);
+    agentStates?.setIdle(agent.id);
+    const code = controller.signal.aborted ? "cancelled" : error?.code;
+    const patch = {
+      status: controller.signal.aborted ? "cancelled" : status,
+      endedAt: new Date().toISOString(),
+      replyMessageIds: bubbles?.replyMessageIds ?? [],
+    };
+    if (error) patch.error = {
+      code: code ?? "internal",
+      message: error instanceof AdapterError || error instanceof ApiError
+        ? error.message
+        : "run failed",
+    };
+    const updated = store.update("runs", storedRun.id, patch);
+    hub.publish("run.ended", { run: stripInternal(updated) });
+    for (const messageId of patch.replyMessageIds) {
+      const message = store.find("messages", messageId);
+      if (message?.status === "completed") memoryDigestScheduler?.onMessageCommitted(message);
     }
   }
 

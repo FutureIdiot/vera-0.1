@@ -124,7 +124,6 @@ export function createStatusTracker({ config, pkgVersion = "0.0.1" }) {
       store: {
         kind: "file",
         collections,
-        sessionStates: 0,
         themesCount,
         lastFlushAt: null,
       },

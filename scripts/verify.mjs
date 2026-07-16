@@ -45,6 +45,7 @@ import * as f4WebManagement from "../test/checks/f4-web-management.mjs";
 import * as memoryDigest from "../test/checks/memory-digest.mjs";
 import * as memoryM4 from "../test/checks/memory-m4.mjs";
 import * as memoryRetrieval from "../test/checks/memory-retrieval.mjs";
+import * as contextSessions from "../test/checks/context-sessions.mjs";
 import * as ollamaAdapter from "../test/checks/ollama-adapter.mjs";
 import * as codexAdapter from "../test/checks/codex-adapter.mjs";
 
@@ -146,6 +147,7 @@ async function main() {
   await ollamaAdapter.runReal(ctx);
   await codexAdapter.run(ctx);
   await codexAdapter.runReal(ctx);
+  await contextSessions.run(ctx);
   await f1Extensions.run(ctx);
   await f3WebCore.run(ctx);
   await f4WebManagement.run(ctx);

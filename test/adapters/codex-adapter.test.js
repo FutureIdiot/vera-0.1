@@ -17,21 +17,30 @@ function makeCtx(command, overrides = {}) {
   const deltas = [];
   const activities = [];
   const persisted = [];
+  const rotations = [];
   const controller = new AbortController();
   return {
     ctx: {
       agent: { id: "agt_codex", name: "Codex" },
       account: account(command),
       prompt: { text: "INDEX\n\nquestion", turnText: "question", historyUserText: "question", residentBlock: "INDEX" },
-      sessionState: null,
+      sessionMode: "main",
+      providerBinding: null,
       workspacePath: process.cwd(),
       onDelta: (value) => deltas.push(value),
       onActivity: (value) => activities.push(value),
-      persistSessionState: (value) => persisted.push(value),
+      persistProviderBinding: async (providerState, ifVersion) => {
+        persisted.push({ providerState, ifVersion });
+        return { version: persisted.length, providerState };
+      },
+      rotateProviderBinding: async (input) => {
+        rotations.push(input);
+        return { prompt: { text: `ROTATED ${input.reason}` }, providerBinding: null, generation: 2 };
+      },
       signal: controller.signal,
       ...overrides,
     },
-    deltas, activities, persisted, controller,
+    deltas, activities, persisted, rotations, controller,
   };
 }
 
@@ -86,20 +95,25 @@ test("kind/provider, secretRef and unsupported args fail before spawning", async
   assert.deepEqual(await fake.readInvocations(), []);
 });
 
-test("chat uses non-interactive exec, persists thread id, resumes, and maps tool activity", async (t) => {
+test("chat uses non-interactive exec, CAS-persists provider binding, resumes, and maps tool activity", async (t) => {
   const fake = await createFakeCodex(t);
   const adapter = createCodexAdapter({ config: { binary: fake.binary } });
   const first = makeCtx(fake.binary, { account: account(fake.binary, { model: "fake-tool" }) });
   const firstResult = await adapter.run(first.ctx);
   assert.equal(firstResult.content, "CODEX_CHAT_OK");
   assert.deepEqual(first.deltas, ["CODEX_CHAT_OK"]);
-  assert.deepEqual(first.persisted, [{ threadId: "thr_fake_1" }]);
+  assert.deepEqual(first.persisted, [{ providerState: { threadId: "thr_fake_1" }, ifVersion: null }]);
   assert.equal(first.activities[0].label, "command_execution");
-  assert.deepEqual(firstResult.sessionState, { threadId: "thr_fake_1" });
+  assert.deepEqual(firstResult, {
+    content: "CODEX_CHAT_OK",
+    providerBinding: { version: 1, providerState: { threadId: "thr_fake_1" } },
+  });
+  assert.equal("sessionState" in firstResult, false);
 
-  const second = makeCtx(fake.binary, { sessionState: firstResult.sessionState });
+  const second = makeCtx(fake.binary, { providerBinding: firstResult.providerBinding });
   const secondResult = await adapter.run(second.ctx);
-  assert.equal(secondResult.content, "CODEX_RESUME_OK");
+  assert.deepEqual(secondResult, { content: "CODEX_RESUME_OK", providerBinding: firstResult.providerBinding });
+  assert.deepEqual(second.persisted, []);
   const calls = await fake.readInvocations();
   assert.equal(calls[0].input, "INDEX\n\nquestion");
   assert.deepEqual(calls[0].args.slice(0, 7), ["-C", process.cwd(), "-a", "never", "-s", "workspace-write", "exec"]);
@@ -107,28 +121,29 @@ test("chat uses non-interactive exec, persists thread id, resumes, and maps tool
   assert.deepEqual(calls[1].args.slice(6, 9), ["exec", "resume", "thr_fake_1"]);
 });
 
-test("invalid state and explicit missing thread reset, while ordinary provider errors do not", async (t) => {
+test("invalid binding and explicit missing thread rotate, while ordinary provider errors do not", async (t) => {
   const fake = await createFakeCodex(t);
   const adapter = createCodexAdapter({ config: { binary: fake.binary } });
-  const invalidResetReasons = [];
   const invalid = makeCtx(fake.binary, {
-    sessionState: { broken: true },
-    recompileForNewSession: async (reason) => {
-      invalidResetReasons.push(reason);
-      return { text: "FRESH INVALID CODEX PROMPT" };
+    providerBinding: { version: 1, providerState: { broken: true } },
+    rotateProviderBinding: async (reason) => {
+      invalid.rotations.push(reason);
+      return { prompt: { text: "FRESH INVALID CODEX PROMPT" }, providerBinding: null, generation: 2 };
     },
   });
-  await adapter.run(invalid.ctx);
+  const invalidResult = await adapter.run(invalid.ctx);
   assert.equal(invalid.activities[0].label, "session-reset");
-  assert.deepEqual(invalidResetReasons, [{ reason: "invalid" }]);
+  assert.deepEqual(invalid.rotations, [{ reason: "invalid" }]);
+  assert.deepEqual(invalid.persisted, [{ providerState: { threadId: "thr_fake_1" }, ifVersion: null }]);
+  assert.equal("sessionState" in invalidResult, false);
   assert.equal((await fake.readInvocations())[0].input, "FRESH INVALID CODEX PROMPT");
 
   const resetOrder = [];
   const stale = makeCtx(fake.binary, {
-    sessionState: { threadId: "stale-thread" },
-    recompileForNewSession: async (reason) => {
-      resetOrder.push({ type: "recompile", reason });
-      return { text: "FRESH CODEX PROMPT" };
+    providerBinding: { version: 1, providerState: { threadId: "stale-thread" } },
+    rotateProviderBinding: async (reason) => {
+      resetOrder.push({ type: "rotate", reason });
+      return { prompt: { text: "FRESH CODEX PROMPT" }, providerBinding: null, generation: 2 };
     },
   });
   stale.ctx.onActivity = (activity) => {
@@ -140,26 +155,41 @@ test("invalid state and explicit missing thread reset, while ordinary provider e
   assert.equal(stale.activities[0].label, "session-reset");
   assert.deepEqual(resetOrder, [
     { type: "activity", label: "session-reset" },
-    { type: "recompile", reason: { reason: "missing" } },
+    { type: "rotate", reason: { reason: "missing" } },
   ]);
+  assert.deepEqual(stale.persisted, [{ providerState: { threadId: "thr_fake_1" }, ifVersion: null }]);
 
   const callsAfterReset = await fake.readInvocations();
   assert.ok(callsAfterReset[1].args.includes("resume"), "first stale attempt must resume the old thread");
   assert.equal(callsAfterReset[2].args.includes("resume"), false, "fresh retry must not resume");
   assert.equal(callsAfterReset[2].input, "FRESH CODEX PROMPT");
 
-  const ordinaryResetReasons = [];
+  const ordinaryRotateReasons = [];
   const failed = makeCtx(fake.binary, {
     account: account(fake.binary, { model: "fake-provider-error" }),
-    sessionState: { threadId: "healthy-thread" },
-    recompileForNewSession: async (reason) => {
-      ordinaryResetReasons.push(reason);
-      return { text: "ordinary errors must not use this" };
+    providerBinding: { version: 1, providerState: { threadId: "healthy-thread" } },
+    rotateProviderBinding: async (reason) => {
+      ordinaryRotateReasons.push(reason);
+      return { prompt: { text: "ordinary errors must not use this" }, providerBinding: null, generation: 2 };
     },
   });
   await assert.rejects(() => adapter.run(failed.ctx), (error) => error.code === "provider_error" && !error.message.includes("secret"));
   assert.equal(failed.activities.length, 0);
-  assert.deepEqual(ordinaryResetReasons, []);
+  assert.deepEqual(ordinaryRotateReasons, []);
+});
+
+test("isolated CLI run is one-shot and neither persists nor returns a binding", async (t) => {
+  const fake = await createFakeCodex(t);
+  const adapter = createCodexAdapter({ config: { binary: fake.binary } });
+  const isolated = makeCtx(fake.binary, {
+    sessionMode: "isolated",
+    providerBinding: { version: 1, providerState: { threadId: "healthy-thread" } },
+    persistProviderBinding: () => { throw new Error("isolated run must not persist"); },
+    rotateProviderBinding: () => { throw new Error("isolated run must not rotate"); },
+  });
+  const result = await adapter.run(isolated.ctx);
+  assert.deepEqual(result, { content: "CODEX_CHAT_OK" });
+  assert.equal((await fake.readInvocations())[0].args.includes("resume"), false);
 });
 
 test("chat parses fragmented JSONL and uses output-file fallback without fake deltas", async (t) => {
