@@ -44,6 +44,10 @@ export async function run(ctx) {
     });
     assertEqual(unknown.status, 400);
 
+    const empty = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { seats: [] });
+    assertEqual(empty.status, 400);
+    assertEqual(empty.json.error.code, "invalid_request");
+
     const badMode = await httpRequest("PATCH", `/api/spaces/${spaceId}`, {
       seats: [{ agentId: agent.id, responseMode: "sometimes" }],
     });

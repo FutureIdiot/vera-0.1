@@ -16,6 +16,7 @@ const RESPONSE_MODES = ["default", "silent", "focused"];
 
 function normalizeSeats(store, seats) {
   if (!Array.isArray(seats)) throw new ApiError("invalid_request", "seats must be an array");
+  if (seats.length === 0) throw new ApiError("invalid_request", "seats must contain at least one Agent");
   const knownAgentIds = new Set(store.list("agents").map((agent) => agent.id));
   const seen = new Set();
   return seats.map((seat) => {
@@ -101,7 +102,7 @@ export function createSpace(store, body) {
     id: newSpaceId(),
     name: body.name.trim(),
     topic: body.topic ?? "",
-    seats: normalizeSeats(store, body.seats ?? []),
+    seats: normalizeSeats(store, body.seats),
     notifications: normalizeNotifications(body.notifications),
     archivedAt: null,
     createdAt: new Date().toISOString(),

@@ -138,8 +138,6 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   form.addEventListener("input", () => { dirty = true; });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    saving = true;
-    save.disabled = true;
     error.hidden = true;
     const seats = [];
     for (const [agentId, control] of seatControls) {
@@ -148,6 +146,13 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
       const blockAgentIds = [...control.blocked].filter(([, input]) => input.checked).map(([id]) => id);
       seats.push({ agentId, responseMode: control.mode.value, ...(respondTo.length ? { respondTo } : {}), ...(blockAgentIds.length ? { blockAgentIds } : {}) });
     }
+    if (!seats.length) {
+      error.textContent = "Space 至少需要一个参与 Agent。";
+      error.hidden = false;
+      return;
+    }
+    saving = true;
+    save.disabled = true;
     try {
       const response = await client.updateSpace(space.id, {
         name: name.value.trim(),

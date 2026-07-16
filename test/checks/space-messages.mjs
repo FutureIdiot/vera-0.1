@@ -3,6 +3,16 @@
 export async function run(ctx) {
   const { check, httpRequest, assertEqual, assert } = ctx;
 
+  await check("c.0 POST /api/spaces rejects missing or empty seats", async () => {
+    const missing = await httpRequest("POST", "/api/spaces", { name: "missing-seats" });
+    assertEqual(missing.status, 400);
+    assertEqual(missing.json.error.code, "invalid_request");
+
+    const empty = await httpRequest("POST", "/api/spaces", { name: "empty-seats", seats: [] });
+    assertEqual(empty.status, 400);
+    assertEqual(empty.json.error.code, "invalid_request");
+  });
+
   await check("c. POST /api/spaces creates space with agent seated", async () => {
     const { status, json } = await httpRequest("POST", "/api/spaces", {
       name: "verify-space",

@@ -180,6 +180,7 @@ Workspace = Account 对应的执行环境与项目工作边界；`Account 1:1 Wo
 ```
 
 - `seat.agentId`：在该 Space 上以哪个身份出席。
+- `seats`必须至少包含一个有效Agent，创建时缺失或为空均返回`400 invalid_request`；更新成员时不得移除最后一个seat。历史空记录只允许读取并通过一次非空`PATCH`修复，不构成合法的新建或编辑结果。
 - `seat.responseMode`（per-agent per-Space，ground truth 2.3）：`default`（都响应）/ `silent`（只响应指定来源的 @）/ `focused`（只响应 @自己）。定向 @ 到的 agent 一律响应，不受 responseMode 影响。
 - **Seat 不携带 `accountId`**（Phase 4.4 调整）：Account 由每条 Execution 显式绑定，普通主 Execution 默认 Home Account，不允许 per-Space 覆盖。
 - `silent` 的来源过滤字段 `respondTo: ["user", "agt_..."]` 挂在 seat 上（成员为 `"user"` 或 `agt_` id）；Phase 4 落地，落地前 silent 对定向 @ 等价 focused。
@@ -403,8 +404,8 @@ Vera全局Settings中的`#/settings/accounts`只负责系统层管理：按Agent
 | Method | Path | 说明 |
 |---|---|---|
 | GET | `/api/spaces` | 默认只列活跃Space；`?archived=true`只列已归档，`?archived=all`列全部。`/api/bootstrap`只返回活跃Space |
-| POST | `/api/spaces` | 创建Space，并在同一事务创建首个active SpaceSession与当前seats的generation 1 AgentSessions |
-| PATCH | `/api/spaces/:id` | 更新 name/topic/seats/notifications（席位增删、responseMode/提醒策略调整） |
+| POST | `/api/spaces` | 创建Space；body必须包含至少一个seat，并在同一事务创建首个active SpaceSession与当前seats的generation 1 AgentSessions |
+| PATCH | `/api/spaces/:id` | 更新 name/topic/seats/notifications（席位增删、responseMode/提醒策略调整；seats不得为空） |
 | POST | `/api/spaces/:id/archive` `[P4.6]` | 归档Space。存在未结束Run或compaction时返回409；成功写入`archivedAt`，不删除或级联清理任何SpaceSession/provider binding。重复归档幂等返回当前Space |
 | POST | `/api/spaces/:id/restore` `[P4.6]` | 恢复已归档Space：把`archivedAt`置回`null`并继续原active SpaceSession。重复恢复幂等返回当前Space |
 | GET | `/api/spaces/:id/timeline?before=<itemId>&limit=50` | 只返回active SpaceSession时间线。返回`{spaceSession,items:[...],runs:[...]}`；`runs`只含与本页item关联的持久Run安全投影，归档窗口不得由该端点隐式混入 |
@@ -915,14 +916,14 @@ run.ended          (completed)
 - **SSE 事件输入**：`space.updated`（重命名 / Seat / notifications 变更回显）；`agent.updated` / `account.upserted`（左栏联系人投影）；`account.presence.updated`（在线指示）。
 - **API 读取**：`GET /api/bootstrap`（复用 Shell 拉取的 agents/accounts/spaces；进导航页不再发额外请求，纯客户端派生左栏联系人 / 右栏 Space 列表）；`GET /api/spaces?archived=true`（展开「已归档 Spaces」分段时按需拉取已归档列表）。
 - **API 写入**：`POST /api/spaces`（新增；body 继承当前左栏选中成员集合作为 seats）；`PATCH /api/spaces/:id`（重命名 / topic / seats / notifications）；`POST /api/spaces/:id/archive`（二次确认后归档，归档成功后切换到另一活跃 Space）；`POST /api/spaces/:id/restore`（从「已归档」分段恢复）。
-- **空错态**：无 Space → 左栏联系人可点但右栏空 + 「新建 Space」CTA；左栏无选中 → 右栏显示「选一个联系人或群组」；归档失败（409 有未结束 Run）→ toast「有进行中的对话，等结束或取消后再归档」；新增失败 → 内联错误；归档二次确认 → 弹层 only（不替换主区）。
+- **空错态**：无 Space → 左栏联系人可点但右栏空 + 「新建 Space」CTA；左栏无选中 → 右栏显示「选一个联系人或群组」，同时禁用新建入口；归档失败（409 有未结束 Run）→ toast「有进行中的对话，等结束或取消后再归档」；新增失败 → 内联错误；归档二次确认 → 弹层 only（不替换主区）。
 
 ### 当前Space设置 `#/spaces/:spaceId/settings`
 
 - **SSE 事件输入**：`space.updated`（外部改动回显，多端同步）；`agent.updated` / `account.upserted` / `account.presence.updated`（参与 Agent 列表状态）。
 - **API 读取**：`GET /api/bootstrap`（参与 Agent + seats 组合）；Phase 6 前不读取或显示 Space Module，契约落地后再读取独立 binding API。
 - **API 写入**：`PATCH /api/spaces/:id`（一次提交 seats / notifications / name / topic；Seat 字段 `agentId` / `responseMode` / `respondTo` / `blockAgentIds` 全在此）。
-- **空错态**：Space 不存在 → 整页「Space 不存在」+ 返回；无 seats → 「还没有 Agent 参与，去 Account 管理添加」+ 跳转 `#/settings/accounts`；保存失败 → 字段级错误回显，不整页崩溃；Phase 6 契约落地前不显示 Space Module 区；离开未保存改动 → 浏览器原生 confirm。
+- **空错态**：Space 不存在 → 整页「Space 不存在」+ 返回；历史/异常记录无 seats → 「还没有 Agent 参与」并允许选择至少一个Agent修复，保存时不得仍为空；保存失败 → 字段级错误回显，不整页崩溃；Phase 6 契约落地前不显示 Space Module 区；离开未保存改动 → 浏览器原生 confirm。
 
 ### Setting目录 `#/settings`
 

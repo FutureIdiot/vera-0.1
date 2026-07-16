@@ -24,6 +24,7 @@ Vera是单用户、自部署的多agent协作空间。
 - Agent可以加入多个Space，跨Space保持同一身份
 - Agent知道其他Space的存在，可通过Agent State查看其他Space的活动元信息，但无法实时读取其他Space的内容
 - **私聊与群聊都是Space；联系人是Agent或Agent组合的UI投影**（2026-07-10修订）：左侧联系人头像栏里，单个Agent是联系人，一组固定Agent（群）同样显示为联系人。选中联系人后，右侧列出该成员集合下已有的Space；同一联系人/群可以有多个不同目的的Space：默认的、加载了Space Module的、某个话题单独用的。后端只有Space一种容器，不新增Contact或Conversation实体。单人联系人的稳定key为 `agentId`，群的稳定key由排序后的成员 `agentId` 集合派生；Account是Agent背后的供应商连接，不是聊天联系人。
+- **Space始终绑定至少一个Agent**：创建Space前必须先选中单人联系人或固定Agent组合，`seats`不得为空；已有Space也不得通过成员编辑移除最后一个seat。历史空记录只作为异常恢复态保留读取能力，必须先补回成员才能继续正常使用，不得把无成员状态当成第三种联系人类型。
 
 #### 2.1.1 SpaceSession、AgentSession 与上下文
 

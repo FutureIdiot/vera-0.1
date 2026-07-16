@@ -62,7 +62,10 @@ export async function run(ctx) {
   let archiveSpaceId = null;
 
   await check("o.4 createSpace 带 notifications 默认 + archivedAt null", async () => {
-    const { status, json } = await httpRequest("POST", "/api/spaces", { name: "f1-archive-test" });
+    const { status, json } = await httpRequest("POST", "/api/spaces", {
+      name: "f1-archive-test",
+      seats: [{ agentId: ctx.agent.id }],
+    });
     assertEqual(status, 201);
     archiveSpaceId = json.space.id;
     assertEqual(json.space.archivedAt, null);

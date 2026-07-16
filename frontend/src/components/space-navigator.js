@@ -22,6 +22,11 @@ function memberProjection(agents, spaces) {
   return entries;
 }
 
+export function resolveSpaceCreationSeats(agents, spaces, selectedKey) {
+  const entry = memberProjection(agents, spaces).find((candidate) => candidate.key === selectedKey);
+  return (entry?.agentIds ?? []).map((agentId) => ({ agentId, responseMode: "default" }));
+}
+
 export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {}) {
   const client = createSpacesClient(createHttpClient(platform));
   let spaces = [...runtime.getBootstrap().spaces];
@@ -135,18 +140,22 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     return el;
   }
 
-  function selectedMembers() {
-    const entry = memberProjection(runtime.getBootstrap().agents, spaces).find((candidate) => candidate.key === selectedKey);
-    return entry?.agentIds ?? [];
+  function selectedSeats() {
+    return resolveSpaceCreationSeats(runtime.getBootstrap().agents, spaces, selectedKey);
   }
 
   async function createSpace() {
+    const seats = selectedSeats();
+    if (!seats.length) {
+      showError("请先选择一个联系人或群组");
+      return;
+    }
     const name = await requestText("新 Space 名称");
     if (!name?.trim()) return;
     try {
       const response = await client.createSpace({
         name: name.trim(),
-        seats: selectedMembers().map((agentId) => ({ agentId, responseMode: "default" })),
+        seats,
       });
       runtime.mergeSpace(response.space);
       spaces = [...spaces.filter((space) => space.id !== response.space.id), response.space];
@@ -262,7 +271,10 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     heading.className = "vera-navigator__heading";
     const title = document.createElement("strong");
     title.textContent = "Space 目录";
-    heading.append(title, button("新建", "vera-text-button", () => void createSpace()));
+    const createButton = button("新建", "vera-text-button", () => void createSpace());
+    createButton.disabled = selectedSeats().length === 0;
+    if (createButton.disabled) createButton.title = "请先选择一个联系人或群组";
+    heading.append(title, createButton);
     spacesPanel.appendChild(heading);
     const visible = spaces.filter((space) => memberKey(space) === selectedKey);
     if (!visible.length) {
