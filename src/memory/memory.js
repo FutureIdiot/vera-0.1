@@ -250,29 +250,40 @@ export function createMemoryVault({ vaultPath, resolveSource, onExternalEdit = n
     return queue.enqueue(agentId, () => scanAt(rootSnapshot().root, agentId, { queueHeld: true, external: true }));
   }
   async function listMemories(agentId) { return (await listWithDiagnostics(agentId)).memories; }
-  async function snapshotMemories(agentId) {
-    return queue.enqueue(agentId, async () => {
-      const root = rootSnapshot().root;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const listed = await scanAt(root, agentId, { queueHeld: true, external: true });
-        const memories = [];
-        for (const item of listed.memories) {
-          const full = await readCanonical(root, agentId, item.slug, { queueHeld: true });
-          full.sources = await validateSourceRefs(full.sources);
-          memories.push(full);
-        }
-        const confirmed = await scanAt(root, agentId, { queueHeld: true, external: true });
-        if (confirmed.index.generation === listed.index.generation) {
-          return { memories, index: confirmed.index };
-        }
+  async function snapshotMemoriesHeld(agentId) {
+    const root = rootSnapshot().root;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const listed = await scanAt(root, agentId, { queueHeld: true, external: true });
+      const memories = [];
+      for (const item of listed.memories) {
+        const full = await readCanonical(root, agentId, item.slug, { queueHeld: true });
+        full.sources = await validateSourceRefs(full.sources);
+        memories.push(full);
       }
-      throw new ApiError("memory_provider_unavailable", "Memory snapshot changed while it was being frozen");
-    });
+      const confirmed = await scanAt(root, agentId, { queueHeld: true, external: true });
+      if (confirmed.index.generation === listed.index.generation) {
+        return { memories, errors: confirmed.errors, index: confirmed.index };
+      }
+    }
+    throw new ApiError("memory_provider_unavailable", "Memory snapshot changed while it was being frozen");
+  }
+  async function snapshotMemories(agentId) {
+    return queue.enqueue(agentId, () => snapshotMemoriesHeld(agentId));
   }
   async function rebuildIndex(agentId) {
     return queue.enqueue(agentId, () => scanAt(rootSnapshot().root, agentId, { force: true, queueHeld: true }));
   }
-  const { applyOperation, applyBatch, finalizeBatch, saveMemory, getMemory, updateMemory, deleteMemory } = createMemoryOperations({
+  const {
+    applyOperation,
+    applyBatch,
+    applyMultiAgentBatch,
+    applyMultiAgentBatchHeld,
+    finalizeBatch,
+    saveMemory,
+    getMemory,
+    updateMemory,
+    deleteMemory,
+  } = createMemoryOperations({
     queue, rootSnapshot, getActiveRoot: () => activeRoot, assertAgentId, assertSlug,
     filePathFor, agentPathFor, readCanonical, scanAt, validateSourceRefs,
     atomicReplace: writeMemoryFile, syncDirectory, invalidMemoryFile,
@@ -307,10 +318,17 @@ export function createMemoryVault({ vaultPath, resolveSource, onExternalEdit = n
     epoch += 1;
     return activeRoot;
   }
+  async function withExclusiveMutation(task) {
+    return queue.withExclusive(() => task({
+      snapshotMemories: snapshotMemoriesHeld,
+      applyMultiAgentBatch: applyMultiAgentBatchHeld,
+    }));
+  }
   return {
-    applyOperation, applyBatch, finalizeBatch, listMemories, listWithDiagnostics, snapshotMemories, rebuildIndex, saveMemory,
+    applyOperation, applyBatch, applyMultiAgentBatch, finalizeBatch,
+    listMemories, listWithDiagnostics, snapshotMemories, rebuildIndex, saveMemory,
     getMemory, updateMemory, deleteMemory, inspect, reopen,
-    drain: queue.drain, withExclusive: queue.withExclusive,
+    drain: queue.drain, withExclusive: queue.withExclusive, withExclusiveMutation,
     getVaultPath: () => activeRoot,
   };
 }

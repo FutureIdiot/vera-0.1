@@ -3,6 +3,7 @@
 
 import { createHash } from "node:crypto";
 import { ApiError } from "../core/errors.js";
+import { sourceRefKey } from "./memory-format.js";
 import { calculateMemoryDerivedWeights } from "./memory-derived-weight.js";
 import { extractMemoryLinks } from "./memory-retrieval-text.js";
 import {
@@ -53,10 +54,7 @@ function validRequestId(value) {
   return typeof value === "string" && value.length >= 1 && value.length <= 128 && !/[\r\n\0]/u.test(value);
 }
 function sameSources(left = [], right = []) {
-  const key = (source) => source.kind === "message"
-    ? `message:${source.spaceId}:${source.messageId}`
-    : `manual:${source.actor}:${source.capturedAt}`;
-  return [...left].map(key).sort().join("\0") === [...right].map(key).sort().join("\0");
+  return [...left].map(sourceRefKey).sort().join("\0") === [...right].map(sourceRefKey).sort().join("\0");
 }
 function operationReached(current, operation, proposalAction) {
   if (!current) return false;

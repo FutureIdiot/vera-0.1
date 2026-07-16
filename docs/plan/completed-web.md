@@ -13,6 +13,7 @@
 
 - 已完成全屏聊天、Space导航、Space切换/新增/改名/归档/恢复、当前Space设置和响应规则。
 - Space创建与成员编辑均强制至少一个Agent seat；未选联系人时导航禁用新建，gateway拒绝缺失/空`seats`，历史空记录只保留修复路径。
+- 已归档Space可经影响预检与二次确认永久删除；默认保留Memory并把已删Message来源墓碑化，可选级联删除全部来源均属于该Space的Memory。
 - 最终导航语义：Space目录是聊天页内左侧双列抽屉；右滑与聊天顶栏左上按钮共用开关；打开期间切换Space保持展开；无pin和持久固定状态。
 - 顶栏Space名称进入当前Space设置。
 - 当前Space设置和所有全局Settings均为独立全屏页；设置路由不显示Space目录。

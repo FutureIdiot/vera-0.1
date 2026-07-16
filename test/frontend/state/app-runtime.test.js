@@ -158,6 +158,35 @@ test("space.updated keeps the shared bootstrap projection current", async () => 
   runtime.close();
 });
 
+test("space.deleted removes the Space from the shared bootstrap projection", async () => {
+  const sources = [];
+  const platform = {
+    async getGatewayUrl() { return "https://vera.test"; },
+    async fetch() {
+      return jsonResponse({
+        agents: [],
+        accounts: [],
+        spaces: [{ id: "spc_1", name: "One", archivedAt: null }],
+        agentStates: [],
+        seq: 1,
+      });
+    },
+    createEventSource(url) {
+      const source = { url, close() {} };
+      sources.push(source);
+      return source;
+    },
+  };
+  const runtime = createAppRuntime({ platform });
+  await runtime.start();
+  await flushAsyncWork();
+  sources[0].onmessage({
+    data: JSON.stringify({ seq: 2, type: "space.deleted", data: { spaceId: "spc_1" } }),
+  });
+  assert.deepEqual(runtime.getBootstrap().spaces, []);
+  runtime.close();
+});
+
 test("space-session.created advances the canonical active session pointer", async () => {
   const sources = [];
   const platform = {

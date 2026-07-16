@@ -187,7 +187,7 @@ Workspace = Account 对应的执行环境与项目工作边界；`Account 1:1 Wo
 - `seat.blockAgentIds: ["agt_…"]`（Phase 4.3，可选）：屏蔽名单——名单里 agent 的气泡不进该 agent 的群聊视角 prompt 段，等价于对它单向静默。定向 @ 仍穿透屏蔽（用户拥有最终决策权，ground truth 2.3）。
 - `notifications` `[P4.6]`：当前Space的提醒策略。`mode` 为 `all`（agent消息与Activity均提醒）/ `agentMessages`（只提醒agent消息，默认）/ `off`；`includeActivityErrors` 控制error Activity是否即使在 `agentMessages` 下也提醒。这里是gateway持久的Space策略；浏览器/系统通知权限仍由各客户端自己申请，二者不得混成一个开关。
 - `activeSpaceSessionId`：该Space唯一可写SpaceSession。创建Space时必须在同一事务创建首个active SpaceSession；任何时刻不得为空或指向archived记录。
-- `archivedAt` `[P4.6]`：`null` 表示活跃；ISO时间戳表示已归档。归档只把Space移出活跃导航并禁止新消息/新Run，Space自身、active/archived SpaceSession、时间线和provider bindings全部保留；恢复后继续使用原Space id及原active SpaceSession。Space没有永久删除接口。Space归档可恢复，SpaceSession归档不可恢复。
+- `archivedAt` `[P4.6]`：`null` 表示活跃；ISO时间戳表示已归档。归档只把Space移出活跃导航并禁止新消息/新Run，Space自身、active/archived SpaceSession、时间线和provider bindings全部保留；恢复后继续使用原Space id及原active SpaceSession。只有已归档Space可永久删除；SpaceSession归档仍不可恢复或单独删除。
 - Space Module绑定不直接塞任意脚本进Space记录。Phase 6先定义全局Extension Package与per-Space Module binding的独立集合/API，再由Space设置页读取；契约未补全前不得在 `seats` 或任意自由字段里偷放Module配置。
 
 ### SpaceSession 与 AgentSession `[P5-C1]`
@@ -408,6 +408,8 @@ Vera全局Settings中的`#/settings/accounts`只负责系统层管理：按Agent
 | PATCH | `/api/spaces/:id` | 更新 name/topic/seats/notifications（席位增删、responseMode/提醒策略调整；seats不得为空） |
 | POST | `/api/spaces/:id/archive` `[P4.6]` | 归档Space。存在未结束Run或compaction时返回409；成功写入`archivedAt`，不删除或级联清理任何SpaceSession/provider binding。重复归档幂等返回当前Space |
 | POST | `/api/spaces/:id/restore` `[P4.6]` | 恢复已归档Space：把`archivedAt`置回`null`并继续原active SpaceSession。重复恢复幂等返回当前Space |
+| GET | `/api/spaces/:id/deletion-preview` | 仅已归档Space；返回`{preview:{spaceId,messageCount,affectedMemoryCount,exclusiveMemoryCount}}`。`affectedMemoryCount`为至少一个Message来源属于该Space的Memory，`exclusiveMemoryCount`为全部sources均为该Space Message的Memory |
+| DELETE | `/api/spaces/:id` | 仅已归档Space；body严格为`{deleteExclusiveMemories:boolean}`。先按预检版本更新Memory：所有保留Memory把该Space的Message SourceRef改为`deleted-message`墓碑；选项为true时额外删除exclusive Memory。Memory全部提交成功后，删除Space及其Message/Activity/Run/Approval/SpaceSession/AgentSession/provider binding/API history/context control与compaction记录；已成功且仍承载Memory事实身份的Digest receipt作为无原文审计保留。返回`200 {deleted:{spaceId,messageCount,affectedMemoryCount,deletedMemoryCount}}`并发布`space.deleted`。active Memory job仍引用该Space或Memory版本冲突时返回409且Space保持已归档 |
 | GET | `/api/spaces/:id/timeline?before=<itemId>&limit=50` | 只返回active SpaceSession时间线。返回`{spaceSession,items:[...],runs:[...]}`；`runs`只含与本页item关联的持久Run安全投影，归档窗口不得由该端点隐式混入 |
 | POST | `/api/spaces/:id/messages` | 发消息（见下）；已归档Space返回409 `conflict`，必须先恢复 |
 | GET | `/api/spaces/:id/sessions?status=active|archived|all` `[P5-C1]` | 默认列archived SpaceSession摘要，按createdAt倒序；`active/all`显式选择。返回`{sessions}`，不含时间线正文 |
@@ -661,7 +663,7 @@ updatedAt: 2026-07-13T00:00:00.000Z
 
 - 正文为 markdown，`[[slug]]` 双链；指向尚不存在的 slug 合法（标记待写，不是错误）。
 - `schemaVersion` 当前只能为 `1`；`scope` 当前只能是 `{ type: "agent", agentId }` 且必须与目录一致，禁止 `global` / `perSpace` 兼容值。`type` 是可扩展的小写 token（允许现行 `project_rule` / `open_question` 与 kebab-case 扩展），不做固定枚举分支；`description` 必须是非空单行字符串；`status` 只允许 `active` / `archived`；`stains` 必须是 `agt_... -> #RRGGBB` 对象；权威时间戳统一为带毫秒的 UTC ISO 8601（`YYYY-MM-DDTHH:mm:ss.sssZ`）。
-- `SourceRef` 只允许 `{ kind: "message", spaceId, messageId }` 或 `{ kind: "manual", actor: "user" | "legacy", capturedAt }`。message ref 必须能在 gateway store 找到同 id Message 且 `message.spaceId === spaceId`；只保存引用，不复制 Message 正文。Activity、Run、工具过程和任意自由 `kind` 均不合法。手动 POST 不接受客户端伪造 `sources`，由 gateway 补 `{ kind:"manual", actor:"user", capturedAt:now }`。
+- `SourceRef` 只允许 `{ kind: "message", spaceId, messageId }`、`{ kind: "deleted-message", spaceId, messageId, deletedAt }`或`{ kind: "manual", actor: "user" | "legacy", capturedAt }`。message ref 必须能在 gateway store 找到同 id Message 且 `message.spaceId === spaceId`；只保存引用，不复制 Message 正文。`deleted-message`只允许由永久删除Space的gateway流程从既有message ref生成，表示原文已按用户确认删除、不可再展开，不接受HTTP/MCP/model伪造。Activity、Run、工具过程和任意自由`kind`均不合法。手动POST不接受客户端伪造`sources`，由gateway补`{kind:"manual",actor:"user",capturedAt:now}`。
 - F1 旧格式曾是合法数据，不能静默消失：仅当旧文件严格符合当时的 `type/description/status/stains/createdAt/updatedAt` 形状时，gateway 经同一 per-Agent 队列原子补齐 M1 字段，来源写为 `{ kind:"manual", actor:"legacy", capturedAt:createdAt }`，明确表示没有可追溯 Space；其他缺字段或畸形文件保持原位并进入坏文件错误，不猜测归属、不覆盖修复。
 - API 的 `version` 是最终完整文件字节的 opaque `sha256:<hex>`，不写回 frontmatter（避免 hash 自引用）；`ifMatch` 与该值比较。`updatedAt` 是展示元数据，不再承担并发版本职责。
 
@@ -847,6 +849,7 @@ data: { "seq": 1042, "type": "message.delta", "ts": "…", "data": { … } }
 | `agent.state.updated` | `{ agentState }` | per-Space AgentState 现 `agentId/spaceId/status/detail/lastActiveAt` 五字段（联邦形态精化） |
 | `account.presence.updated` | `{ accountId, presence, lastSeenAt }` | Account 所绑定 Workspace 宿主 daemon 的可执行性广播；不表示 Account 已被某 Agent 登录或独占。活跃控制权以 Execution 租约为准 |
 | `space.updated` / `agent.updated` / `account.upserted` | `{ space }` / `{ agent }` / `{ account }` | 配置变更广播；`account.upserted` 覆盖 account 创建与修改，前端按 `id` 合并联系人 |
+| `space.deleted` | `{ spaceId }` | 已归档Space永久删除且Memory与store清理全部提交后发布；客户端移除活跃与归档投影 |
 | `space-session.archived` / `space-session.created` `[P5-C1]` | `{spaceId,spaceSession}` | `/new`的存储事务完整提交后才依次广播旧窗口归档与新active窗口；事件之间不存在可写的中间状态，归档窗口不会再产生写事件 |
 | `agent-session.compaction.updated` `[P5-C1]` | `{spaceId,spaceSessionId,jobId,agentSession:{id,agentId,generation,context,status}}` | 自动或手动compact进度/结果；不含checkpoint、history或provider binding |
 | `agent-session.compact.requested` `[P5-C1/Phase 5.5 daemon-only]` | `{jobId,target:{agentId,agentSessionId,fromGeneration,mode},account,input}` | 只发给目标daemon。`mode`为`native/checkpoint_new_binding/gateway_history`；native input只含当前安全CLI binding，后两者只含gateway裁剪的compaction source与checkpoint schema。daemon以专用result端点回报，不生成聊天delta/Message |
@@ -915,8 +918,8 @@ run.ended          (completed)
 
 - **SSE 事件输入**：`space.updated`（重命名 / Seat / notifications 变更回显）；`agent.updated` / `account.upserted`（左栏联系人投影）；`account.presence.updated`（在线指示）。
 - **API 读取**：`GET /api/bootstrap`（复用 Shell 拉取的 agents/accounts/spaces；进导航页不再发额外请求，纯客户端派生左栏联系人 / 右栏 Space 列表）；`GET /api/spaces?archived=true`（展开「已归档 Spaces」分段时按需拉取已归档列表）。
-- **API 写入**：`POST /api/spaces`（新增；body 继承当前左栏选中成员集合作为 seats）；`PATCH /api/spaces/:id`（重命名 / topic / seats / notifications）；`POST /api/spaces/:id/archive`（二次确认后归档，归档成功后切换到另一活跃 Space）；`POST /api/spaces/:id/restore`（从「已归档」分段恢复）。
-- **空错态**：无 Space → 左栏联系人可点但右栏空 + 「新建 Space」CTA；左栏无选中 → 右栏显示「选一个联系人或群组」，同时禁用新建入口；归档失败（409 有未结束 Run）→ toast「有进行中的对话，等结束或取消后再归档」；新增失败 → 内联错误；归档二次确认 → 弹层 only（不替换主区）。
+- **API 写入**：`POST /api/spaces`（新增；body 继承当前左栏选中成员集合作为 seats）；`PATCH /api/spaces/:id`（重命名 / topic / seats / notifications）；`POST /api/spaces/:id/archive`（二次确认后归档，归档成功后切换到另一活跃 Space）；`POST /api/spaces/:id/restore`（从「已归档」分段恢复）；`GET /api/spaces/:id/deletion-preview`后`DELETE /api/spaces/:id`永久删除。
+- **空错态**：无 Space → 左栏联系人可点但右栏空 + 「新建 Space」CTA；左栏无选中 → 右栏显示「选一个联系人或群组」，同时禁用新建入口；归档失败（409 有未结束 Run）→ toast「有进行中的对话，等结束或取消后再归档」；新增失败 → 内联错误；归档二次确认 → 弹层 only（不替换主区）。已归档Space显示恢复与删除；删除弹层必须显示Message与Memory影响计数，并提供默认不勾选的“同时删除全部来源均属于该Space的Memory”，确认按钮明确写“永久删除”；删除失败保留归档记录并内联报错。
 
 ### 当前Space设置 `#/spaces/:spaceId/settings`
 

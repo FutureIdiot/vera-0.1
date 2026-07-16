@@ -32,6 +32,8 @@
 .vera-inline-error { color: var(--vera-color-danger); font-size: var(--vera-font-size-small); }
 .vera-dialog { background: var(--vera-color-bg); border: var(--vera-border-width) solid var(--vera-color-border); border-radius: var(--vera-control-radius); box-shadow: 0 var(--vera-space-sm) var(--vera-space-lg) var(--vera-overlay-color); display: grid; gap: var(--vera-space-md); left: 50%; max-width: calc(100% - var(--vera-space-lg) * 2); padding: var(--vera-space-lg); position: absolute; top: 50%; transform: translate(-50%, -50%); width: calc(var(--vera-touch-target) * 6); z-index: 10; }
 .vera-dialog input { background: var(--vera-color-bg); border: var(--vera-border-width) solid var(--vera-color-border); border-radius: var(--vera-control-radius); color: var(--vera-color-text); min-height: var(--vera-touch-target); min-width: 0; padding: var(--vera-space-sm); }
+.vera-dialog .vera-check input { min-height: auto; padding: 0; }
+.vera-dialog__note { color: var(--vera-color-text-muted); font-size: var(--vera-font-size-small); }
 .vera-dialog__actions { display: flex; justify-content: flex-end; }
 .vera-primary-button--danger { background: var(--vera-color-danger); }
 

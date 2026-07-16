@@ -55,5 +55,11 @@ export function createSpacesClient(http) {
     restoreSpace(spaceId) {
       return http.post(`/api/spaces/${spaceId}/restore`, {});
     },
+    getDeletionPreview(spaceId) {
+      return http.get(`/api/spaces/${spaceId}/deletion-preview`);
+    },
+    deleteSpace(spaceId, { deleteExclusiveMemories }) {
+      return http.delete(`/api/spaces/${spaceId}`, { deleteExclusiveMemories });
+    },
   };
 }

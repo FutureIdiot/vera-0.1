@@ -139,20 +139,25 @@ export function createMemoryOperations(deps) {
     return updated;
   }
 
-  async function applyBatch(agentId, operations, { onApplied, onRolledBack } = {}) {
+  function validateBatch(agentId, operations) {
     assertAgentId(agentId);
     if (!Array.isArray(operations) || operations.length === 0) throw invalid("memory batch must contain operations");
     for (const operation of operations) {
       validateOperation(operation);
       if (operation.agentId !== agentId) throw invalid("memory batch cannot cross Agent scope");
     }
-    return queue.enqueue(agentId, async () => {
-      const snapshot = rootSnapshot();
+  }
+
+  async function applyBatchesHeld(batches, { onApplied, onRolledBack } = {}) {
+    if (!Array.isArray(batches) || batches.length === 0) throw invalid("memory multi-batch must contain batches");
+    for (const batch of batches) validateBatch(batch.agentId, batch.operations);
+    const snapshot = rootSnapshot();
+    const prepared = [];
+    for (const batch of batches) {
       const before = [];
-      // Preflight every target version before the first file changes.
-      for (const operation of operations) {
+      for (const operation of batch.operations) {
         if (operation.kind === "create") { before.push(null); continue; }
-        const current = await readCanonical(snapshot.root, agentId, operation.slug, { upgradeLegacy: false });
+        const current = await readCanonical(snapshot.root, batch.agentId, operation.slug, { upgradeLegacy: false });
         if (operation.ifMatch !== current.version) {
           const conflict = new ApiError("conflict", `memory ${operation.slug} was modified`);
           conflict.details = { reason: "version_mismatch", current: { memory: current } };
@@ -160,43 +165,70 @@ export function createMemoryOperations(deps) {
         }
         before.push(current);
       }
-      await writeMemoryBatchMarker(snapshot.root, agentId);
-      const results = [];
-      const applied = [];
-      let failure = null;
-      try {
-        for (let index = 0; index < operations.length; index += 1) {
-          const result = await applyValidatedOperation(operations[index], snapshot, { scan: false });
-          results.push(result);
-          applied.push({ index, operation: operations[index], before: before[index] });
-          await onApplied?.({ index, operation: operations[index], result });
-        }
-      } catch (error) {
-        failure = error;
+      prepared.push({ ...batch, before, results: [] });
+    }
+    const markedAgents = [];
+    const applied = [];
+    let failure = null;
+    try {
+      for (const batch of prepared) {
+        await writeMemoryBatchMarker(snapshot.root, batch.agentId);
+        markedAgents.push(batch.agentId);
       }
-      if (failure) {
-        try {
-          for (const item of [...applied].reverse()) {
-            const path = filePathFor(snapshot.root, agentId, item.operation.slug);
-            if (item.operation.kind === "create") {
-              try { await unlink(path); } catch (error) { if (error.code !== "ENOENT") throw error; }
-            } else {
-              await atomicReplace(path, serializeMemoryDocument(item.before));
-            }
+      for (const batch of prepared) {
+        for (let index = 0; index < batch.operations.length; index += 1) {
+          const operation = batch.operations[index];
+          const result = await applyValidatedOperation(operation, snapshot, { scan: false });
+          batch.results.push(result);
+          applied.push({ agentId: batch.agentId, index, operation, before: batch.before[index] });
+          await onApplied?.({ agentId: batch.agentId, index, operation, result });
+        }
+      }
+      for (const agentId of [...new Set(markedAgents)]) {
+        await scanAt(snapshot.root, agentId, { force: true, queueHeld: true, allowPendingBatch: true });
+        await removeMemoryBatchMarker(snapshot.root, agentId);
+      }
+    } catch (error) {
+      failure = error;
+    }
+    if (failure) {
+      try {
+        for (const item of [...applied].reverse()) {
+          const path = filePathFor(snapshot.root, item.agentId, item.operation.slug);
+          if (item.operation.kind === "create") {
+            try { await unlink(path); } catch (error) { if (error.code !== "ENOENT") throw error; }
+          } else {
+            await atomicReplace(path, serializeMemoryDocument(item.before));
           }
+        }
+        for (const agentId of [...new Set(markedAgents)]) {
           await scanAt(snapshot.root, agentId, { force: true, queueHeld: true, allowPendingBatch: true });
           await removeMemoryBatchMarker(snapshot.root, agentId);
-          await onRolledBack?.({ operations: applied.map((item) => item.operation) });
-        } catch {
-          // Leave the durable marker in place. Ordinary reads fail closed until
-          // the owning job retries and publishes one complete generation.
         }
-        throw failure;
+        await onRolledBack?.({ operations: applied.map((item) => item.operation) });
+      } catch {
+        // Leave durable markers in place. Ordinary reads fail closed until
+        // the owning maintenance flow retries and publishes complete generations.
       }
-      await scanAt(snapshot.root, agentId, { force: true, queueHeld: true, allowPendingBatch: true });
-      await removeMemoryBatchMarker(snapshot.root, agentId);
-      return results;
+      throw failure;
+    }
+    return prepared.map(({ agentId, results }) => ({ agentId, results }));
+  }
+
+  async function applyBatch(agentId, operations, callbacks = {}) {
+    validateBatch(agentId, operations);
+    return queue.enqueue(agentId, async () => {
+      const [batch] = await applyBatchesHeld([{ agentId, operations }], callbacks);
+      return batch.results;
     });
+  }
+
+  async function applyMultiAgentBatch(batches) {
+    return queue.withExclusive(() => applyBatchesHeld(batches));
+  }
+
+  async function applyMultiAgentBatchHeld(batches) {
+    return applyBatchesHeld(batches);
   }
 
   async function finalizeBatch(agentId) {
@@ -251,5 +283,15 @@ export function createMemoryOperations(deps) {
     });
   }
 
-  return { applyOperation, applyBatch, finalizeBatch, saveMemory, getMemory, updateMemory, deleteMemory };
+  return {
+    applyOperation,
+    applyBatch,
+    applyMultiAgentBatch,
+    applyMultiAgentBatchHeld,
+    finalizeBatch,
+    saveMemory,
+    getMemory,
+    updateMemory,
+    deleteMemory,
+  };
 }

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { ApiError } from "../core/errors.js";
+import { sourceRefKey } from "./memory-format.js";
 
 const ACTIONS = new Set(["create", "update", "archive", "supersede", "skip"]);
 const PROPOSAL_KEYS = new Set([
@@ -260,9 +261,7 @@ export function validateDigestProposals({ proposals, messages, agentId, spaceId,
 export function mergeSourceRefs(current = [], additions = []) {
   const seen = new Set();
   return [...current, ...additions].filter((source) => {
-    const key = source.kind === "message"
-      ? `message:${source.spaceId}:${source.messageId}`
-      : `manual:${source.actor}:${source.capturedAt}`;
+    const key = sourceRefKey(source);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

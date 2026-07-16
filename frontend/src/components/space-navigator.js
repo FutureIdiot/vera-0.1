@@ -1,12 +1,15 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createSpacesClient } from "../api/spaces-client.js";
+import {
+  confirmNavigatorAction,
+  confirmSpaceDeletion,
+  requestNavigatorText,
+} from "./navigator-dialogs.js";
 
 function memberKey(space) {
   const ids = [...new Set((space.seats ?? []).map((seat) => seat.agentId))].sort();
   return ids.length > 1 ? `group:${ids.join(",")}` : `agent:${ids[0] ?? "none"}`;
 }
-
-let dialogSequence = 0;
 
 function memberProjection(agents, spaces) {
   const byId = new Map(agents.map((agent) => [agent.id, agent]));
@@ -42,91 +45,6 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
   spacesPanel.className = "vera-navigator__spaces";
   panel.append(contacts, spacesPanel);
 
-  function activateDialog(dialog, initialFocus, onCancel) {
-    const previousFocus = document.activeElement;
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onCancel();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = [...dialog.querySelectorAll("button, input, select, textarea, a[href]")]
-        .filter((element) => !element.disabled && !element.hidden);
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    dialog.addEventListener("keydown", onKeyDown);
-    queueMicrotask(() => initialFocus.focus());
-    return () => {
-      dialog.removeEventListener("keydown", onKeyDown);
-      if (previousFocus?.isConnected) previousFocus.focus();
-    };
-  }
-
-  function requestText(title, initialValue = "") {
-    return new Promise((resolve) => {
-      const dialog = document.createElement("form");
-      dialog.className = "vera-dialog";
-      dialog.setAttribute("role", "dialog");
-      dialog.setAttribute("aria-modal", "true");
-      const heading = document.createElement("strong");
-      heading.textContent = title;
-      heading.id = `vera-dialog-title-${++dialogSequence}`;
-      dialog.setAttribute("aria-labelledby", heading.id);
-      const input = document.createElement("input");
-      input.value = initialValue;
-      input.required = true;
-      input.setAttribute("aria-label", title);
-      const actions = document.createElement("div");
-      actions.className = "vera-dialog__actions";
-      const cancel = button("取消", "vera-text-button", () => finish(null));
-      const submit = document.createElement("button");
-      submit.type = "submit";
-      submit.className = "vera-primary-button";
-      submit.textContent = "确定";
-      actions.append(cancel, submit);
-      dialog.append(heading, input, actions);
-      panel.appendChild(dialog);
-      const deactivate = activateDialog(dialog, input, () => finish(null));
-      function finish(value) { deactivate(); dialog.remove(); resolve(value); }
-      dialog.addEventListener("submit", (event) => { event.preventDefault(); finish(input.value.trim() || null); });
-    });
-  }
-
-  function confirmAction(message) {
-    return new Promise((resolve) => {
-      const dialog = document.createElement("section");
-      dialog.className = "vera-dialog";
-      dialog.setAttribute("role", "dialog");
-      dialog.setAttribute("aria-modal", "true");
-      const text = document.createElement("p");
-      text.textContent = message;
-      text.id = `vera-dialog-description-${++dialogSequence}`;
-      dialog.setAttribute("aria-describedby", text.id);
-      const actions = document.createElement("div");
-      actions.className = "vera-dialog__actions";
-      const cancel = button("取消", "vera-text-button", () => finish(false));
-      actions.append(
-        cancel,
-        button("确认归档", "vera-primary-button vera-primary-button--danger", () => finish(true)),
-      );
-      dialog.append(text, actions);
-      panel.appendChild(dialog);
-      const deactivate = activateDialog(dialog, cancel, () => finish(false));
-      function finish(value) { deactivate(); dialog.remove(); resolve(value); }
-    });
-  }
-
   function navigate(spaceId) {
     window.location.hash = `#/spaces/${encodeURIComponent(spaceId)}`;
   }
@@ -150,7 +68,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       showError("请先选择一个联系人或群组");
       return;
     }
-    const name = await requestText("新 Space 名称");
+    const name = await requestNavigatorText(panel, "新 Space 名称");
     if (!name?.trim()) return;
     try {
       const response = await client.createSpace({
@@ -167,7 +85,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
   }
 
   async function renameSpace(space) {
-    const name = await requestText("重命名 Space", space.name);
+    const name = await requestNavigatorText(panel, "重命名 Space", space.name);
     if (!name?.trim() || name.trim() === space.name) return;
     try {
       const response = await client.updateSpace(space.id, { name: name.trim() });
@@ -180,7 +98,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
   }
 
   async function archiveSpace(space) {
-    if (!await confirmAction(`归档“${space.name}”？历史与会话状态都会保留。`)) return;
+    if (!await confirmNavigatorAction(panel, `归档“${space.name}”？历史与会话状态都会保留。`)) return;
     try {
       const response = await client.archiveSpace(space.id);
       runtime.mergeSpace(response.space);
@@ -216,6 +134,21 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       navigate(response.space.id);
     } catch (err) {
       showError(err.message);
+    }
+  }
+
+  async function deleteSpace(space) {
+    try {
+      const { preview } = await client.getDeletionPreview(space.id);
+      const choice = await confirmSpaceDeletion(panel, space, preview);
+      if (!choice) return;
+      await client.deleteSpace(space.id, choice);
+      runtime.removeSpace(space.id);
+      archived = archived.filter((item) => item.id !== space.id);
+      render();
+      if (space.id === currentSpaceId) window.location.hash = spaces[0] ? `#/spaces/${spaces[0].id}` : "#/";
+    } catch (err) {
+      showError(err.status === 409 ? "Space 仍有进行中的任务或 Memory 已变化，请稍后重试" : err.message);
     }
   }
 
@@ -255,7 +188,10 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     const open = button(space.name, "vera-space-row__open", () => navigate(space.id));
     const actions = document.createElement("div");
     actions.className = "vera-space-row__actions";
-    if (isArchived) actions.append(button("恢复", "vera-text-button", () => void restoreSpace(space)));
+    if (isArchived) actions.append(
+      button("恢复", "vera-text-button", () => void restoreSpace(space)),
+      button("删除", "vera-text-button vera-text-button--danger", () => void deleteSpace(space)),
+    );
     else actions.append(
       button("改名", "vera-text-button", () => void renameSpace(space)),
       button("归档", "vera-text-button vera-text-button--danger", () => void archiveSpace(space)),
@@ -297,6 +233,12 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       spaces = [...envelope.data.bootstrap.spaces];
       archived = null;
       if (!spaces.some((space) => memberKey(space) === selectedKey)) selectedKey = memberKey(spaces[0] ?? { seats: [] });
+      render();
+      return;
+    }
+    if (envelope.type === "space.deleted" && envelope.data?.spaceId) {
+      spaces = spaces.filter((item) => item.id !== envelope.data.spaceId);
+      if (archived) archived = archived.filter((item) => item.id !== envelope.data.spaceId);
       render();
       return;
     }

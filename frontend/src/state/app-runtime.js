@@ -51,6 +51,8 @@ export function createAppRuntime({
       bootstrap.spaces = space.archivedAt
         ? bootstrap.spaces.filter((candidate) => candidate.id !== space.id)
         : upsert(bootstrap.spaces, space);
+    } else if (envelope.type === "space.deleted" && envelope.data?.spaceId) {
+      bootstrap.spaces = bootstrap.spaces.filter((space) => space.id !== envelope.data.spaceId);
     } else if (envelope.type === "space-session.created" && envelope.data?.spaceId && envelope.data?.spaceSession?.id) {
       bootstrap.spaces = bootstrap.spaces.map((space) => space.id === envelope.data.spaceId
         ? { ...space, activeSpaceSessionId: envelope.data.spaceSession.id }
@@ -145,6 +147,11 @@ export function createAppRuntime({
     },
     mergeSpace(space) {
       const envelope = { type: "space.updated", seq: bootstrap?.seq ?? 0, data: { space } };
+      applyBootstrapEvent(envelope);
+      for (const listener of listeners) listener(envelope);
+    },
+    removeSpace(spaceId) {
+      const envelope = { type: "space.deleted", seq: bootstrap?.seq ?? 0, data: { spaceId } };
       applyBootstrapEvent(envelope);
       for (const listener of listeners) listener(envelope);
     },

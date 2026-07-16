@@ -79,4 +79,24 @@ export async function run(ctx) {
     assertEqual(space.topic, "F3 settings");
     assertEqual(space.seats[0].respondTo[0], "user");
   });
+
+  await check("p.4 archived Space preview/delete 发布 space.deleted", async () => {
+    await httpRequest("POST", `/api/spaces/${spaceId}/archive`);
+    await sse.waitFor((event) =>
+      event.type === "space.updated" &&
+      event.data.space.id === spaceId &&
+      event.data.space.archivedAt !== null);
+    const preview = await httpRequest("GET", `/api/spaces/${spaceId}/deletion-preview`);
+    assertEqual(preview.status, 200);
+    assertEqual(preview.json.preview.messageCount, 0);
+    assertEqual(preview.json.preview.exclusiveMemoryCount, 0);
+    const removed = await httpRequest("DELETE", `/api/spaces/${spaceId}`, {
+      deleteExclusiveMemories: false,
+    });
+    assertEqual(removed.status, 200);
+    assertEqual(removed.json.deleted.spaceId, spaceId);
+    await sse.waitFor((event) =>
+      event.type === "space.deleted" &&
+      event.data.spaceId === spaceId);
+  });
 }

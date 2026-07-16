@@ -20,6 +20,10 @@ import {
   startNewSpaceSession,
 } from "./context-sessions.js";
 import { getContextCompactionJob } from "./context-compaction-store.js";
+import {
+  deleteArchivedSpace,
+  getSpaceDeletionPreview,
+} from "./space-deletion.js";
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
@@ -27,7 +31,7 @@ function stripInternal({ _seq, ...rest }) {
 
 export function registerSpaceRoutes(router, {
   store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
-  contextCompaction,
+  contextCompaction, memory,
 }) {
   router.get(
     "/api/spaces",
@@ -73,6 +77,35 @@ export function registerSpaceRoutes(router, {
       const space = restoreSpace(store, params.id);
       hub.publish("space.updated", { space });
       sendJson(res, 200, { space });
+    }),
+  );
+
+  router.get(
+    "/api/spaces/:id/deletion-preview",
+    asHandler(async ({ res, params }) => {
+      if (!memory) throw new ApiError("memory_provider_unavailable", "Memory is unavailable");
+      const preview = await getSpaceDeletionPreview({ store, memory, spaceId: params.id });
+      sendJson(res, 200, { preview });
+    }),
+  );
+
+  router.delete(
+    "/api/spaces/:id",
+    asHandler(async ({ req, res, params }) => {
+      if (!memory) throw new ApiError("memory_provider_unavailable", "Memory is unavailable");
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+          Object.keys(body).length !== 1 || typeof body.deleteExclusiveMemories !== "boolean") {
+        throw new ApiError("invalid_request", "body must be exactly { deleteExclusiveMemories: boolean }");
+      }
+      const deleted = await deleteArchivedSpace({
+        store,
+        memory,
+        spaceId: params.id,
+        deleteExclusiveMemories: body.deleteExclusiveMemories,
+      });
+      hub.publish("space.deleted", { spaceId: params.id });
+      sendJson(res, 200, { deleted });
     }),
   );
 

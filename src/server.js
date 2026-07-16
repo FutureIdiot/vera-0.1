@@ -206,7 +206,7 @@ router.get("/api/events", ({ req, res }) => {
 registerAgentRoutes(router, { store, agentStates, memoryConfigService: memoryConfig });
 registerSpaceRoutes(router, {
   store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
-  contextCompaction,
+  contextCompaction, memory,
 });
 registerMemoryRoutes(router, {
   memory,

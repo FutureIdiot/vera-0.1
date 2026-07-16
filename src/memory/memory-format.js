@@ -123,14 +123,32 @@ export function validateSources(sources) {
       if (typeof source.messageId !== "string" || !source.messageId) throw invalid(`sources[${index}].messageId is required`);
       return { kind: "message", spaceId: source.spaceId, messageId: source.messageId };
     }
+    if (source?.kind === "deleted-message") {
+      assertExactKeys(source, new Set(["kind", "spaceId", "messageId", "deletedAt"]), `sources[${index}]`);
+      if (typeof source.spaceId !== "string" || !source.spaceId) throw invalid(`sources[${index}].spaceId is required`);
+      if (typeof source.messageId !== "string" || !source.messageId) throw invalid(`sources[${index}].messageId is required`);
+      assertIso(source.deletedAt, `sources[${index}].deletedAt`);
+      return {
+        kind: "deleted-message",
+        spaceId: source.spaceId,
+        messageId: source.messageId,
+        deletedAt: source.deletedAt,
+      };
+    }
     if (source?.kind === "manual") {
       assertExactKeys(source, new Set(["kind", "actor", "capturedAt"]), `sources[${index}]`);
       if (!["user", "legacy"].includes(source.actor)) throw invalid(`sources[${index}].actor must be user or legacy`);
       assertIso(source.capturedAt, `sources[${index}].capturedAt`);
       return { kind: "manual", actor: source.actor, capturedAt: source.capturedAt };
     }
-    throw invalid(`sources[${index}].kind must be message or manual`);
+    throw invalid(`sources[${index}].kind must be message, deleted-message, or manual`);
   });
+}
+
+export function sourceRefKey(source) {
+  if (source.kind === "message") return `message:${source.spaceId}:${source.messageId}`;
+  if (source.kind === "deleted-message") return `deleted-message:${source.spaceId}:${source.messageId}`;
+  return `manual:${source.actor}:${source.capturedAt}`;
 }
 
 export function validateMemoryFields(memory, { agentId }) {
@@ -168,6 +186,12 @@ export function serializeFrontmatter(memory) {
     lines.push(`  - kind: ${source.kind}`);
     if (source.kind === "message") {
       lines.push(`    spaceId: ${source.spaceId}`, `    messageId: ${source.messageId}`);
+    } else if (source.kind === "deleted-message") {
+      lines.push(
+        `    spaceId: ${source.spaceId}`,
+        `    messageId: ${source.messageId}`,
+        `    deletedAt: ${source.deletedAt}`,
+      );
     } else {
       lines.push(`    actor: ${source.actor}`, `    capturedAt: ${source.capturedAt}`);
     }
