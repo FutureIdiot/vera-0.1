@@ -6,6 +6,38 @@ export function parseRoute(hash = "") {
   if (path === "/" || path === "//") return { name: "space", spaceId: null };
   if (path === "/spaces" || path === "/spaces/") return { name: "spaces", spaceId: null };
   if (path === "/settings" || path === "/settings/") return { name: "settings" };
+
+  // Agent settings — most specific first
+  const memoryLibraryMatch = path.match(/^\/settings\/accounts\/([^/]+)\/data\/memory\/library\/?$/);
+  if (memoryLibraryMatch) {
+    try { return { name: "agent-memory-library", agentId: decodeURIComponent(memoryLibraryMatch[1]) }; }
+    catch { return { name: "not-found", path }; }
+  }
+  const memoryConfigMatch = path.match(/^\/settings\/accounts\/([^/]+)\/data\/memory\/?$/);
+  if (memoryConfigMatch) {
+    try { return { name: "agent-memory-config", agentId: decodeURIComponent(memoryConfigMatch[1]) }; }
+    catch { return { name: "not-found", path }; }
+  }
+  const dataMatch = path.match(/^\/settings\/accounts\/([^/]+)\/data\/?$/);
+  if (dataMatch) {
+    try { return { name: "agent-data", agentId: decodeURIComponent(dataMatch[1]) }; }
+    catch { return { name: "not-found", path }; }
+  }
+  const mcpMatch = path.match(/^\/settings\/accounts\/([^/]+)\/mcp\/?$/);
+  if (mcpMatch) {
+    try { return { name: "agent-mcp", agentId: decodeURIComponent(mcpMatch[1]) }; }
+    catch { return { name: "not-found", path }; }
+  }
+  const hooksMatch = path.match(/^\/settings\/accounts\/([^/]+)\/hooks\/?$/);
+  if (hooksMatch) {
+    try { return { name: "agent-hooks", agentId: decodeURIComponent(hooksMatch[1]) }; }
+    catch { return { name: "not-found", path }; }
+  }
+  const skillsMatch = path.match(/^\/settings\/accounts\/([^/]+)\/skills\/?$/);
+  if (skillsMatch) {
+    try { return { name: "agent-skills", agentId: decodeURIComponent(skillsMatch[1]) }; }
+    catch { return { name: "not-found", path }; }
+  }
   const memoryMatch = path.match(/^\/settings\/accounts\/([^/]+)\/memory\/?$/);
   if (memoryMatch) {
     try { return { name: "agent-memory", agentId: decodeURIComponent(memoryMatch[1]) }; }
@@ -16,6 +48,7 @@ export function parseRoute(hash = "") {
     try { return { name: "account-detail", agentId: decodeURIComponent(accountMatch[1]) }; }
     catch { return { name: "not-found", path }; }
   }
+
   if (path === "/settings/accounts" || path === "/settings/accounts/") return { name: "accounts" };
   if (path === "/settings/system" || path === "/settings/system/") return { name: "system-settings" };
   if (path === "/settings/appearance" || path === "/settings/appearance/") return { name: "appearance" };
@@ -66,6 +99,10 @@ export function createAppRouter({
   loadAppearanceView = () => import("../views/appearance-view.js"),
   loadPathSettingsView = () => import("../views/path-settings-view.js"),
   loadControlCenterView = () => import("../views/control-center-view.js"),
+  loadCapabilityDirectoryView = () => import("../views/capability-directory-view.js"),
+  loadAgentDataView = () => import("../views/agent-data-view.js"),
+  loadAgentMemoryConfigView = () => import("../views/agent-memory-config-view.js"),
+  loadAgentMemoryLibraryView = () => import("../views/agent-memory-library-view.js"),
 } = {}) {
   let activeCleanup = null;
   let shell = null;
@@ -111,27 +148,33 @@ export function createAppRouter({
     outlet.replaceChildren();
     shell?.setRoute(route);
 
-    let loader = null;
-    let mountName = null;
-    if (route.name === "space" || route.name === "spaces") { loader = loadSpaceView; mountName = "mountSpaceView"; }
-    else if (route.name === "space-settings") { loader = loadSpaceSettingsView; mountName = "mountSpaceSettingsView"; }
-    else if (route.name === "space-history") { loader = loadSpaceHistoryView; mountName = "mountSpaceHistoryView"; }
-    else if (route.name === "settings") { loader = loadSettingsView; mountName = "mountSettingsIndexView"; }
-    else if (route.name === "accounts") { loader = loadAccountsView; mountName = "mountAccountListView"; }
-    else if (route.name === "account-detail") { loader = loadAccountDetailView; mountName = "mountAccountDetailView"; }
-    else if (route.name === "agent-memory") { loader = loadAgentMemoryView; mountName = "mountAgentMemoryView"; }
-    else if (route.name === "system-settings") { loader = loadSystemSettingsView; mountName = "mountSystemSettingsView"; }
-    else if (route.name === "appearance") { loader = loadAppearanceView; mountName = "mountAppearanceView"; }
-    else if (route.name === "path-settings") { loader = loadPathSettingsView; mountName = "mountPathSettingsView"; }
-    else if (route.name === "control-center") { loader = loadControlCenterView; mountName = "mountControlCenterView"; }
+    const routeMap = [
+      { names: ["space", "spaces"], loader: loadSpaceView, mount: "mountSpaceView" },
+      { names: ["space-settings"], loader: loadSpaceSettingsView, mount: "mountSpaceSettingsView" },
+      { names: ["space-history"], loader: loadSpaceHistoryView, mount: "mountSpaceHistoryView" },
+      { names: ["settings"], loader: loadSettingsView, mount: "mountSettingsIndexView" },
+      { names: ["accounts"], loader: loadAccountsView, mount: "mountAccountListView" },
+      { names: ["account-detail"], loader: loadAccountDetailView, mount: "mountAccountDetailView" },
+      { names: ["agent-memory"], loader: loadAgentMemoryView, mount: "mountAgentMemoryView" },
+      { names: ["system-settings"], loader: loadSystemSettingsView, mount: "mountSystemSettingsView" },
+      { names: ["appearance"], loader: loadAppearanceView, mount: "mountAppearanceView" },
+      { names: ["path-settings"], loader: loadPathSettingsView, mount: "mountPathSettingsView" },
+      { names: ["control-center"], loader: loadControlCenterView, mount: "mountControlCenterView" },
+      { names: ["agent-skills", "agent-hooks", "agent-mcp"], loader: loadCapabilityDirectoryView, mount: "mountCapabilityDirectoryView" },
+      { names: ["agent-data"], loader: loadAgentDataView, mount: "mountAgentDataView" },
+      { names: ["agent-memory-config"], loader: loadAgentMemoryConfigView, mount: "mountAgentMemoryConfigView" },
+      { names: ["agent-memory-library"], loader: loadAgentMemoryLibraryView, mount: "mountAgentMemoryLibraryView" },
+    ];
 
-    if (loader) {
+    const entry = routeMap.find((r) => r.names.includes(route.name));
+
+    if (entry) {
       const routeRoot = windowTarget.document?.createElement?.("main") ?? document.createElement("main");
       routeRoot.className = "vera-route";
       outlet.appendChild(routeRoot);
-      const module = await loader();
+      const module = await entry.loader();
       if (currentTransition !== transition) { routeRoot.remove(); return; }
-      const cleanup = await module[mountName]({
+      const cleanup = await module[entry.mount]({
         root: routeRoot,
         platform,
         runtime,

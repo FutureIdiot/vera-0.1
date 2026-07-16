@@ -11,5 +11,8 @@ export function createAgentsClient(http) {
     listUnitBindings(agentId, kind) {
       return http.get(`/api/agents/${agentId}/unit-bindings?kind=${encodeURIComponent(kind)}`);
     },
+    updateUnitBinding(agentId, unitId, body) {
+      return http.patch(`/api/agents/${agentId}/unit-bindings/${unitId}`, body);
+    },
   };
 }

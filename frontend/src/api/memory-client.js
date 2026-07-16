@@ -8,5 +8,11 @@ export function createMemoryClient(http) {
       const query = new URLSearchParams({ ifMatch });
       return http.delete(`/api/agents/${agentId}/memory/${encodeURIComponent(slug)}?${query}`);
     },
+    getConfig(agentId) { return http.get(`/api/agents/${agentId}/memory/_config`); },
+    patchConfig(agentId, body) { return http.patch(`/api/agents/${agentId}/memory/_config`, body); },
+    getOptions(agentId) { return http.get(`/api/agents/${agentId}/memory/_options`); },
+    getStatus(agentId) { return http.get(`/api/agents/${agentId}/memory/_status`); },
+    enqueueDigest(agentId, body) { return http.post(`/api/agents/${agentId}/memory/_digest`, body); },
+    enqueueDream(agentId, body) { return http.post(`/api/agents/${agentId}/memory/_dream`, body); },
   };
 }
