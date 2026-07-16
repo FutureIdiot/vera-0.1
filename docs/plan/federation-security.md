@@ -24,8 +24,9 @@
 - [ ] Bearer token唯一解析为一个`agentId`；请求参数不得覆盖该身份。
 - [ ] 同一可信身份绑定Vera Memory MCP transport。
 - [ ] Account access key由User生成/轮换/撤销；gateway只保存salted hash/version，明文只返回一次。
-- [ ] enroll只允许Account key创建全新Agent并签发token，不得指定既有Agent；login同时验证Account key与agent token，任何一方都不能单独冒充另一方。
-- [ ] 非默认Agent登录或任一显式takeover必须提供非空reason，并进入可信delegationContext与接管审计。
+- [ ] enroll只允许`ownerAgentId:null`的Account创建唯一owner Agent并签发token；owner建立后不得再次enroll，既有Agent不得认领第二个Account。
+- [ ] login同时验证Account key与agent token，任何一方都不能单独冒充另一方；同一Agent已有其他Account会话时拒绝，必须先退出。
+- [ ] 非owner Agent登录或任一显式takeover必须提供非空reason，并进入可信delegationContext与接管审计。
 - [ ] Key泄露后的轮换撤销旧会话；日志、API、SSE和审计不泄露明文。
 
 ## Owner身份
@@ -38,7 +39,7 @@
 
 ## 验收
 
-- [ ] 同一Agent代表不同Account、或同一pair位于不同Space时，AgentState互不覆盖。
+- [ ] 同一Agent先后代表owner Account或临时代上线Account、或同一pair位于不同Space时，AgentState互不覆盖；同一Agent不得并发登录多个Account。
 - [ ] 在线/离线@行为、presence事件和lastSeenAt通过黑盒测试。
 - [ ] 无/错agent token、无/错Account key、跨Agent冒充、跨Account复用与伪造owner头全部拒绝。
 - [ ] 日志与API不泄露token、secret或宿主路径。

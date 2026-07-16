@@ -14,7 +14,7 @@
   为94/94、`npm run analyze:web`与`git diff --check`通过；后端
   `node --check`已在F1实现验收中通过，本次冻结提交不含后端代码变更。
 - Phase 5下一阶段唯一指向`federation-account.md`。2026-07-17已在Phase 5.5
-  契约中把早先Home Account方案替换为Account-first接入；本Phase 5冻结的per-Agent
+  契约中把早先Home Account方案替换为Account固定owner、代上线临时授权；本Phase 5冻结的per-Agent
   Memory、Files与上下文实现不因此改写。
 
 ## P5-F1：Files
@@ -52,7 +52,7 @@
 ## P5-D0：契约冻结
 
 - 已冻结per-Agent Memory、slug不可普通改名和gateway单写者；当时记录的Home Account
-  执行路由已由后续Phase 5.5 Account-first契约取代，不属于Phase 5实现事实。
+  执行路由已由后续Phase 5.5 Account固定owner契约取代，不属于Phase 5实现事实。
 - 默认Provider为`vera.markdown`；Obsidian兼容是该Provider特性，不是所有Provider的强制格式。
 - 第一方Vera Memory MCP是统一Agent访问facade；自定义Provider运行时仍未实现。
 

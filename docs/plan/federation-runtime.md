@@ -34,7 +34,7 @@
 
 ## Mock与验证
 
-- [ ] 增加mock daemon：覆盖enroll、默认Agent login、其他Agent takeover、CLI run→binding CAS→completed。
+- [ ] 增加mock daemon：覆盖owner Agent login、其他Agent临时代上线/takeover、CLI run→binding CAS→completed。
 - [ ] 覆盖API bounded messages→api-result CAS→completed，并证明完整history只在gateway。
 - [ ] 覆盖compact、history conflict、isolated subagent、按Account logout、Key轮换和租约释放。
 - [ ] gateway内部一致性测试保留现有mock adapter。

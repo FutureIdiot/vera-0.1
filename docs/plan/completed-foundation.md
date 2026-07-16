@@ -28,4 +28,4 @@
 - Speaker view只注入Message，不注入Activity；他人消息以署名声告进入volatile输入，不伪装成目标Agent的assistant历史。
 - seat已支持`responseMode/respondTo/blockAgentIds`。
 - `GET/PATCH /api/settings`、运行时override和配置consumer基础已完成。
-- Phase 4当时实现的`Agent 1:N Account`与`owningAgentId`现为待迁移历史形态，不是当前产品语义；迁移任务见 `federation-account.md`。
+- Phase 4当时实现的`Agent 1:N Account`与可变连接Account现为待迁移历史形态；Phase 5.5将`owningAgentId`一次迁为严格1:1、不可普通改绑的`ownerAgentId`，迁移任务见 `federation-account.md`。

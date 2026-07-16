@@ -17,7 +17,7 @@
 
 ## 当前依赖顺序
 
-1. [ ] [Account-first身份、Execution与Workspace迁移](federation-account.md)
+1. [ ] [Account固定归属、Execution与Workspace迁移](federation-account.md)
 2. [ ] [联邦状态、身份与权限](federation-security.md)
 3. [ ] [Agent daemon 与跨进程运行链路](federation-runtime.md)
 4. [ ] [VPS 私网部署与旧链路清理](federation-deployment.md)
@@ -35,7 +35,7 @@
 | [`memory-ui.md`](memory-ui.md) | Data → Memory完成记录入口；当前无未完成事项 |
 | [`files.md`](files.md) | Files完成记录入口；当前无未完成事项 |
 | [`phase-5-closeout.md`](phase-5-closeout.md) | Phase 5冻结记录入口；当前无未完成事项 |
-| [`federation-account.md`](federation-account.md) | Account-first身份、Space Seat、Execution、Workspace与消息展示迁移 |
+| [`federation-account.md`](federation-account.md) | Account固定owner、Space Seat、Execution、Workspace与消息展示迁移 |
 | [`federation-security.md`](federation-security.md) | AgentState、Account presence、Agent token、Account Key与owner identity |
 | [`federation-runtime.md`](federation-runtime.md) | `/api/agent/*`、调度器、daemon、mock daemon |
 | [`federation-deployment.md`](federation-deployment.md) | VPS、Tailscale Serve、数据迁移、本机清理与真实模型复验 |

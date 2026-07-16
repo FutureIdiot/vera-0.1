@@ -29,7 +29,7 @@ Vera是单用户、自部署的多agent协作空间。
 #### 2.1.1 SpaceSession、AgentSession 与上下文
 
 - **Space是房间，SpaceSession是房间内的一段对话窗口**。每个Space始终恰有一个`active` SpaceSession，并可有零到多个`archived` SpaceSession；私聊与群聊遵守同一规则。SpaceSession归档后永久只读，不恢复、不追加Message、不再创建Run；它与可恢复的Space归档是两种不同操作。
-- **AgentSession是某个实际Agent代表某个Account在某个SpaceSession中的主聊天模型上下文**。唯一键为`(spaceSessionId, accountId, agentId)`；同一Account发生代上线时，新Agent必须建立自己的AgentSession，绝不resume默认Agent的供应商history、CLI thread或API模型上下文。subagent Execution仍是Run级隔离任务，其Run的`agentSessionId/contextGeneration`为`null`。
+- **AgentSession是某个实际Agent代表某个Account在某个SpaceSession中的主聊天模型上下文**。唯一键为`(spaceSessionId, accountId, agentId)`；同一Account发生代上线时，非owner Agent必须建立自己的AgentSession，绝不resume owner Agent的供应商history、CLI thread或API模型上下文。subagent Execution仍是Run级隔离任务，其Run的`agentSessionId/contextGeneration`为`null`。
 - AgentSession由Vera持有逻辑真值，至少包括`generation`、上下文检查点、最近完整轮次、容量估算与provider binding元数据。Account只提供本次主Execution使用的Space/Workspace/项目数据授权，provider连接与runtime来自实际Agent；CLI的thread/resume id只是某一AgentSession generation的外部绑定，API Agent的规范history/checkpoint由Vera保存并提供，不能把opaque provider state当成API会话真值。
 - **自动压缩与`/compact`只换上下文代次，不新建SpaceSession**。成功压缩令目标AgentSession的`generation + 1`，以稳定身份/规则、上代checkpoint和最近完整轮次建立新窗口；旧provider binding与Recall交付状态只读冻结，新generation首次Run重新注入常驻Memory索引并建立新的Recall sidecar。压缩不创建Message、不进入Digest/Dream、不生成或修改长期Memory。
 - 自动压缩按各AgentSession自己的容量独立触发；群聊中一个Agent到达水位不连带压缩其他Agent。默认容量水位为warning 70%、auto-compact 80%、hard 95%，三者可按已验证provider/model profile配置且必须严格递增。达到auto水位在安全点异步压缩；下一Run前已达hard水位必须先压缩，失败则明确`context_capacity`，不得丢当前消息或依赖provider静默截断。真实provider usage优先，其次使用已验证tokenizer，只有保守估算时必须标`estimate`。
@@ -38,31 +38,33 @@ Vera是单用户、自部署的多agent协作空间。
 
 ### 2.2 Account、Agent 与 Execution（2026-07-17重冻结）
 
-**Account（账户）**：Space中的持久对外身份 + Space/项目数据与Workspace权限边界。用户先创建Account，再生成接入凭据让Agent上线。
+**Account（账户）**：某个固定owner Agent在Space中的持久对外身份 + Space/项目数据与Workspace权限边界。除首次接入前的短暂待绑定状态外，Account与owner Agent严格1:1；其他Agent只能临时代上线，不能取得所有权。
 
 | 字段 | 说明 |
 |------|------|
 | 命名 | Space中展示的账号名；历史Message冻结发送时名称快照 |
 | Space与项目数据 | Seat、Workspace、Files可见性及项目资料随Account，不随代上线Agent |
-| 默认Agent | `defaultAgentId`；首次成功接入时建立，之后只有User可显式修改 |
+| 所属Agent | `ownerAgentId`；首次成功接入时建立，之后不可普通修改，且一个Agent只能拥有一个Account |
 | 接入Key | `accessKeyState`为`active/revoked`，version单调递增；User生成、轮换、撤销，明文只返回一次，gateway只保存不可逆校验值 |
-| 当前上线者 | `activeAgentId`是登录会话/租约派生状态，不是持久所有权 |
+| 当前上线者 | `activeAgentId`是登录会话/租约派生状态；可等于owner，也可为临时代上线Agent，不改变`ownerAgentId` |
 
 **Agent**：实际执行者 = 稳定Agent身份 + 私有Memory + 自己的provider/runtime/model能力。
 
 | 字段 | 说明 |
 |------|------|
 | 命名 | 实际Agent身份，例如Codex；用于审计和Agent使用管理，不替代Account对外名称 |
-| Memory | 始终按`agentId`私有；登录其他Account不读取、继承或复制其默认Agent的Memory |
+| Memory | 始终按`agentId`私有；临时代上线其他Agent的Account时，不读取、继承或复制owner Agent的Memory |
 | provider/runtime/model | 属于Agent daemon的真实执行能力；Account不再保存或决定模型 |
 | 能力与Data设置 | Skills / Hooks / MCP / Data四个平级目录继续属于Agent |
 
 **Execution（执行）**：一次实际运行的绑定关系。每个Execution创建时固定`agentId + accountId + runtimeRevision + effectiveModel + delegated`；Agent贡献自己的Memory与模型能力，Account贡献Space、Workspace、Files和项目数据。
 
 **说明：**
-- 创建入口固定为Account；不得要求User先创建空Agent再补连接。Agent在首次接入时登记，Account的第一个成功接入Agent成为默认Agent。
+- 创建入口固定为Account；不得要求User先创建空Agent再补连接。新Account首次且仅首次`enroll`时原子创建owner Agent并写入`ownerAgentId`；该绑定建立后不可再用此Account创建第二个Agent。
+- Account与owner Agent严格1:1：一个Account只有一个`ownerAgentId`，一个Agent也只能被一个Account引用为owner。owner关系不是“默认选择”，不提供普通改绑或多Account经营入口。
 - 协议必须分别证明“实际Agent身份”和“Account访问权”：agent token绑定`agentId`，Account access key绑定`accountId`。前端可把首次接入包装为一份接入凭据，但gateway不得用同一个共享Key冒充Agent身份，否则无法隔离Memory或识别代上线。
-- User把Account Key交给另一个已登记Agent时，该Agent以自己的agent token代表同一Account上线；交给尚未登记的runtime时，只能先经`enroll`创建新的`agentId/agent token/Memory`再登录。两种情况都不改变`defaultAgentId`，新上线者必须明确收到切换原因、当前Account身份及其Space/项目上下文。
+- User把Account Key临时交给另一个**已登记且拥有自己Account**的Agent时，该Agent以自己的agent token代表目标Account代上线；未登记runtime不能用别人的Account Key创建第二个Agent，必须先为自己创建Account并完成owner登记。代上线始终不改变目标Account的`ownerAgentId`，新上线者必须明确收到切换原因、当前Account身份及其Space/项目上下文。
+- 一个Agent同一时刻只能维持一个Account登录会话。开始代上线前必须先退出自己的owner Account或上一个代上线Account；不得让同一Agent长期或并发驾驶多个Account。
 - **每个Account同一时刻只允许一个活跃登录/Execution租约**。显式接管必须先取消或终态化旧Account在飞Execution、撤销旧会话，再原子切换`activeAgentId`；普通竞争请求返回`account_busy`。
 - `effectiveModel`必须是本次Execution实际使用的可展示模型名，由Agent runtime在Run创建前解析并冻结；不得为空、写成`default`或回退显示Account名/provider名。
 - Memory始终按`agentId`隔离；Workspace、Space成员关系与项目数据按`accountId`隔离；AgentSession按`spaceSessionId + accountId + agentId`建模。
@@ -72,7 +74,7 @@ Vera是单用户、自部署的多agent协作空间。
 - CLI供应商示例：Claude Code、Codex、OpenCode等；调用路径示例：build路径、`opencode go`
 - API/CLI provider连接都由Agent runtime承载。当前Phase 5进程内实现仍暂借Account字段承载Ollama/Codex连接，这是Phase 5.5必须一次迁移并删除的旧形态，不是目标契约。
 - adapter按provider协议与运行生命周期划分，不按Agent、Account、endpoint或模型划分；同一Ollama adapter可服务多个Agent runtime和模型。新增adapter先遵守`adapter-interface.md` 1.2的行为与三层验收规范，server保持显式import和普通provider map，不引入基类、动态注册表或无第二真实用例的兼容抽象。
-- 命名纪律：Agent、Account、Execution、Workspace各占一名，不得互作别名。Phase 4的`Agent 1:N Account`与2026-07-13的Home Account方案均为待迁移历史形态。
+- 命名纪律：Agent、Account、Execution、Workspace各占一名，不得互作别名。Phase 4的`Agent 1:N Account`、可变`defaultAgentId`与独立Account池均为待迁移历史形态。
 
 ### 2.3 消息
 
@@ -89,8 +91,8 @@ Vera是单用户、自部署的多agent协作空间。
 - 规则是per-account per-Space的，不影响代上线Agent在其他Account或Space的行为
 - Agent获得用户授权后可发起对其他agent的调度
 - 用户拥有最终决策权
-- **群聊的发言归属**（2026-07-17按Account-first修订）：实际Agent的provider会话里，只有它当前代表Account生成的输出是assistant角色；用户和其他Account的发言注入时必须带Account署名、以对方发言的形式呈现，不得用assistant角色转达，否则模型重放历史会把全群发言当成自己说的。触发某`accountId + agentId`组合时，把该组合上次发言之后错过的其他参与者Message一并转达。
-- **发言与过程的边界**（2026-07-17按Account-first修订）：Message（气泡）是Account对外发言，是实际Agent在Space内唯一能被其他成员看见的输出，经编译层以Account署名注入其他实际Agent的下次prompt；Activity（思考链/工具链）只服务于同期观察的User，**不进任何Agent的下次prompt**——包括执行者本人。API Agent的必要tool call/result由gateway写入对应AgentSession规范history；CLI工具历史由该generation的外部provider binding持有，gateway不把Activity二次注入。其他Agent想要细节只能靠Phase 5的`fetch_detail`/`fetch_more`主动调阅，按需、带预算，不是默认注入。这是“时间线对User全展开、prompt层只看气泡”的产品语义边界。
+- **群聊的发言归属**（2026-07-17按Account固定归属修订）：实际Agent的provider会话里，只有它当前代表Account生成的输出是assistant角色；用户和其他Account的发言注入时必须带Account署名、以对方发言的形式呈现，不得用assistant角色转达，否则模型重放历史会把全群发言当成自己说的。触发某`accountId + agentId`组合时，把该组合上次发言之后错过的其他参与者Message一并转达。
+- **发言与过程的边界**（2026-07-17按Account固定归属修订）：Message（气泡）是Account对外发言，是实际Agent在Space内唯一能被其他成员看见的输出，经编译层以Account署名注入其他实际Agent的下次prompt；Activity（思考链/工具链）只服务于同期观察的User，**不进任何Agent的下次prompt**——包括执行者本人。API Agent的必要tool call/result由gateway写入对应AgentSession规范history；CLI工具历史由该generation的外部provider binding持有，gateway不把Activity二次注入。其他Agent想要细节只能靠Phase 5的`fetch_detail`/`fetch_more`主动调阅，按需、带预算，不是默认注入。这是“时间线对User全展开、prompt层只看气泡”的产品语义边界。
 - **群聊视角的注入形态**（2026-07-04补，2026-07-15按API history修订）：其他Account成员的气泡以"群内最近发言"这一明确声告段进入本轮volatile输入，不伪装成当前实际Agent自己说过的话。编译层在当前`accountId + agentId`组合上次发言之后到当前触发之间派生这段delta，无独立投递水位。CLI与API共享同一语义编译结果，但wire分型：CLI只收`promptText + providerBinding?`，API只收`messages + historyVersion`。API规范history按每个main Run原子保存一对turn：输入侧只保留当前trigger Message的带来源署名信封，输出侧保留当前实际Agent代表Account生成的回复及provider确需的安全tool transcript；累计群聊声告、常驻Memory块和Recall投影不写入稳定turn。这样由其他Account发言触发的回复也有明确前因，不产生孤立assistant轮次。CLI provider thread可能按供应商能力保留已投递文本，但gateway不把它冒充API规范history；compact后两者都只继承checkpoint与最近完整轮次。
 - **响应规则的统一语义**（2026-07-17修订）：silent / focused / 屏蔽某Account，本质都是过滤进入当前`accountId + executingAgentId`群聊视角prompt段的事件流。`silent`靠`respondTo`，屏蔽靠seat上的`blockAccountIds`；定向@仍穿透。
 
@@ -102,7 +104,7 @@ Vera是单用户、自部署的多agent协作空间。
 
 1. **Gateway 搬 VPS**。Vera 中枢不在本机，根治“本机 sleeps / 切网就让 Vera 整体失联”；Cloudflare Tunnel 与公网反向代理都不再是运行链路依赖。
 2. **Agent 只监听、被动响应**：agent daemon SSE 订阅 gateway，gateway 的反馈即 prompt——没有 prompt agent 不动。CLI 进程由 daemon 在 agent 那一侧自己 spawn 并保活，gateway 不知道也不关心 CLI 在哪。
-3. **离线Account被 @ 直接跳过**：发一条 `phase:"error"` 的 Activity 进时间线作离线提示（不发明新 itemType），前端Account详情可看`presence=offline`与默认Agent。该Account下次上线不补发漏过的@（无副作用历史）。
+3. **离线Account被 @ 直接跳过**：发一条 `phase:"error"` 的 Activity 进时间线作离线提示（不发明新 itemType），前端Account详情可看`presence=offline`与所属Agent。该Account下次上线不补发漏过的@（无副作用历史）。
 4. **多 agent 同时改代码的仓库冲突由工作流约定**：Vera不做文件级或Git级锁。用户指派一个agent负责分配任务 + 验收 + commit；GitHub用一个vera机器账号，issue描述/label标指派对象（`@agent-X` + label `agent=x`），agent自己`gh issue/PR/commit`。这不取消Account的单活跃Execution租约：前者防代码协作踩文件，后者防同一Account的CLI provider binding与Workspace被并发驾驶。
 
 **纯私网网络边界**：
@@ -119,10 +121,10 @@ Vera是单用户、自部署的多agent协作空间。
 
 | 字段 | 说明 |
 |------|------|
-| defaultAgentId | 首次接入后确定的默认Agent；代上线不自动改它 |
+| ownerAgentId | 首次接入后永久确定的所属Agent；与Account严格1:1，代上线不改它 |
 | presence | `online` / `offline`，当前是否有Agent代表该Account在线 |
 | lastSeenAt | 上次心跳或 SSE 收到时刻 |
-| activeAgentId | 当前Account登录会话派生值；离线为null，不作为持久所有权 |
+| activeAgentId | 当前Account登录会话派生值；离线为null，可暂时指向非owner Agent，但不改变所有权 |
 | accessKeyState / accessKeyVersion / accessKeyHash | 公开状态为`active/revoked`，version单调递增；hash仅active时存在，明文不落store |
 | 会话归属 | Vera持有SpaceSession及`(spaceSessionId,accountId,agentId)`AgentSession；不同Agent代表同一Account时不共享provider binding/history |
 | workspace | gateway持久化该Account唯一Workspace的宿主标识、绑定、策略、状态与校验时间；实际文件只在daemon宿主 |
@@ -156,7 +158,7 @@ Vera是单用户、自部署的多agent协作空间。
 
 **AgentState 改为 per-Agent + Account + Space**（联邦形态必需的精化）：
 
-- 同一Agent同时代表多个Account或在多个Space有Run时，每个`agentId + accountId + spaceId`组合的状态独立；Space按Account seat取数，Agent详情可按实际Agent聚合。
+- 同一Agent先后代表owner Account或某个临时代上线Account，以及在多个Space有Run时，每个`agentId + accountId + spaceId`组合的状态独立；同一Agent不得同时维持多个Account会话。Space按Account seat取数，Agent详情可按实际Agent聚合。
 - AgentState 形状：`{ agentId, accountId, spaceId, status, detail, lastActiveAt }`，扩展态枚举：`idle` / `thinking` / `typing` / `reading` / `coding` / `reviewing` / `on_task` / `away`。
 - 状态由 agent daemon 自己声明（它最清楚 opencode 此刻在 think / tool / final typing），gateway 不猜，agent 说啥显示啥。
 - Account.presence 与 AgentState 正交：presence 表示哪个Agent当前代表Account在线，AgentState 表示这个Agent + Account pair在某Space内的细颗粒工作相。
@@ -178,7 +180,7 @@ Vera是单用户、自部署的多agent协作空间。
 对话记录、长期记忆。Agent的认知层。
 
 - 默认：Space内原始对话记录隔离
-- 长期Memory按`agentId`私有，跨该Agent代表的不同Account/Space Execution连续可用，不随Account复制或切换
+- 长期Memory按`agentId`私有，跨该Agent自己的Account及临时代上线Execution连续可用，不随Account复制或切换
 - 不存在所有Agent隐式共享的长期Memory池；未来若需要共享，必须新增显式scope、授权与来源契约后才能实现
 - 每个Agent恰好绑定一个`active Memory Provider`，该Provider是该Agent长期Memory的唯一事实来源。默认Provider是`vera.markdown`：gateway托管的per-Agent Markdown vault，兼容Obsidian；Obsidian兼容是默认Provider的特性，不是Memory抽象的强制格式
 - owner可以选择已安装且显式声明`memory-provider`能力、通过Vera Provider契约校验的自定义Provider。自定义Provider可以继续使用自己的文件、数据库或远程原生存储，**不要求导入、复制或转换为Markdown**；切换Provider不自动迁移旧Provider数据，未选中的Provider数据保持原位但不参与当前检索、写入或Dream
@@ -302,8 +304,8 @@ Account的项目与执行数据边界。
 
 **消息呈现**（2026-07-03补）
 - 气泡切分规则：段落边界模式、单气泡长度上限
-- Account发言固定展示`Account名 · 实际模型名`。Account名使用普通身份样式；当发送时`executingAgentId !== defaultAgentId`，只把模型名改用统一“代上线”语义颜色，不增加代理文字标签。该颜色必须由`styles/tokens.css`中的CSS变量提供，不得在消息组件硬编码。
-- Message必须冻结`accountNameSnapshot/executingAgentId/effectiveModel/delegated`，以后改Account名、默认Agent或模型不得改写历史展示。
+- Account发言固定展示`Account名 · 实际模型名`。Account名使用普通身份样式；当发送时`executingAgentId !== ownerAgentId`，只把模型名改用统一“代上线”语义颜色，不增加代理文字标签。该颜色必须由`styles/tokens.css`中的CSS变量提供，不得在消息组件硬编码。
+- Message必须冻结`accountNameSnapshot/executingAgentId/effectiveModel/delegated`，以后改Account名、接管状态或模型不得改写历史展示。
 
 **消息响应规则**
 - per-account per-Space：默认 / 静默 / 专注
@@ -316,7 +318,7 @@ Account的项目与执行数据边界。
 **Agent使用管理**
 - Agent像素形象、当前状态与当前代表的Account/Space会话属于Agent使用层；像素形象现阶段是现有Agent视觉身份的展示，不因此新增第二套Avatar/Contact持久对象
 - Agent使用管理固定提供Skills / Hooks / MCP / Data四个平级目录，Memory位于Data之下
-- Account详情中的默认/当前Agent与聊天消息的模型名可进入对应Agent使用页；Account头像/名称始终进入Account详情，不把代上线Agent伪装成Space联系人
+- Account详情中的所属/当前Agent与聊天消息的模型名可进入对应Agent使用页；Account头像/名称始终进入Account详情，不把代上线Agent伪装成Space联系人
 
 **Space设置**
 - 在场Account列表
