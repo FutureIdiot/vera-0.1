@@ -1,7 +1,20 @@
 # 已完成：Phase 5 Memory与上下文
 
-本文只记录已经落地的能力和验收边界。Phase 5最终环境闸门见
-`phase-5-closeout.md`。
+本文只记录已经落地的能力和验收边界。Phase 5已于2026-07-17冻结。
+
+## P5-X1：Phase 5冻结
+
+- 用户已完成手机与桌面真实浏览器验收，覆盖Agent使用管理四目录、
+  Data → Memory与Library，以及Files页面、composer附件入口和消息附件显示。
+- 已安装并真实调用精确模型`qwen3-embedding:0.6b`；Ollama返回的完整model
+  digest为
+  `ac6da0dfba84a81fdbfbaf330198c33cd77c4cdfc53e8bc50eb581914a15621d`，
+  维度1024，真实smoke 3/3通过。
+- X1完成后最终回归再次通过：`npm test`退出码为0、`node scripts/verify.mjs`
+  为94/94、`npm run analyze:web`与`git diff --check`通过；后端
+  `node --check`已在F1实现验收中通过，本次冻结提交不含后端代码变更。
+- Phase 5下一阶段唯一指向`federation-account.md`，即Phase 5.5的
+  Home Account / Execution / Workspace迁移；本冻结不包含VPS迁移或原生工程生成。
 
 ## P5-F1：Files
 
@@ -18,7 +31,7 @@
 - 固定`PORT=3210`临时gateway手测中，curl逐帧收到`space.updated` seq 1与
   `file.created` seq 2；公开事件不含hash、storage name或宿主路径。
 
-## P5-X1：已完成的自动化收口切片
+## P5-X1：自动化收口证据
 
 - `isolation.memory`固定隔离与`isolation.files`三策略已由真实consumer和黑盒覆盖；
   AgentState/Account bootstrap既有形状回归通过，没有提前实现联邦per-Space状态。
@@ -32,8 +45,8 @@
 - 2026-07-17自动化基线：`npm test`为285项、282通过、3项显式真实provider
   smoke跳过；`verify.mjs`为94/94；Web分析、后端`node --check`与
   `git diff --check`通过。
-- 本切片不代表Phase 5已经冻结；真实浏览器与真实
-  `qwen3-embedding:0.6b`环境闸门仍见`phase-5-closeout.md`。
+- 上述自动化证据与本文件开头的真实浏览器、真实embedding闸门共同构成Phase 5
+  冻结依据。
 
 ## P5-D0：契约冻结
 
@@ -74,7 +87,8 @@
 - 已接入loopback Ollama `qwen3-embedding:0.6b`、1024维与完整model digest。
 - embedding sidecar可重建、可增量更新；失败时公开`degradedChannels:["vector"]`并fail open到keyword + graph。
 - 代表节点与全部`mergedSlugs`共同写入当前generation delivered集合。
-- 2026-07-16单测为267通过；真实embedding smoke提供显式开关，但当时未自动下载模型或冒充已运行。
+- 2026-07-17已安装并运行精确`qwen3-embedding:0.6b`真实smoke；完整model
+  digest见本文件P5-X1冻结章节。
 
 ## P5-M4后端：Provider、权重与Dream
 
@@ -84,4 +98,5 @@
 - Dream只允许语义不变的结构/description/links更新、明确重复merge和带active replacement的冗余archive；无Message证据时不得纠正事实。
 - 已完成Dream持久job、批量单写者、receipt恢复和IANA schedule。
 - 2026-07-15后端验收：`npm test` 236通过、`verify.mjs` 79/79；后续语义收口已并入M3.1的267项单测。
-- Data → Memory真实页面不属于本完成记录，见 `memory-ui.md`。
+- Data → Memory真实页面与Library已实现，并于2026-07-17由用户完成手机与桌面
+  浏览器验收。

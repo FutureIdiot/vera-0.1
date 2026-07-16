@@ -17,17 +17,14 @@
 
 ## 当前依赖顺序
 
-1. [~] [Agent使用管理、目录壳与内置Hooks/MCP接线（阶段A–B浏览器闸门）](runtime-capabilities.md)
-2. [~] [Data → Memory 页面浏览器闸门](memory-ui.md)
-3. [~] [Phase 5 收口：真实embedding与最终冻结](phase-5-closeout.md)
-4. [ ] [Home Account / Execution / Workspace 迁移](federation-account.md)
-5. [ ] [联邦状态、身份与权限](federation-security.md)
-6. [ ] [Agent daemon 与跨进程运行链路](federation-runtime.md)
-7. [ ] [VPS 私网部署与旧链路清理](federation-deployment.md)
-8. [ ] [原生客户端](native-clients.md)
-9. [ ] [运行时能力真实闭环（阶段C）](runtime-capabilities.md)
-10. [ ] [Extension 体系](extensions.md)
-11. [ ] [原生发布与三端回归](native-release.md)
+1. [ ] [Home Account / Execution / Workspace 迁移](federation-account.md)
+2. [ ] [联邦状态、身份与权限](federation-security.md)
+3. [ ] [Agent daemon 与跨进程运行链路](federation-runtime.md)
+4. [ ] [VPS 私网部署与旧链路清理](federation-deployment.md)
+5. [ ] [原生客户端](native-clients.md)
+6. [ ] [运行时能力真实闭环（阶段C）](runtime-capabilities.md)
+7. [ ] [Extension 体系](extensions.md)
+8. [ ] [原生发布与三端回归](native-release.md)
 
 不得从前项未完成处跳过依赖直接生成原生工程。某一文件内部若有更细依赖，以该文件为准。
 
@@ -35,9 +32,9 @@
 
 | 文件 | 唯一职责 |
 |---|---|
-| [`memory-ui.md`](memory-ui.md) | Data → Memory 状态与配置页面 |
+| [`memory-ui.md`](memory-ui.md) | Data → Memory完成记录入口；当前无未完成事项 |
 | [`files.md`](files.md) | Files完成记录入口；当前无未完成事项 |
-| [`phase-5-closeout.md`](phase-5-closeout.md) | Memory / Files 端到端验收与 Phase 5 冻结 |
+| [`phase-5-closeout.md`](phase-5-closeout.md) | Phase 5冻结记录入口；当前无未完成事项 |
 | [`federation-account.md`](federation-account.md) | Home Account、Execution、Workspace与租约迁移 |
 | [`federation-security.md`](federation-security.md) | AgentState、presence、agent token、owner identity |
 | [`federation-runtime.md`](federation-runtime.md) | `/api/agent/*`、调度器、daemon、mock daemon |
@@ -53,7 +50,7 @@
 |---|---|
 | [`completed-foundation.md`](completed-foundation.md) | Phase 0–4 的基础、消息、配置与历史网络切片 |
 | [`completed-web.md`](completed-web.md) | F0–F5 Web共享核心、最终Shell语义与验收 |
-| [`completed-memory.md`](completed-memory.md) | P5-D0、M1、M1.5、M2、M3、C1、M3.1、M4后端、F1与X1自动化验收切片 |
+| [`completed-memory.md`](completed-memory.md) | 已冻结的完整Phase 5：Memory、上下文、Data UI、Files与X1验收 |
 
 ## 0.0.1 明确不做
 
