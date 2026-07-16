@@ -100,9 +100,10 @@ export async function run(ctx) {
       assertEqual(reply?.content, "CODEX_CHAT_OK");
 
       const queued = await verifiedRequest("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, mode: "range",
+        spaceId: space.id, spaceSessionId: posted.json.message.spaceSessionId, mode: "range",
         fromMessageId: posted.json.message.id, toMessageId: posted.json.message.id,
       });
+      assertEqual(queued.status, 202, JSON.stringify(queued.json));
       const job = await waitForJob(verifiedRequest, agent.id, queued.json.job.id, sleep, 5000);
       assertEqual(job.status, "succeeded");
       const memories = await verifiedRequest("GET", `/api/agents/${agent.id}/memory`);
@@ -110,8 +111,15 @@ export async function run(ctx) {
       assertEqual(memories.json.memories[0].sourceCount, 1);
 
       await sleep(300);
-      const states = JSON.parse(await readFile(join(dir, "data", "session-states.json"), "utf8"));
-      assertEqual(states[`${account.id}:${space.id}`].threadId, "thr_fake_1");
+      const bindings = JSON.parse(await readFile(join(dir, "data", "providerBindings.json"), "utf8"));
+      const run = posted.json.runs.find((item) => item.agentId === agent.id);
+      assert(run, "Codex chat must expose its AgentSession generation");
+      const binding = bindings.find((item) =>
+        item.agentSessionId === run.agentSessionId &&
+        item.generation === run.contextGeneration &&
+        item.accountId === account.id);
+      assert(binding, "Codex chat must persist a generation-scoped provider binding");
+      assertEqual(binding.providerState.threadId, "thr_fake_1");
       const calls = await fake.readInvocations();
       assertEqual(calls.length, 2);
       assert(calls[1].args.includes("--output-schema"), "digest must pass --output-schema");
@@ -128,9 +136,10 @@ export async function run(ctx) {
         author: { type: "user" }, target: { type: "broadcast" }, content: "Do not execute OpenCode digest.",
       });
       const openQueued = await verifiedRequest("POST", `/api/agents/${openCode.json.agent.id}/memory/_digest`, {
-        spaceId: openSpace.json.space.id, mode: "range",
+        spaceId: openSpace.json.space.id, spaceSessionId: openMessage.json.message.spaceSessionId, mode: "range",
         fromMessageId: openMessage.json.message.id, toMessageId: openMessage.json.message.id,
       });
+      assertEqual(openQueued.status, 202, JSON.stringify(openQueued.json));
       const openJob = await waitForJob(verifiedRequest, openCode.json.agent.id, openQueued.json.job.id, sleep, 5000);
       assertEqual(openJob.status, "failed");
       assertEqual(openJob.error.code, "memory_task_unavailable");
@@ -180,13 +189,14 @@ export async function runReal(ctx) {
         spaceId: space.id, spaceSessionId: posted.json.message.spaceSessionId, mode: "range",
         fromMessageId: posted.json.message.id, toMessageId: posted.json.message.id,
       });
+      assertEqual(queued.status, 202, JSON.stringify(queued.json));
       const job = await waitForJob(request, agent.id, queued.json.job.id, sleep, 300000);
       assertEqual(job.status, "succeeded", JSON.stringify(job.error));
       const memories = (await request("GET", `/api/agents/${agent.id}/memory`)).json.memories;
       assert(memories.some((memory) => memory.sourceCount >= 1), "real digest must apply a sourced Memory");
 
       await sleep(300);
-      const bindings = JSON.parse(await readFile(join(dir, "data", "provider-bindings.json"), "utf8"));
+      const bindings = JSON.parse(await readFile(join(dir, "data", "providerBindings.json"), "utf8"));
       const binding = bindings.find((item) =>
         item.agentSessionId === posted.json.runs[0].agentSessionId &&
         item.generation === posted.json.runs[0].contextGeneration &&

@@ -106,8 +106,8 @@ export async function run(ctx) {
         model: "gemma4:e4b",
       });
       assertEqual(created.status, 201);
-      const { agent, account } = created.json;
-      assertEqual(account.provider, "ollama");
+      const { agent } = created.json;
+      assertEqual(created.json.account.provider, "ollama");
       await gateway.stop();
       gateway = null;
       await verifyDigestTask(dataPath, agent.id, "gemma4:e4b");
@@ -141,8 +141,10 @@ export async function run(ctx) {
       assertEqual(reply?.content, "OLLAMA_GATEWAY_STUB_OK");
 
       const queued = await verifiedRequest("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, mode: "range", fromMessageId: userMessage.id, toMessageId: reply.id,
+        spaceId: space.id, spaceSessionId: userMessage.spaceSessionId, mode: "range",
+        fromMessageId: userMessage.id, toMessageId: reply.id,
       });
+      assertEqual(queued.status, 202, JSON.stringify(queued.json));
       let job = queued.json.job;
       for (let attempt = 0; attempt < 100 && !["succeeded", "failed", "cancelled"].includes(job.status); attempt += 1) {
         await sleep(25);
@@ -158,12 +160,16 @@ export async function run(ctx) {
       assert(!/oneOf|patternProperties|"pattern"|"const"/.test(schemaText), "Ollama transport schema must stay compatible");
 
       await sleep(300);
-      const states = JSON.parse(await readFile(join(dir, "data", "session-states.json"), "utf8"));
-      const state = states[`${account.id}:${space.id}`];
-      assertEqual(state.schemaVersion, 1);
-      assertEqual(state.history[0].content, "raw gateway question");
-      assertEqual(state.history[1].content, "OLLAMA_GATEWAY_STUB_OK");
-      assertEqual("externalSessionId" in state, false);
+      const histories = JSON.parse(await readFile(join(dir, "data", "apiHistories.json"), "utf8"));
+      const run = posted.json.runs.find((item) => item.agentId === agent.id);
+      assert(run, "Ollama chat must expose its AgentSession generation");
+      const history = histories.find((item) =>
+        item.agentSessionId === run.agentSessionId && item.generation === run.contextGeneration);
+      assert(history, "Ollama chat must persist generation-scoped API history");
+      assertEqual(history.version, 1);
+      assertEqual(history.turns[0].input.content, "raw gateway question");
+      assertEqual(history.turns[0].assistant[0].content, "OLLAMA_GATEWAY_STUB_OK");
+      assertEqual("providerState" in history, false);
     } finally {
       if (gateway) await gateway.stop();
       await ollama.close();
@@ -234,9 +240,10 @@ export async function runReal(ctx) {
       );
 
       const firstQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, mode: "range",
+        spaceId: space.id, spaceSessionId: durable.spaceSessionId, mode: "range",
         fromMessageId: durable.id, toMessageId: duplicate.id,
       });
+      assertEqual(firstQueued.status, 202, JSON.stringify(firstQueued.json));
       const first = await waitForJob(request, agent.id, firstQueued.json.job.id, sleep, 300000);
       assertEqual(first.status, "succeeded", JSON.stringify(first.error));
       const firstStored = await waitForStoredJob(
@@ -258,9 +265,10 @@ export async function runReal(ctx) {
         [invented, "unsupported_inference"],
       ]) {
         const negativeQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
-          spaceId: space.id, mode: "range",
+          spaceId: space.id, spaceSessionId: negative.spaceSessionId, mode: "range",
           fromMessageId: negative.id, toMessageId: negative.id,
         });
+        assertEqual(negativeQueued.status, 202, JSON.stringify(negativeQueued.json));
         const negativeJob = await waitForJob(request, agent.id, negativeQueued.json.job.id, sleep, 300000);
         const negativeStored = await waitForStoredJob(
           join(dir, "data", "memoryDigestJobs.json"), negativeJob.id, sleep, 5000,
@@ -285,9 +293,10 @@ export async function runReal(ctx) {
         "再次确认：Vera 的人工验收端口仍固定为 3210。",
       );
       const repeatedQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, mode: "range",
+        spaceId: space.id, spaceSessionId: repeated.spaceSessionId, mode: "range",
         fromMessageId: repeated.id, toMessageId: repeated.id,
       });
+      assertEqual(repeatedQueued.status, 202, JSON.stringify(repeatedQueued.json));
       const repeatedJob = await waitForJob(request, agent.id, repeatedQueued.json.job.id, sleep, 300000);
       assertEqual(repeatedJob.status, "succeeded", JSON.stringify(repeatedJob.error));
       const repeatedStored = await waitForStoredJob(
@@ -303,9 +312,10 @@ export async function runReal(ctx) {
         "纠正：Vera 的人工验收端口不再是 3210，改为 3211；这条更正取代之前的 3210 规则。",
       );
       const correctionQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, mode: "range",
+        spaceId: space.id, spaceSessionId: correction.spaceSessionId, mode: "range",
         fromMessageId: correction.id, toMessageId: correction.id,
       });
+      assertEqual(correctionQueued.status, 202, JSON.stringify(correctionQueued.json));
       const correctionJob = await waitForJob(request, agent.id, correctionQueued.json.job.id, sleep, 300000);
       assertEqual(correctionJob.status, "succeeded", JSON.stringify(correctionJob.error));
       const correctionStored = await waitForStoredJob(
