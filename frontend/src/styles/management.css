@@ -73,6 +73,102 @@
 .vera-status-row { align-items: start; display: flex; gap: var(--vera-space-md); justify-content: space-between; overflow-wrap: anywhere; }
 .vera-status-row span { color: var(--vera-color-text-muted); }
 
+/* Agent detail: avatar + arrows */
+.vera-agent-avatar-area {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--vera-space-sm);
+  justify-content: center;
+  position: relative;
+}
+.vera-agent-avatar {
+  position: relative;
+}
+.vera-agent-avatar__canvas {
+  align-items: center;
+  background: var(--vera-color-surface);
+  border: calc(var(--vera-border-width) * 3) solid var(--vera-color-border);
+  border-radius: var(--vera-control-radius);
+  display: flex;
+  height: 96px;
+  image-rendering: pixelated;
+  justify-content: center;
+  width: 96px;
+}
+.vera-agent-avatar__initial {
+  color: var(--vera-color-accent);
+  font-size: 2.5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.vera-agent-avatar__arrow {
+  align-items: center;
+  background: var(--vera-color-surface);
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  border-radius: 9999px;
+  color: var(--vera-color-text);
+  display: inline-flex;
+  font-size: 1.25rem;
+  height: 36px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+}
+.vera-agent-avatar__arrow--prev { left: -48px; }
+.vera-agent-avatar__arrow--next { right: -48px; }
+.vera-agent-avatar__arrow:disabled { opacity: 0.4; }
+.vera-agent-name {
+  font-size: var(--vera-font-size-base);
+  font-weight: 600;
+  margin: var(--vera-space-xs) 0 0;
+  text-align: center;
+}
+
+/* Agent detail: info panel */
+.vera-agent-info-panel {
+  background: var(--vera-color-surface);
+  border-radius: var(--vera-control-radius);
+  display: grid;
+  gap: var(--vera-space-sm);
+  padding: var(--vera-space-md);
+}
+.vera-agent-info-row {
+  align-items: baseline;
+  display: flex;
+  gap: var(--vera-space-sm);
+  min-height: var(--vera-touch-target);
+}
+.vera-agent-info-row__label {
+  color: var(--vera-color-text-muted);
+  flex: 0 0 auto;
+  min-width: 3.5em;
+}
+.vera-agent-info-row__value {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Directory entry disabled state */
+.vera-settings-row.is-disabled {
+  color: var(--vera-color-text-muted);
+  cursor: not-allowed;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+@media (min-width: 768px) {
+  .vera-account-grid,
+  .vera-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vera-memory-layout { grid-template-columns: minmax(180px, 0.35fr) minmax(0, 1fr); }
+}
+
 @media (min-width: 768px) {
   .vera-account-grid,
   .vera-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
