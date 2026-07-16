@@ -1,12 +1,14 @@
 # AGENTS.md
 
-本文件是所有参与 Vera 0.0.1 开发的 agents 的长期工作规约。只写稳定规则；设计在 `docs/ground-truth.md`，计划在 `docs/plan.md`，不要把设计方案复制进来。
+本文件是所有参与 Vera 0.0.1 开发的 agents 的长期工作规约。只写稳定规则；设计在 `docs/ground-truth.md`，计划入口在 `docs/plan/index.md`，不要把设计方案复制进来。
 
 ## 文档秩序（最高优先级）
 
 - `docs/ground-truth.md` 是唯一设计基准。代码与它冲突时，停下来问用户，不要自行取舍。
 - **文档变更先于代码变更**：改接口先改 `docs/api-contract.md` / `docs/adapter-interface.md`，再动代码。
-- `docs/` 保持扁平，固定成员：`ground-truth.md`、`plan.md`、`api-contract.md`、`adapter-interface.md`、`salvage-notes.md`、`memory-hook.md`、`reference/`。**不得新建文档目录或另开计划文档**；阶段进展直接更新 `plan.md` 的状态标记。旧 Vera 的 docs 分了六个目录互相引用失效，是前车之鉴。
+- `docs/` 固定成员：`ground-truth.md`、`api-contract.md`、`adapter-interface.md`、`salvage-notes.md`、`memory-hook.md`、`reference/`、`plan/`。除 `reference/` 与 `plan/` 外不得新建文档目录。
+- `docs/plan/index.md` 是唯一计划入口。`plan/` 内一个功能一个文件；执行文件只写未完成/进行中事项，已完成事项移入对应 `completed-*.md`，不得在同一段混写历史实现与当前任务。索引只维护依赖顺序、状态和链接，不复制功能细节。
+- `docs/plan/` 的文件清单由 `index.md` 固定。需要新增、合并或改名计划文件时必须先问用户，并同步更新本规约与索引。旧 Vera 的 docs 因目录和重复计划无约束扩张而互相引用失效，是前车之鉴。
 
 ## 文件结构（不得自行扩张）
 
@@ -18,7 +20,8 @@ Vera-0.0.1/
 ├── android/               # [F6] Capacitor生成的Android原生壳
 ├── ios/                   # [F6] Capacitor生成的iOS原生壳
 ├── docs/                  # 固定成员见「文档秩序」，唯一允许放 .md 的地方
-│   └── reference/         # 外部参考资料
+│   ├── reference/         # 外部参考资料
+│   └── plan/              # 计划索引、按功能拆分的执行文件、按领域拆分的完成记录
 ├── src/                   # 后端 gateway
 │   ├── server.js          # 唯一入口：路由组合与参数读取
 │   ├── core/              # 配置加载、id、日志、spawn 封装等通用件
@@ -42,9 +45,9 @@ Vera-0.0.1/
 ```
 
 - 上图是允许的长期结构，不是要求把目录提前建满。**任何未列出的根目录文件或目录都必须先问用户，并先更新本规约再新增**；不得把“工具惯例”当成默认授权。
-- `capacitor.config.*`、`android/`、`ios/` 只在 `docs/plan.md` 的 F6 被标为进行中、且用户在当前任务明确授权进入 F6 后才可生成。新窗口即使看到本规约已列出它们，也不得直接运行 `cap init`、`cap add`、`npx cap ...` 或同类生成命令；必须先检查 `plan.md` 阶段状态与当前授权。
+- `capacitor.config.*`、`android/`、`ios/` 只在 `docs/plan/native-clients.md` 的 F6 被标为进行中、且用户在当前任务明确授权进入 F6 后才可生成。新窗口即使看到本规约已列出它们，也不得直接运行 `cap init`、`cap add`、`npx cap ...` 或同类生成命令；必须先检查该文件的阶段状态与当前授权。
 - 现有子目录也不是无限堆放区。新文件必须进入职责最接近的既有目录；觉得哪里都不合适，或需要新的领域子目录时，先停下来问用户。不得为了少建文件把多个职责继续塞进一个文件，也不得为了形式整齐预建空目录。
-- `.md` 文件只允许出现在 `docs/`（根目录的 AGENTS.md、README.md 除外）。**任何工作产出的报告、总结、TODO、设计草稿一律不写成新文档**——进展更新到 `plan.md`，经验回写 `salvage-notes.md`，接口变更改契约文档，其余直接在对话里说。
+- `.md` 文件只允许出现在 `docs/`（根目录的 AGENTS.md、README.md 除外）。**任何工作产出的报告、总结、TODO、设计草稿一律不写成新文档**——进展更新到 `docs/plan/index.md` 指向的对应功能文件，完成证据移入对应 `completed-*.md`，经验回写 `salvage-notes.md`，接口变更改契约文档，其余直接在对话里说。
 - 临时文件、实验脚本、抓包输出等不进 repo，用系统临时目录。
 - 手写文件名一律 kebab-case；工具生成且无法配置的原生工程文件遵循对应平台惯例。一个文件一个职责，接近 ~300 行或已经出现两个职责时及时拆分，不能等文件明显膨胀后再处理；拆分仍沿既有页面、领域和平台边界，不顺手发明抽象层。
 
@@ -77,8 +80,9 @@ Vera-0.0.1/
 - 开始前 `git status --short`；不得回退、覆盖用户或其他 agent 的未提交改动。
 - 中大型、多模块或长阶段任务默认使用 subagents 分担实现、审查与验证，以控制主窗口上下文压力。主 agent 负责范围控制、按不重叠文件或职责拆分任务、整合结果与最终提交；不得让多个 agent 同时编辑相同文件。小型、单文件或无法安全并行的任务由主 agent 直接完成，不为形式强行拆分。
 - 不做与当前任务无关的"顺手整理"或大重构。
+- 用户已授权的任务完成且规定的验证通过后，直接提交本任务改动，不再停下来询问是否提交。提交前仍须检查范围，只提交当前任务文件，不夹带用户或其他 agent 的无关改动。
 - secrets 只存 `~/.vera/secrets.json`，不进 repo，不出现在日志与 API 返回中。
-- 后端改动至少验证：`node --check` 改动文件；起服务用临时数据目录（`VERA_DATA_PATH=/tmp/... PORT=3210`），不污染真实数据。**端口固定 3210**（旧 Vera 常驻进程占 3000；见 `docs/plan.md` Phase 2 注记）；3210 被占时先 `lsof -i :3210` 查谁在占，不绕过换号——攒一堆端口记录就是没规约的征兆。要换 3210 必须先改 `plan.md` 那条注记，一次改干净。`scripts/verify.mjs` 用 `getFreePort()` 随机挑空闲端口是例外，固定端口反而会和手测实例打架。
+- 后端改动至少验证：`node --check` 改动文件；起服务用临时数据目录（`VERA_DATA_PATH=/tmp/... PORT=3210`），不污染真实数据。**端口固定 3210**（旧 Vera 常驻进程占 3000；见 `docs/plan/completed-foundation.md`）；3210 被占时先 `lsof -i :3210` 查谁在占，不绕过换号——攒一堆端口记录就是没规约的征兆。要换 3210 必须先改该完成记录与所有现行执行文件中的引用，一次改干净。`scripts/verify.mjs` 用 `getFreePort()` 随机挑空闲端口是例外，固定端口反而会和手测实例打架。
 - 涉及 SSE 的改动必须实测流式（curl 看事件逐条到达），不能只看单元测试。
 - 禁止破坏性 git 命令；提交信息说清楚做了什么、动了哪层。
 

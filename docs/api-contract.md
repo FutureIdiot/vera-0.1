@@ -545,7 +545,7 @@ F0确认默认值：`theme: "system"`、`themeId: null`、`fontFamily: "system"`
 
 Space/Agent 设置由各自现有 API 管（`/api/spaces` / `/api/agents`），不进 settings；响应规则 per-agent per-Space 挂在 seat 上（`responseMode` / `respondTo` / `blockAgentIds`，见 Space 段），不进 settings；Account 的 `authorizedAgentIds` 由 `/api/accounts` 管（Phase 5.5 落地）。
 
-**持久化语义**：`<dataPath>/settings.json` 保存设置override，`<dataPath>/themes.json` 保存归一化Theme对象，均走store防抖落盘（与 store 同 200ms 节流）。config.js 仍是启动默认 source（env 派生），settings.json 是运行时覆盖；只 persist overrides，不 persist 默认值或导入原文。consumer 接入（bubble-stream / view-compiler / memory 整理、Appearance token loader等）在 Phase 4.6 及以后；没有实际consumer和实测记录的字段不得在 `plan.md` 标成闭环完成。
+**持久化语义**：`<dataPath>/settings.json` 保存设置override，`<dataPath>/themes.json` 保存归一化Theme对象，均走store防抖落盘（与 store 同 200ms 节流）。config.js 仍是启动默认 source（env 派生），settings.json 是运行时覆盖；只 persist overrides，不 persist 默认值或导入原文。consumer 接入（bubble-stream / view-compiler / memory 整理、Appearance token loader等）在 Phase 4.6 及以后；没有实际consumer和实测记录的字段不得在 `plan/index.md` 指向的对应功能计划中标成闭环完成。
 
 ### Memory（P5-M1–M4；Provider、权威层、Digest与Dream）
 

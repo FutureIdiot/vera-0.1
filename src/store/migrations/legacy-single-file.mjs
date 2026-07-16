@@ -1,6 +1,6 @@
 // 旧单文件 → 分文件迁移的根级协调（store.js 启动加载阶段调）。
 //
-// 历史（plan.md Phase 2 注 2）：Vera 最早 dataPath 指向单个 store.json（所有
+// 历史（docs/plan/completed-foundation.md）：Vera 最早 dataPath 指向单个 store.json（所有
 // 集合混存一个 JSON）。Phase 2 改为分文件形态——dataPath 是目录，agents.json /
 // spaces.json / … / session-states.json / meta.json 各一文件。本模块负责把
 // 旧单文件 adopting 进当前的内存结构，并让位旧文件为 .legacy。

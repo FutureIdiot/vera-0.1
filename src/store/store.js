@@ -1,6 +1,6 @@
 // JSON 文件存储：启动加载、防抖写盘。集合形状按 api-contract.md 数据形状。
 //
-// 持久化布局（plan.md Phase 2 注 2）：dataPath 是一个**目录**，目录内按集合
+// 持久化布局（docs/plan/completed-foundation.md）：dataPath 是一个**目录**，目录内按集合
 // 分文件——agents.json / spaces.json / … / agentSessions.json / meta.json，
 // 防 memory、profile 等数据增长后混存一个大 JSON。脏跟踪按文件：只重写发生
 // 变化的文件（插一条 message 只写 messages.json + meta.json）。

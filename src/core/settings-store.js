@@ -1,7 +1,7 @@
 // 系统设置存储（Phase 4.5 / F1）：直接读写 <dataPath>/settings.json，不进 store.js
 // （4.3+4.4 在并行分支动 store.js，本步用独立模块避免冲突）。
 //
-// 语义（plan.md 4.5 / api-contract.md「配置 [P4]」+ F1 扩 appearance/paths）：
+// 语义（docs/plan/completed-foundation.md / api-contract.md「配置 [P4]」+ F1 扩 appearance/paths）：
 //   - config.js 是启动默认 source（env 派生），settings.json 是运行时覆盖。
 //   - getAll() 返回合并视图（overrides 叠 defaults），给前端 GET /api/settings。
 //   - get(key) 本步仅返回 overrides[key]（未设则 undefined），不 fallback 到

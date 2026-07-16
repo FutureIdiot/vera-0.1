@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 黑盒端到端验收脚本（AGENTS.md / plan.md Phase 2 最后一项）。
+// 黑盒端到端验收脚本（AGENTS.md / docs/plan/completed-foundation.md）。
 //
 // 零依赖 Node 20+ ESM：拉起一个用临时数据目录 + 空闲端口的 gateway 子进程
 // （mock adapter），走真实 HTTP / SSE 对 docs/api-contract.md 的行为逐项断言。
