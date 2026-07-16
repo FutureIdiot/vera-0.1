@@ -17,17 +17,18 @@
 
 ## 当前依赖顺序
 
-1. [ ] [Data → Memory 页面](memory-ui.md)
-2. [ ] [Files：Space 附件](files.md)
-3. [ ] [Phase 5 收口](phase-5-closeout.md)
-4. [ ] [Home Account / Execution / Workspace 迁移](federation-account.md)
-5. [ ] [联邦状态、身份与权限](federation-security.md)
-6. [ ] [Agent daemon 与跨进程运行链路](federation-runtime.md)
-7. [ ] [VPS 私网部署与旧链路清理](federation-deployment.md)
-8. [ ] [原生客户端](native-clients.md)
-9. [ ] [运行时能力与 Agent 设置](runtime-capabilities.md)
-10. [ ] [Extension 体系](extensions.md)
-11. [ ] [原生发布与三端回归](native-release.md)
+1. [ ] [Agent设置目录壳与内置Hooks/MCP接线（阶段A–B）](runtime-capabilities.md)
+2. [ ] [Data → Memory 页面](memory-ui.md)
+3. [ ] [Files：Space 附件](files.md)
+4. [ ] [Phase 5 收口](phase-5-closeout.md)
+5. [ ] [Home Account / Execution / Workspace 迁移](federation-account.md)
+6. [ ] [联邦状态、身份与权限](federation-security.md)
+7. [ ] [Agent daemon 与跨进程运行链路](federation-runtime.md)
+8. [ ] [VPS 私网部署与旧链路清理](federation-deployment.md)
+9. [ ] [原生客户端](native-clients.md)
+10. [ ] [运行时能力真实闭环（阶段C）](runtime-capabilities.md)
+11. [ ] [Extension 体系](extensions.md)
+12. [ ] [原生发布与三端回归](native-release.md)
 
 不得从前项未完成处跳过依赖直接生成原生工程。某一文件内部若有更细依赖，以该文件为准。
 
@@ -43,7 +44,7 @@
 | [`federation-runtime.md`](federation-runtime.md) | `/api/agent/*`、调度器、daemon、mock daemon |
 | [`federation-deployment.md`](federation-deployment.md) | VPS、Tailscale Serve、数据迁移、本机清理与真实模型复验 |
 | [`native-clients.md`](native-clients.md) | Capacitor共享平台、Android壳与iOS壳 |
-| [`runtime-capabilities.md`](runtime-capabilities.md) | CLI/API adapter补全、Skills / Hooks / MCP / Data运行时闭环 |
+| [`runtime-capabilities.md`](runtime-capabilities.md) | Skills / Hooks / MCP / Data前端目录、内置binding接线与后续运行时闭环 |
 | [`extensions.md`](extensions.md) | Extension Package、Agent Plugin、Space Module与Memory Provider扩展 |
 | [`native-release.md`](native-release.md) | Android release、iOS archive与三端最终回归 |
 

@@ -1,33 +1,56 @@
 # 运行时能力与 Agent 设置
 
-## 开始条件
+## 阶段A：纯前端目录壳
+
+- [ ] 在Agent详情加入 `Skills / Hooks / MCP / Data` 四个平级入口。
+- [ ] 路由固定为 `#/settings/accounts/:agentId/skills|hooks|mcp|data`；Data当前只列Memory入口。
+- [ ] Skills / Hooks / MCP复用一个无HTTP职责的单列目录view和标准化投影，不创建三份相似页面。
+- [ ] Shell管理页顶栏支持右侧两个页面动作；三个目录固定显示“添加”“管理”。
+- [ ] 实现loading、empty、error、单列条目、可用性、可选开关和窄屏长名称布局。
+- [ ] 生产Skills显示“还没有 Skill”；未接入动作全部disabled并说明原因，不弹假表单。
+- [ ] 生产路由不硬编码内置Hook/MCP或示例Skill；列表行视觉用测试夹具覆盖。
+- [ ] 本阶段只改前端与前端测试，不改gateway、store、unit binding或Extension接口。
+
+## 阶段A验收闸门
+
+- [ ] 手机与桌面确认四入口、返回关系、标题和右侧动作位置。
+- [ ] deep-link刷新、前进后退、Agent不存在、loading/empty/error、长名称与禁用按钮状态通过。
+- [ ] 夹具证明Skill/Hook/MCP行使用同一组件；生产构建中没有示例条目或伪造状态。
+- [ ] `npm test`、`node scripts/verify.mjs`、`npm run analyze:web`、`git diff --check`通过。
+- [ ] 阶段A验收前不得开始真实接口接线。
+
+## 阶段B：内置能力真实接线
+
+- [ ] Hooks读取`GET /api/agents/:agentId/unit-bindings?kind=hook`，展示`vera.memory.recall`与`vera.memory.write`。
+- [ ] MCP读取`GET /api/agents/:agentId/unit-bindings?kind=mcp`，展示`vera.memory`。
+- [ ] 开关只通过`PATCH /api/agents/:agentId/unit-bindings/:unitId`写入并使用真实`version`处理409。
+- [ ] Skills保持真实空列表；“添加/管理”继续disabled，直到Extension Package/Skill接口完成。
+- [ ] Hooks/MCP的“添加/管理”也不提前模拟第三方安装；当前只有内置binding开关。
+- [ ] 阶段B完成并验收后，Data → Memory页面才在完整四目录IA下实现。
+
+## 阶段C开始条件
 
 - [ ] Phase 5.5完成
 
-## Adapter补全
+## 阶段C：Adapter补全
 
 - [ ] 实现Claude Code resume型daemon adapter。
 - [ ] 实现API tool-call host。
 - [ ] 将已完成的Codex进程内driver迁移到daemon，不创建第二套Codex adapter，也不回到gateway spawn。
 - [ ] 所有adapter按 `docs/adapter-interface.md` 的stub→临时gateway→真实provider三层闸门验收。
 
-## Agent设置目录
+## 阶段C：Agent设置运行时闭环
 
-- [ ] Agent设置固定实现 `Skills / Hooks / MCP / Data` 四个平级目录。
 - [ ] 不增加第五个Agent Plugin目录，也不把Agent Plugin混入Skills。
 - [ ] Skills、Hooks、MCP的绑定与状态是独立资源，不嵌进Agent身份字段。
 
 ## Hooks
 
 - [ ] Hooks是通用事件自动化目录，不被Memory两项穷举。
-- [ ] 默认内置`vera.memory.recall`与`vera.memory.write`。
-- [ ] 两者由gateway程序执行，不显示executor或任务模型。
-- [ ] Recall关闭只停止自动注入；Write关闭只停止自动Digest。
+- [ ] 第三方Hook按manifest声明自己的运行位置、权限、失败策略与可选控件。
 
 ## MCP
 
-- [ ] 默认内置`vera.memory`，只显示启用状态、可用性与工具清单。
-- [ ] 不显示semantic Agent或模型。
 - [ ] 普通第三方MCP按自身契约显示字段，不自动成为Memory Provider。
 
 ## Data

@@ -4,6 +4,7 @@
 
 - [ ] 实现 `#/settings/accounts/:agentId/data/memory`
 - 前置后端已完成，见 [`completed-memory.md`](completed-memory.md)
+- 必须先完成并验收 [`runtime-capabilities.md`](runtime-capabilities.md) 的阶段A与阶段B，确保四个平级目录及内置Hooks/MCP已有真实唯一入口
 - 本文件只负责状态/配置页面，不负责长期Memory正文编辑、Hooks目录或MCP目录
 
 ## 不可推导的页面语义

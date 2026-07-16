@@ -32,4 +32,4 @@
 
 - [ ] Web、Android、iOS加载同一业务产物与gateway事实来源。
 - [ ] Android真机与iPhone模拟器/真机通过核心聊天、设置、断线恢复和文件选择场景。
-- [ ] 完成后进入 `runtime-capabilities.md`，不在本文件提前做发布收口。
+- [ ] 完成后进入 `runtime-capabilities.md` 阶段C，不重复阶段A–B的Web目录与内置binding工作，也不在本文件提前做发布收口。
