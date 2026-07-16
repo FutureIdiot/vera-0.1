@@ -25,6 +25,7 @@ import {
   fileExistsAt,
   createCounter,
   createHttpClient,
+  createBinaryHttpClient,
   connectSse,
   startGateway,
 } from "../test/checks/_helpers.mjs";
@@ -48,6 +49,7 @@ import * as memoryRetrieval from "../test/checks/memory-retrieval.mjs";
 import * as contextSessions from "../test/checks/context-sessions.mjs";
 import * as ollamaAdapter from "../test/checks/ollama-adapter.mjs";
 import * as codexAdapter from "../test/checks/codex-adapter.mjs";
+import * as files from "../test/checks/files.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..");
@@ -69,6 +71,7 @@ async function startPrimaryGateway() {
       VERA_SSE_BUFFER_SIZE: "20",
       VERA_MOCK_DELAY_MS: "150",
       VERA_MEMORY_VAULT_PATH: join(dataDir, "memory"),
+      VERA_FILES_ATTACHMENTS_PATH: join(dataDir, "files"),
     },
   });
 }
@@ -100,6 +103,7 @@ async function main() {
     getFreePort,
     fileExistsAt,
     httpRequest,
+    binaryRequest: createBinaryHttpClient(port),
     // connectSse helper：统一把打开的 handle 注册进 openSseHandles 以便
     // cleanup。下面在 ctx 建好后赋值（避免引用尚未声明的 const）。
     openSseHandles,
@@ -148,6 +152,7 @@ async function main() {
   await codexAdapter.run(ctx);
   await codexAdapter.runReal(ctx);
   await contextSessions.run(ctx);
+  await files.run(ctx);
   await f1Extensions.run(ctx);
   await f3WebCore.run(ctx);
   await f4WebManagement.run(ctx);

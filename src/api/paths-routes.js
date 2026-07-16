@@ -4,9 +4,9 @@
 import { asHandler, readJsonBody, sendJson } from "./http.js";
 import { ApiError } from "../core/errors.js";
 import { dirSize, validatePathTarget } from "./path-validation.js";
-import { migrateDataPath, migrateVaultPath } from "./path-migrations.js";
+import { migrateDataPath, migrateFilesPath, migrateVaultPath } from "./path-migrations.js";
 
-const EDITABLE_KEYS = new Set(["memory.vaultPath", "gateway.dataPath"]);
+const EDITABLE_KEYS = new Set(["memory.vaultPath", "files.attachmentsPath", "gateway.dataPath"]);
 
 function requireKey(key) {
   if (!EDITABLE_KEYS.has(key)) {
@@ -15,16 +15,18 @@ function requireKey(key) {
 }
 
 export function registerPathsRoutes(router, dependencies) {
-  const { config, memory } = dependencies;
+  const { config, memory, files } = dependencies;
 
   router.get(
     "/api/paths",
     asHandler(async ({ res }) => {
       const memorySummary = await memory.inspect();
+      const filesSummary = await files.inspect();
       const configuredTarget = dependencies.settingsStore.get("paths.gateway.dataPath");
       sendJson(res, 200, {
         paths: {
           memory: { vaultPath: memory.getVaultPath(), ...memorySummary },
+          files: filesSummary,
           gateway: {
             dataPath: config.dataPath,
             sizeBytes: await dirSize(config.dataPath),
@@ -59,7 +61,9 @@ export function registerPathsRoutes(router, dependencies) {
       if (!validation.ok) throw new ApiError("invalid_request", validation.errors.join("; "));
       const result = body.key === "memory.vaultPath"
         ? await migrateVaultPath({ ...dependencies, target: validation.normalized })
-        : await migrateDataPath({ ...dependencies, target: validation.normalized });
+        : body.key === "files.attachmentsPath"
+          ? await migrateFilesPath({ ...dependencies, target: validation.normalized })
+          : await migrateDataPath({ ...dependencies, target: validation.normalized });
       sendJson(res, 200, result);
     }),
   );

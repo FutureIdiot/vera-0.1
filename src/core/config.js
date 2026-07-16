@@ -66,6 +66,11 @@ const DEFAULTS = {
     dreamBatchSize: 256,
     derivedWeightSeed: "vera-m4-v1",
   },
+  files: {
+    attachmentsPath: "~/.vera/files",
+    maxUploadBytes: 25 * 1024 * 1024,
+    maxAttachmentsPerMessage: 8,
+  },
   // Appearance 默认值（ground truth 4.3「F0确认默认值」/ api-contract.md Appearance 字段）。
   // 这是唯一默认源——settings-store 的 appearance.* deriveDefaults 从这里读，
   // 代码其他地方不许另写第二份。运行时覆盖走 PATCH /api/settings。
@@ -251,6 +256,14 @@ export function loadConfig(env = process.env) {
         256,
       ),
       derivedWeightSeed: env.VERA_MEMORY_DERIVED_WEIGHT_SEED || DEFAULTS.memory.derivedWeightSeed,
+    },
+    files: {
+      attachmentsPath: expandHome(env.VERA_FILES_ATTACHMENTS_PATH || DEFAULTS.files.attachmentsPath),
+      maxUploadBytes: positiveInt(env.VERA_FILES_MAX_UPLOAD_BYTES, DEFAULTS.files.maxUploadBytes),
+      maxAttachmentsPerMessage: positiveInt(
+        env.VERA_FILES_MAX_ATTACHMENTS_PER_MESSAGE,
+        DEFAULTS.files.maxAttachmentsPerMessage,
+      ),
     },
     appearance: DEFAULTS.appearance,
     viewCompiler: {

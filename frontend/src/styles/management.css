@@ -72,6 +72,12 @@
 .vera-memory-row.is-active { border-color: var(--vera-color-accent); }
 .vera-status-row { align-items: start; display: flex; gap: var(--vera-space-md); justify-content: space-between; overflow-wrap: anywhere; }
 .vera-status-row span { color: var(--vera-color-text-muted); }
+.vera-file-list { display: grid; gap: var(--vera-space-sm); }
+.vera-file-row { background: var(--vera-color-surface); border-radius: var(--vera-control-radius); display: grid; gap: var(--vera-space-sm); padding: var(--vera-space-md); }
+.vera-file-row__summary { display: grid; gap: var(--vera-space-xs); min-width: 0; overflow-wrap: anywhere; }
+.vera-file-row__summary small { color: var(--vera-color-text-muted); }
+.vera-file-sharing { display: grid; gap: var(--vera-space-sm); }
+.vera-file-sharing summary { cursor: pointer; font-weight: 600; min-height: var(--vera-touch-target); padding-block: var(--vera-space-sm); }
 
 /* Agent detail: avatar + arrows */
 .vera-agent-avatar-area {

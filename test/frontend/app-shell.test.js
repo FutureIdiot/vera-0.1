@@ -42,6 +42,10 @@ test("all management routes expose one top-bar back action and one heading", () 
   });
   assert.equal(agent.title, "Gemma");
   assert.equal(agent.leadingHref, "#/spaces/spc_one");
+
+  const files = resolveShellHeader({ routeName: "space-files", currentSpace: space });
+  assert.equal(files.title, "Files");
+  assert.equal(files.leadingHref, "#/spaces/spc_one");
 });
 
 test("the directory stays open across chat routes but never enters settings", () => {

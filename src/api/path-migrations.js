@@ -112,6 +112,66 @@ export async function migrateVaultPath(dependencies) {
   return dependencies.memory.withExclusive(() => migrateVaultPathExclusive(dependencies));
 }
 
+async function removeEmptyGeneratedDirectory(path) {
+  try {
+    const entries = await readdir(path);
+    if (entries.length > 0) return false;
+    await rm(path, { recursive: true, force: true });
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return true;
+    throw error;
+  }
+}
+
+async function migrateFilesPathExclusive({ config, settingsStore, files, bootPaths, target }) {
+  const from = files.getRootPath();
+  if (from === target) return { ok: true, key: "files.attachmentsPath", from, to: target, restartRequired: false };
+  await mkdir(from, { recursive: true });
+  await mkdir(target, { recursive: true });
+  const targetEntries = await readdir(target);
+  if (targetEntries.length > 0) throw new ApiError("conflict", "Files migration target must be empty");
+  await removeEmptyGeneratedDirectory(join(from, ".vera-tmp"));
+  await removeEmptyGeneratedDirectory(join(from, ".vera-trash"));
+  const sourceEntries = await readdir(from, { withFileTypes: true });
+  const unknown = sourceEntries.filter((entry) => !entry.isDirectory() || !files.isManagedOwnerDirectory(entry.name));
+  if (unknown.length > 0) {
+    throw new ApiError("conflict", `Files root contains unknown entries: ${unknown.slice(0, 5).map((entry) => entry.name).join(", ")}`);
+  }
+  const moved = [];
+  const previousOverride = settingsStore.get("paths.filesAttachmentsPath");
+  let anchorSnapshot = null;
+  try {
+    for (const entry of sourceEntries) {
+      const src = join(from, entry.name);
+      const dst = join(target, entry.name);
+      await movePath(src, dst);
+      moved.push({ src, dst });
+    }
+    await files.verifyRoot(target);
+    await settingsStore.setAll({ "paths.filesAttachmentsPath": target });
+    await settingsStore.flush();
+    anchorSnapshot = await writeAnchorOverride({
+      bootPaths, currentDataPath: config.dataPath, key: "paths.filesAttachmentsPath", value: target,
+    });
+    files.reopen({ rootPath: target });
+    return { ok: true, key: "files.attachmentsPath", from, to: target, restartRequired: false };
+  } catch (error) {
+    files.reopen({ rootPath: from });
+    try { await restoreSetting(settingsStore, "paths.filesAttachmentsPath", previousOverride); } catch { /* preserve original error */ }
+    try { await restoreAnchorOverride(anchorSnapshot); } catch { /* preserve original error */ }
+    for (const item of moved.reverse()) {
+      try { await movePath(item.dst, item.src); } catch { /* best effort */ }
+    }
+    if (error instanceof ApiError) throw error;
+    throw new ApiError("internal", `Files migration failed and was rolled back: ${error.message}`);
+  }
+}
+
+export async function migrateFilesPath(dependencies) {
+  return dependencies.files.withExclusive(() => migrateFilesPathExclusive(dependencies));
+}
+
 async function backupExistingTarget(target) {
   await mkdir(target, { recursive: true });
   const entries = await readdir(target);

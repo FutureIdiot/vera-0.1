@@ -82,7 +82,7 @@ test("MCP binds Digest to the trusted SpaceSession", async () => {
 });
 
 test("trusted Agent context drives MCP create/list/fetch_detail/update/archive through one authority", async () => {
-  await withMcp(async ({ mcp, context }) => {
+  await withMcp(async ({ mcp, retrieval, context }) => {
     const created = await mcp.callTool({
       context,
       name: "memory_create",
@@ -106,6 +106,14 @@ test("trusted Agent context drives MCP create/list/fetch_detail/update/archive t
     const full = await mcp.callTool({ context, name: "memory_fetch_detail", arguments: { slug: "mcp-created" } });
     assert.equal(full.structuredContent.memory.content, "authoritative body");
     assert.deepEqual(full.structuredContent.memory.sources, context.sourceRefs);
+    assert.equal(full.structuredContent.usageRecorded, true);
+    const repeated = await mcp.callTool({ context, name: "memory_fetch_detail", arguments: { slug: "mcp-created" } });
+    assert.equal(repeated.structuredContent.usageRecorded, false);
+    assert.deepEqual(
+      retrieval.listSignals().filter((item) => item.kind === "detail_opened")
+        .map(({ agentId, slug, kind }) => ({ agentId, slug, kind })),
+      [{ agentId: context.agentId, slug: "mcp-created", kind: "detail_opened" }],
+    );
     assert.doesNotMatch(JSON.stringify(full), /stains|#AABBCC/u);
 
     const updated = await mcp.callTool({

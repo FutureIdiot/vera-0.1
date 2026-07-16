@@ -320,6 +320,7 @@ export function executeRun({
               author: triggerMessage.author,
               target: triggerMessage.target,
               content: triggerMessage.content ?? "",
+              fileIds: triggerMessage.fileIds ?? [],
               createdAt: triggerMessage.createdAt ?? null,
             },
             assistant: replies.map((message) => ({

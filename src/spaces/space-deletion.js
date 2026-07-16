@@ -70,7 +70,7 @@ async function collectMemoryImpact({ store, snapshotMemories, spaceId, deletedAt
   return { batches, affected };
 }
 
-export async function getSpaceDeletionPreview({ store, memory, spaceId }) {
+export async function getSpaceDeletionPreview({ store, memory, files, spaceId }) {
   requireArchivedSpace(store, spaceId);
   assertNoActiveWork(store, spaceId);
   const impact = await collectMemoryImpact({
@@ -135,6 +135,7 @@ function purgeSpaceGraph(store, spaceId, deletedMemories) {
 export async function deleteArchivedSpace({
   store,
   memory,
+  files,
   spaceId,
   deleteExclusiveMemories,
 }) {
@@ -168,6 +169,7 @@ export async function deleteArchivedSpace({
           }),
     }));
     if (multiAgentBatches.length > 0) await applyMultiAgentBatch(multiAgentBatches);
+    const deletedFileIds = await files?.deleteOwnedBySpace?.(spaceId, deletedAt) ?? [];
 
     const messageCount = store.list("messages").filter((message) => message.spaceId === spaceId).length;
     purgeSpaceGraph(store, spaceId, deletedMemories);
@@ -177,6 +179,7 @@ export async function deleteArchivedSpace({
       messageCount,
       affectedMemoryCount: impact.affected.length,
       deletedMemoryCount: deletedMemories.length,
+      deletedFileIds,
     };
   });
 }

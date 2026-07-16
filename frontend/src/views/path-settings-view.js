@@ -33,6 +33,22 @@ export async function mountPathSettingsView({ root, platform, shell } = {}) {
   migrateVault.textContent = "迁移并切换";
   migrateVault.disabled = true;
   vault.append(vaultTitle, field("新位置", vaultInput), vaultMeta, validateVault, migrateVault);
+  const files = document.createElement("section");
+  files.className = "vera-management-section";
+  const filesTitle = document.createElement("h2");
+  filesTitle.textContent = "Files attachments";
+  const filesInput = input();
+  const filesMeta = createNotice("");
+  const validateFiles = document.createElement("button");
+  validateFiles.type = "button";
+  validateFiles.className = "vera-secondary-button";
+  validateFiles.textContent = "校验目标";
+  const migrateFiles = document.createElement("button");
+  migrateFiles.type = "button";
+  migrateFiles.className = "vera-primary-button";
+  migrateFiles.textContent = "迁移并切换";
+  migrateFiles.disabled = true;
+  files.append(filesTitle, field("新位置", filesInput), filesMeta, validateFiles, migrateFiles);
   const data = document.createElement("section");
   data.className = "vera-management-section";
   const dataTitle = document.createElement("h2");
@@ -49,12 +65,14 @@ export async function mountPathSettingsView({ root, platform, shell } = {}) {
   migrateData.textContent = "备份、复制并验证";
   migrateData.disabled = true;
   data.append(dataTitle, createNotice("不能直接改写。必须校验 → 备份 → 复制 → 验证；旧路径作为回滚备份保留。"), field("迁移目标", dataInput), dataMeta, validateData, migrateData);
-  content.append(notice, vault, data);
+  content.append(notice, vault, files, data);
   root.appendChild(content);
 
   function fill() {
     vaultInput.value = paths.memory.vaultPath;
     vaultMeta.textContent = `${paths.memory.exists ? "可用" : "不存在"} · ${paths.memory.memoryCount} 条 Memory · ${paths.memory.legacyUnscopedCount} 条未归属`;
+    filesInput.value = paths.files.attachmentsPath;
+    filesMeta.textContent = `${paths.files.exists ? "可用" : "不存在"} · ${paths.files.activeCount} 个附件 · ${formatBytes(paths.files.sizeBytes)}`;
     dataInput.value = paths.gateway.dataPath;
     dataMeta.textContent = `${formatBytes(paths.gateway.sizeBytes)}${paths.gateway.restartRequired ? " · 等待重启切换" : ""}`;
   }
@@ -70,8 +88,10 @@ export async function mountPathSettingsView({ root, platform, shell } = {}) {
     finally { setBusy(button, false); }
   }
   validateVault.addEventListener("click", async () => { migrateVault.disabled = !(await validate("memory.vaultPath", vaultInput, validateVault, vaultMeta)); });
+  validateFiles.addEventListener("click", async () => { migrateFiles.disabled = !(await validate("files.attachmentsPath", filesInput, validateFiles, filesMeta)); });
   validateData.addEventListener("click", async () => { migrateData.disabled = !(await validate("gateway.dataPath", dataInput, validateData, dataMeta)); });
   vaultInput.addEventListener("input", () => { migrateVault.disabled = true; });
+  filesInput.addEventListener("input", () => { migrateFiles.disabled = true; });
   dataInput.addEventListener("input", () => { migrateData.disabled = true; });
   migrateVault.addEventListener("click", async () => {
     if (!window.confirm("把 Memory vault 迁移到已校验目标？")) return;
@@ -79,6 +99,23 @@ export async function mountPathSettingsView({ root, platform, shell } = {}) {
     try { await client.migrate("memory.vaultPath", vaultInput.value); paths = (await client.get()).paths; fill(); notice.textContent = "Memory vault 已验证并切换"; notice.dataset.tone = "success"; }
     catch (err) { notice.textContent = `迁移失败，原路径保持不动：${err.message}`; notice.dataset.tone = "danger"; }
     finally { setBusy(migrateVault, false); migrateVault.disabled = true; }
+  });
+  migrateFiles.addEventListener("click", async () => {
+    if (!window.confirm("把 Files 附件根迁移到已校验的空目标？")) return;
+    setBusy(migrateFiles, true, "迁移中…");
+    try {
+      await client.migrate("files.attachmentsPath", filesInput.value);
+      paths = (await client.get()).paths;
+      fill();
+      notice.textContent = "Files附件已逐项验证并热切换";
+      notice.dataset.tone = "success";
+    } catch (err) {
+      notice.textContent = `迁移失败，原路径保持不动：${err.message}`;
+      notice.dataset.tone = "danger";
+    } finally {
+      setBusy(migrateFiles, false);
+      migrateFiles.disabled = true;
+    }
   });
   migrateData.addEventListener("click", async () => {
     if (!window.confirm("执行 dataPath 备份、复制和验证？完成后仍需重启 gateway 才切换。")) return;

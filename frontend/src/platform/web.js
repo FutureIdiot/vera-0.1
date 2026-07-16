@@ -12,7 +12,12 @@ function pickFileWithInput(accept) {
     if (accept) input.accept = accept;
     input.addEventListener("change", () => {
       const file = input.files?.[0];
-      resolve(file ? { path: file.name, name: file.name, mime: file.type } : unsupported);
+      resolve(file ? {
+        name: file.name,
+        mime: file.type,
+        size: file.size,
+        source: file,
+      } : unsupported);
     }, { once: true });
     input.addEventListener("cancel", () => resolve(unsupported), { once: true });
     input.click();

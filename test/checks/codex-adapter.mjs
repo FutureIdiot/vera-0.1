@@ -110,6 +110,19 @@ export async function run(ctx) {
       assertEqual(memories.json.memories[0].slug, "vera-test-port");
       assertEqual(memories.json.memories[0].sourceCount, 1);
 
+      const recallSpace = await verifiedRequest("POST", "/api/spaces", {
+        name: "Codex cross-Space recall", seats: [{ agentId: agent.id }],
+      });
+      const recalled = await verifiedRequest("POST", `/api/spaces/${recallSpace.json.space.id}/messages`, {
+        author: { type: "user" }, target: { type: "agent", agentId: agent.id },
+        content: "What is the Vera test port?",
+      });
+      assertEqual(recalled.status, 201);
+      const recallReply = await waitForAgentReply(
+        verifiedRequest, recallSpace.json.space.id, sleep, 5000,
+      );
+      assertEqual(recallReply?.content, "CODEX_CHAT_OK");
+
       await sleep(300);
       const bindings = JSON.parse(await readFile(join(dir, "data", "providerBindings.json"), "utf8"));
       const run = posted.json.runs.find((item) => item.agentId === agent.id);
@@ -121,9 +134,12 @@ export async function run(ctx) {
       assert(binding, "Codex chat must persist a generation-scoped provider binding");
       assertEqual(binding.providerState.threadId, "thr_fake_1");
       const calls = await fake.readInvocations();
-      assertEqual(calls.length, 2);
+      assertEqual(calls.length, 3);
       assert(calls[1].args.includes("--output-schema"), "digest must pass --output-schema");
       assert(!calls[1].args.includes("resume"), "digest must not resume chat");
+      assert(/Vera 记忆库常驻索引/.test(calls[2].input), "new Space must receive the resident Memory index");
+      assert(/vera-test-port/.test(calls[2].input), "new Space must recall the digested Memory slug");
+      assert(/Vera uses port 3210/.test(calls[2].input), "new Space must recall the digested Memory projection");
 
       const openCode = await verifiedRequest("POST", "/api/agents", {
         name: "Paused OpenCode", kind: "cli", provider: "opencode",
@@ -143,7 +159,7 @@ export async function run(ctx) {
       const openJob = await waitForJob(verifiedRequest, openCode.json.agent.id, openQueued.json.job.id, sleep, 5000);
       assertEqual(openJob.status, "failed");
       assertEqual(openJob.error.code, "memory_task_unavailable");
-      assertEqual((await fake.readInvocations()).length, 2);
+      assertEqual((await fake.readInvocations()).length, 3);
     } finally {
       if (gateway) await gateway.stop();
       await fake.close();

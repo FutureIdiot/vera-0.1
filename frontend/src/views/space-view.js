@@ -7,6 +7,7 @@ import { renderApprovalCard, applyApprovalCard } from "../components/approval-ca
 import { createComposer } from "../components/composer.js";
 import { attachEdgeSwipe } from "../hooks/edge-swipe.js";
 import { createRunStatus } from "../components/run-status.js";
+import { createFilesClient, FILE_ACCEPT } from "../api/files-client.js";
 
 const TIMELINE_PAGE_SIZE = 50;
 const TIMELINE_DOM_LIMIT = 200;
@@ -69,6 +70,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
   olderButton.textContent = "加载更早消息";
   olderButton.hidden = true;
   const spaces = createSpacesClient(createHttpClient(platform));
+  const files = createFilesClient(createHttpClient(platform));
   const runStatus = createRunStatus({
     onCancel: async (runIds) => {
       try { await Promise.all(runIds.map((runId) => spaces.cancelRun(runId))); }
@@ -279,6 +281,10 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
       void refreshCompactionStatus();
       return;
     }
+    if (["file.updated", "file.deleted"].includes(envelope.type)) {
+      void reloadActiveTimeline().catch((err) => handleHydrationError("附件状态刷新失败", err));
+      return;
+    }
     runStatus.handleEvent(envelope, space?.id);
     if (hydrating) pendingEvents.push(envelope);
     else ingestForCurrentSpace(envelope);
@@ -290,7 +296,14 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     : bootstrap.spaces[0];
   const composer = createComposer({
     targets: bootstrap.agents.filter((agent) => initialSpace?.seats.some((seat) => seat.agentId === agent.id)),
-    onSend: async (content, target) => {
+    onPickAttachment: async () => {
+      if (!space) throw new Error("当前没有可上传附件的 Space");
+      const selection = await platform.pickFile({ accept: FILE_ACCEPT });
+      if (selection?.unsupported) return null;
+      const response = await files.upload(space.id, selection);
+      return response.file;
+    },
+    onSend: async (content, target, fileIds) => {
       if (!space) throw new Error("当前没有可发送消息的 Space");
       if (content === "/new") {
         const result = await spaces.startNewSession(space.id, crypto.randomUUID());
@@ -309,6 +322,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
         author: { type: "user" },
         target,
         content,
+        fileIds,
       });
     },
   });

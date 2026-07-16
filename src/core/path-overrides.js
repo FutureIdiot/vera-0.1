@@ -20,12 +20,16 @@ export async function applyBootPathOverrides(config) {
   const settings = await readSettings(anchorDataPath);
   const dataOverride = settings["paths.gateway.dataPath"];
   const vaultOverride = settings["paths.memoryVaultPath"];
+  const filesOverride = settings["paths.filesAttachmentsPath"];
 
   if (typeof dataOverride === "string" && dataOverride.trim()) config.dataPath = resolve(dataOverride);
   else config.dataPath = anchorDataPath;
 
   if (typeof vaultOverride === "string" && vaultOverride.trim()) config.memory.vaultPath = resolve(vaultOverride);
   else config.memory.vaultPath = resolve(config.memory.vaultPath);
+
+  if (typeof filesOverride === "string" && filesOverride.trim()) config.files.attachmentsPath = resolve(filesOverride);
+  else config.files.attachmentsPath = resolve(config.files.attachmentsPath);
 
   return { anchorDataPath, settings };
 }

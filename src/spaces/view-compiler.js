@@ -209,6 +209,7 @@ export async function compilePrompt({
       author: triggerMessage.author,
       target: triggerMessage.target,
       sourceMessageId: triggerMessage.id,
+      fileIds: triggerMessage.fileIds ?? [],
     })}\n\n${turnText}`,
   });
 

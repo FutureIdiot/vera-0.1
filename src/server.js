@@ -40,6 +40,8 @@ import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 import { createCodexAdapter } from "./adapters/codex-adapter.js";
 import { createContextCompactionService } from "./spaces/context-compactions.js";
 import { recoverInterruptedRuns } from "./spaces/run-controller.js";
+import { createFilesService } from "./memory/files-service.js";
+import { registerFilesRoutes } from "./memory/files-routes.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
@@ -59,6 +61,13 @@ const hub = createEventHub({
 });
 const agentStates = createAgentStateTracker({ hub });
 const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
+const files = await createFilesService({
+  store,
+  settingsStore,
+  rootPath: config.files.attachmentsPath,
+  maxUploadBytes: config.files.maxUploadBytes,
+  maxAttachmentsPerMessage: config.files.maxAttachmentsPerMessage,
+});
 const memoryTaskRuntime = createMemoryTaskRuntime({ store });
 const memoryConfig = createMemoryConfigService({
   store,
@@ -206,8 +215,9 @@ router.get("/api/events", ({ req, res }) => {
 registerAgentRoutes(router, { store, agentStates, memoryConfigService: memoryConfig });
 registerSpaceRoutes(router, {
   store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
-  contextCompaction, memory,
+  contextCompaction, memory, files,
 });
+registerFilesRoutes(router, { files, hub });
 registerMemoryRoutes(router, {
   memory,
   retrieval: memoryRetrieval,
@@ -230,7 +240,7 @@ registerSettingsRoutes(router, {
 
 const statusTracker = createStatusTracker({ config });
 registerStatusRoutes(router, { statusTracker, store, hub, config, memory, settingsStore });
-registerPathsRoutes(router, { config, settingsStore, memory, store, bootPaths });
+registerPathsRoutes(router, { config, settingsStore, memory, files, store, bootPaths });
 registerThemesRoutes(router, { store, settingsStore });
 
 const server = createServer(async (req, res) => {

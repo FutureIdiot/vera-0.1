@@ -31,7 +31,7 @@ function stripInternal({ _seq, ...rest }) {
 
 export function registerSpaceRoutes(router, {
   store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
-  contextCompaction, memory,
+  contextCompaction, memory, files,
 }) {
   router.get(
     "/api/spaces",
@@ -84,7 +84,7 @@ export function registerSpaceRoutes(router, {
     "/api/spaces/:id/deletion-preview",
     asHandler(async ({ res, params }) => {
       if (!memory) throw new ApiError("memory_provider_unavailable", "Memory is unavailable");
-      const preview = await getSpaceDeletionPreview({ store, memory, spaceId: params.id });
+      const preview = await getSpaceDeletionPreview({ store, memory, files, spaceId: params.id });
       sendJson(res, 200, { preview });
     }),
   );
@@ -101,9 +101,14 @@ export function registerSpaceRoutes(router, {
       const deleted = await deleteArchivedSpace({
         store,
         memory,
+        files,
         spaceId: params.id,
         deleteExclusiveMemories: body.deleteExclusiveMemories,
       });
+      for (const fileId of deleted.deletedFileIds) {
+        hub.publish("file.deleted", { spaceId: params.id, fileId });
+      }
+      delete deleted.deletedFileIds;
       hub.publish("space.deleted", { spaceId: params.id });
       sendJson(res, 200, { deleted });
     }),
@@ -117,7 +122,9 @@ export function registerSpaceRoutes(router, {
       const before = query.get("before") || undefined;
       const limitParam = query.get("limit");
       const limit = limitParam ? Number(limitParam) : 50;
-      sendJson(res, 200, getTimeline(store, params.id, { spaceSessionId: spaceSession.id, before, limit }));
+      const timeline = getTimeline(store, params.id, { spaceSessionId: spaceSession.id, before, limit });
+      timeline.items = timeline.items.map((item) => item.itemType === "message" ? files.projectMessage(item, params.id) : item);
+      sendJson(res, 200, timeline);
     }),
   );
 
@@ -147,11 +154,13 @@ export function registerSpaceRoutes(router, {
       }
       const before = query.get("before") || undefined;
       const limit = query.get("limit") ? Number(query.get("limit")) : 50;
-      sendJson(res, 200, getTimeline(store, params.id, {
+      const timeline = getTimeline(store, params.id, {
         spaceSessionId: session.id,
         before,
         limit,
-      }));
+      });
+      timeline.items = timeline.items.map((item) => item.itemType === "message" ? files.projectMessage(item, params.id) : item);
+      sendJson(res, 200, timeline);
     }),
   );
 
@@ -231,6 +240,7 @@ export function registerSpaceRoutes(router, {
         memoryRetrieval,
         memoryDigestScheduler,
         contextCompaction,
+        files,
         spaceId: params.id,
         body,
       });

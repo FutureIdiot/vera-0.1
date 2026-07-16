@@ -2,6 +2,7 @@ import { createSpaceNavigator } from "./space-navigator.js";
 
 const MANAGEMENT_ROUTES = new Set([
   "space-settings",
+  "space-files",
   "settings",
   "accounts",
   "account-detail",
@@ -26,6 +27,7 @@ function defaultManagementHeader(routeName, currentSpace) {
   const currentChat = currentSpace ? `#/spaces/${encodeURIComponent(currentSpace.id)}` : "#/";
   const defaults = {
     "space-settings": { title: "当前 Space 设置", backHref: currentChat, backLabel: "返回" },
+    "space-files": { title: "Files", backHref: currentChat, backLabel: "返回" },
     settings: { title: "Settings", backHref: currentChat, backLabel: "返回" },
     accounts: { title: "Account", backHref: "#/settings", backLabel: "返回" },
     "account-detail": { title: "Account", backHref: "#/settings/accounts", backLabel: "返回" },

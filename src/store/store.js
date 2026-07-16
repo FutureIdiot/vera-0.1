@@ -51,6 +51,7 @@ const COLLECTIONS = [
   "memoryTaskVerifications", "memoryDreamJobs",
   "spaceSessions", "agentSessions", "providerBindings", "apiHistories",
   "contextCompactionJobs", "contextControlRequests",
+  "files",
 ];
 
 // 内存键 -> 目录内文件名

@@ -76,6 +76,11 @@ export function parseRoute(hash = "") {
     try { return { name: "space-history", spaceId: decodeURIComponent(historyMatch[1]), spaceSessionId: null }; }
     catch { return { name: "not-found", path }; }
   }
+  const filesMatch = path.match(/^\/spaces\/([^/]+)\/files\/?$/);
+  if (filesMatch) {
+    try { return { name: "space-files", spaceId: decodeURIComponent(filesMatch[1]) }; }
+    catch { return { name: "not-found", path }; }
+  }
   const match = path.match(/^\/spaces\/([^/]+)\/?$/);
   if (match) {
     try { return { name: "space", spaceId: decodeURIComponent(match[1]) }; }
@@ -93,6 +98,7 @@ export function createAppRouter({
   loadSpaceView = () => import("../views/space-view.js"),
   loadSpaceSettingsView = () => import("../views/space-settings-view.js"),
   loadSpaceHistoryView = () => import("../views/space-history-view.js"),
+  loadSpaceFilesView = () => import("../views/space-files-view.js"),
   loadSettingsView = () => import("../views/settings-index-view.js"),
   loadAccountsView = () => import("../views/account-list-view.js"),
   loadAccountDetailView = () => import("../views/account-detail-view.js"),
@@ -154,6 +160,7 @@ export function createAppRouter({
       { names: ["space", "spaces"], loader: loadSpaceView, mount: "mountSpaceView" },
       { names: ["space-settings"], loader: loadSpaceSettingsView, mount: "mountSpaceSettingsView" },
       { names: ["space-history"], loader: loadSpaceHistoryView, mount: "mountSpaceHistoryView" },
+      { names: ["space-files"], loader: loadSpaceFilesView, mount: "mountSpaceFilesView" },
       { names: ["settings"], loader: loadSettingsView, mount: "mountSettingsIndexView" },
       { names: ["accounts"], loader: loadAccountsView, mount: "mountAccountListView" },
       { names: ["account-detail"], loader: loadAccountDetailView, mount: "mountAccountDetailView" },

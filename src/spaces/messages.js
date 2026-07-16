@@ -52,13 +52,15 @@ function shouldRespond(seat, message) {
 
 export function postMessage({
   store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
-  contextCompaction, spaceId, body,
+  contextCompaction, files, spaceId, body,
 }) {
   const space = getSpaceOrThrow(store, spaceId);
-  if (!body?.author || !body?.content) {
-    throw new ApiError("invalid_request", "author and content are required");
+  const content = typeof body?.content === "string" ? body.content : "";
+  const fileIds = files.assertMessageFileIds(spaceId, body?.fileIds ?? []);
+  if (!body?.author || (!content.trim() && fileIds.length === 0)) {
+    throw new ApiError("invalid_request", "author and non-empty content or fileIds are required");
   }
-  const controlCommand = typeof body.content === "string" ? body.content.trim() : null;
+  const controlCommand = content.trim();
   if (controlCommand === "/new" || controlCommand === "/compact") {
     throw new ApiError(
       "control_command_required",
@@ -75,13 +77,14 @@ export function postMessage({
     spaceSessionId: spaceSession.id,
     author: body.author,
     target,
-    content: body.content,
+    content,
+    fileIds,
     runId: null,
     status: "completed",
     createdAt: new Date().toISOString(),
   };
   const storedMessage = store.insert("messages", message);
-  hub.publish("message.created", { message: stripInternal(storedMessage) });
+  hub.publish("message.created", { message: files.projectMessage(stripInternal(storedMessage), spaceId) });
   memoryDigestScheduler?.onMessageCommitted(storedMessage);
 
   const runs = [];

@@ -13,13 +13,12 @@ function joinUrl(baseUrl, path) {
 }
 
 export function createHttpClient(platform) {
-  async function request(method, path, body) {
+  async function fetchResponse(method, path, init = {}) {
     const gatewayUrl = await platform.getGatewayUrl();
-    const response = await platform.fetch(joinUrl(gatewayUrl, path), {
-      method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    return platform.fetch(joinUrl(gatewayUrl, path), { method, ...init });
+  }
+
+  async function parseJsonResponse(method, path, response) {
     const text = await response.text();
     let json = null;
     if (text) {
@@ -39,8 +38,19 @@ export function createHttpClient(platform) {
     return json;
   }
 
+  async function request(method, path, body) {
+    const response = await fetchResponse(method, path, {
+      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    return parseJsonResponse(method, path, response);
+  }
+
   return {
     request,
+    async raw(method, path, init) {
+      return parseJsonResponse(method, path, await fetchResponse(method, path, init));
+    },
     get(path) { return request("GET", path); },
     post(path, body) { return request("POST", path, body); },
     patch(path, body) { return request("PATCH", path, body); },

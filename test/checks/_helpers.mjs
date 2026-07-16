@@ -6,6 +6,7 @@ import http from "node:http";
 import net from "node:net";
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
+import { join } from "node:path";
 
 export function assert(cond, msg) {
   if (!cond) throw new Error(msg || "assertion failed");
@@ -109,6 +110,22 @@ export function createHttpClient(defaultPort) {
   return httpRequest;
 }
 
+export function createBinaryHttpClient(defaultPort) {
+  return async function binaryRequest(method, path, { headers = {}, body, portOverride } = {}) {
+    const response = await fetch(`http://127.0.0.1:${portOverride ?? defaultPort}${path}`, {
+      method,
+      headers,
+      body,
+    });
+    const buffer = Buffer.from(await response.arrayBuffer());
+    let json = null;
+    if ((response.headers.get("content-type") ?? "").includes("application/json") && buffer.length > 0) {
+      json = JSON.parse(buffer.toString("utf8"));
+    }
+    return { status: response.status, headers: response.headers, buffer, json };
+  };
+}
+
 // 打开一条真实 SSE 连接，逐帧解析为事件对象，累积在 .events；waitFor 等
 // 满足条件的事件出现。
 export function connectSse({ port, since } = {}) {
@@ -200,9 +217,13 @@ export async function waitForHealth(port, timeoutMs = 8000) {
 // { child, port, stop() }。调用方负责手动 stop。
 export async function startGateway({ repoRoot, env, cwd = repoRoot }) {
   const port = await getFreePort();
+  const resolvedEnv = { ...env };
+  if (resolvedEnv.VERA_DATA_PATH && !resolvedEnv.VERA_FILES_ATTACHMENTS_PATH) {
+    resolvedEnv.VERA_FILES_ATTACHMENTS_PATH = join(resolvedEnv.VERA_DATA_PATH, "files");
+  }
   const child = spawn(process.execPath, [`${repoRoot}/src/server.js`], {
     cwd,
-    env: { ...process.env, PORT: String(port), ...env },
+    env: { ...process.env, PORT: String(port), ...resolvedEnv },
     stdio: ["ignore", "pipe", "pipe"],
   });
 

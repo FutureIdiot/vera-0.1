@@ -57,6 +57,7 @@ const ALLOWED_KEYS = {
   "appearance.windowMargin.desktop.management": { type: "number", min: 0 },
   // 路径（ground truth 4.1 末段 / api-contract.md 七、Path 管理 [P4.6/F1]）
   "paths.memoryVaultPath": { type: "string" },
+  "paths.filesAttachmentsPath": { type: "string" },
   "paths.gateway.dataPath": { type: "string" },
 };
 
@@ -97,6 +98,7 @@ function deriveDefaults(config) {
     "appearance.windowMargin.desktop.chat": wm.desktop?.chat ?? 64,
     "appearance.windowMargin.desktop.management": wm.desktop?.management ?? 8,
     "paths.memoryVaultPath": config.memory.vaultPath,
+    "paths.filesAttachmentsPath": config.files.attachmentsPath,
     "paths.gateway.dataPath": config.dataPath,
   };
 }

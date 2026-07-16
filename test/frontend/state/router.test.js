@@ -97,6 +97,7 @@ test("parseRoute recognizes the chat root and encoded Space ids", () => {
   assert.deepEqual(parseRoute("#/settings/paths"), { name: "path-settings" });
   assert.deepEqual(parseRoute("#/settings/control-center"), { name: "control-center" });
   assert.deepEqual(parseRoute("#/spaces/spc_1/settings"), { name: "space-settings", spaceId: "spc_1" });
+  assert.deepEqual(parseRoute("#/spaces/spc_1/files"), { name: "space-files", spaceId: "spc_1" });
   assert.deepEqual(parseRoute("#/spaces/spc_1/history"), {
     name: "space-history", spaceId: "spc_1", spaceSessionId: null,
   });

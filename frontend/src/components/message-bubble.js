@@ -12,6 +12,7 @@ export function applyMessageBubble(el, item, ctx = {}) {
   let avatarEl = el.querySelector(".vera-bubble__avatar");
   let authorEl = el.querySelector(".vera-bubble__author");
   let contentEl = el.querySelector(".vera-bubble__content");
+  let attachmentsEl = el.querySelector(".vera-bubble__attachments");
   if (!contentEl) {
     el.textContent = "";
     avatarEl = document.createElement("a");
@@ -20,7 +21,9 @@ export function applyMessageBubble(el, item, ctx = {}) {
     authorEl.className = "vera-bubble__author";
     contentEl = document.createElement("div");
     contentEl.className = "vera-bubble__content";
-    el.append(avatarEl, authorEl, contentEl);
+    attachmentsEl = document.createElement("div");
+    attachmentsEl.className = "vera-bubble__attachments";
+    el.append(avatarEl, authorEl, contentEl, attachmentsEl);
   } else if (!avatarEl) {
     avatarEl = document.createElement("a");
     avatarEl.className = "vera-bubble__avatar";
@@ -44,6 +47,25 @@ export function applyMessageBubble(el, item, ctx = {}) {
   authorEl.textContent = authorName;
   authorEl.hidden = !authorName;
   contentEl.textContent = item.content ?? "";
+  if (!attachmentsEl) {
+    attachmentsEl = document.createElement("div");
+    attachmentsEl.className = "vera-bubble__attachments";
+    el.appendChild(attachmentsEl);
+  }
+  attachmentsEl.textContent = "";
+  for (const attachment of item.attachments ?? []) {
+    const control = attachment.state === "available"
+      ? document.createElement("a")
+      : document.createElement("span");
+    control.className = "vera-bubble__attachment";
+    control.textContent = attachment.state === "available" ? attachment.name : `${attachment.name}（不可用）`;
+    if (attachment.state === "available") {
+      control.href = `/api/spaces/${encodeURIComponent(item.spaceId)}/files/${encodeURIComponent(attachment.fileId)}/download`;
+      control.download = attachment.name;
+    }
+    attachmentsEl.appendChild(control);
+  }
+  attachmentsEl.hidden = (item.attachments ?? []).length === 0;
 }
 
 export function renderMessageBubble(item, ctx = {}) {

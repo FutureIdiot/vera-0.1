@@ -1,10 +1,10 @@
-import { access, readdir, stat, statfs } from "node:fs/promises";
+import { access, lstat, readdir, stat, statfs } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(join(dirname(fileURLToPath(import.meta.url)), "..", ".."));
-const VERA_STORE_FILE = /^(agents|accounts|spaces|messages|activities|approvals|runs|session-states|meta|settings|themes)\.json(\.legacy)?$/;
+const VERA_STORE_FILE = /^(agents|accounts|spaces|messages|activities|approvals|runs|session-states|meta|settings|themes|files)\.json(\.legacy)?$/;
 
 export async function dirSize(dirPath) {
   let total = 0;
@@ -41,14 +41,20 @@ async function writableParent(target) {
   }
 }
 
-export async function validatePathTarget({ key, value, config, memory }) {
+export async function validatePathTarget({ key, value, config, memory, files }) {
   const normalized = resolve(value);
   const errors = [];
   const warnings = [];
   if (!isAbsolute(value)) warnings.push("relative path was normalized to an absolute path");
   const rel = relative(repoRoot, normalized);
   if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) errors.push("path must not be inside the Vera repository");
-  const source = resolve(key === "gateway.dataPath" ? config.dataPath : memory.getVaultPath());
+  const source = resolve(
+    key === "gateway.dataPath"
+      ? config.dataPath
+      : key === "files.attachmentsPath"
+        ? files.getRootPath()
+        : memory.getVaultPath(),
+  );
   const targetFromSource = relative(source, normalized);
   const sourceFromTarget = relative(normalized, source);
   if (
@@ -59,6 +65,12 @@ export async function validatePathTarget({ key, value, config, memory }) {
     errors.push("source and target paths must not contain one another");
   }
   if (!(await writableParent(normalized))) errors.push(`path or nearest parent is not writable: ${normalized}`);
+  try {
+    const info = await lstat(normalized);
+    if (info.isSymbolicLink()) errors.push("target path must not be a symbolic link");
+  } catch (error) {
+    if (error.code !== "ENOENT") errors.push(`cannot inspect target: ${error.message}`);
+  }
 
   if (key === "gateway.dataPath") {
     try {
@@ -76,10 +88,25 @@ export async function validatePathTarget({ key, value, config, memory }) {
     } catch {
       warnings.push("free disk space could not be verified");
     }
-  } else {
+  } else if (key === "memory.vaultPath") {
     const legacy = await memory.inspect();
     if (legacy.legacyUnscopedCount > 0) {
       errors.push(`vault contains ${legacy.legacyUnscopedCount} unscoped legacy markdown file(s); assign them to agent directories first`);
+    }
+  } else {
+    try {
+      const entries = await readdir(normalized);
+      if (entries.length > 0) errors.push("Files migration target must be empty");
+    } catch (error) {
+      if (error.code !== "ENOENT") errors.push(`cannot read target: ${error.message}`);
+    }
+    try {
+      const summary = await files.inspect();
+      const fs = await statfs(dirname(normalized));
+      const freeBytes = Number(fs.bavail) * Number(fs.bsize);
+      if (freeBytes < summary.sizeBytes) errors.push(`insufficient free space: need ${summary.sizeBytes} bytes`);
+    } catch {
+      warnings.push("free disk space could not be verified");
     }
   }
   return { ok: errors.length === 0, errors, warnings, normalized };

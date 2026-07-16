@@ -93,3 +93,37 @@ test("user messages do not expose an Agent avatar link", () => {
     globalThis.document = previousDocument;
   }
 });
+
+test("available and deleted attachments render as safe message projections", () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = { createElement: (tagName) => new FakeElement(tagName) };
+  try {
+    const bubble = renderMessageBubble({
+      id: "msg_3",
+      spaceId: "spc one",
+      itemType: "message",
+      status: "completed",
+      author: { type: "user" },
+      content: "",
+      attachments: [
+        { fileId: "fil one", name: "brief.pdf", state: "available" },
+        { fileId: "fil_gone", name: "old.txt", state: "deleted" },
+      ],
+    });
+
+    const attachments = bubble.querySelector(".vera-bubble__attachments");
+    assert.equal(attachments.hidden, false);
+    assert.equal(attachments.children.length, 2);
+    assert.equal(attachments.children[0].tagName, "a");
+    assert.equal(
+      attachments.children[0].href,
+      "/api/spaces/spc%20one/files/fil%20one/download",
+    );
+    assert.equal(attachments.children[0].download, "brief.pdf");
+    assert.equal(attachments.children[1].tagName, "span");
+    assert.equal(attachments.children[1].textContent, "old.txt（不可用）");
+    assert.equal(attachments.children[1].href, "");
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});

@@ -1,13 +1,39 @@
 # 已完成：Phase 5 Memory与上下文
 
-本文只记录已经落地的能力和验收边界。未完成页面见 `memory-ui.md`，Files见 `files.md`。
+本文只记录已经落地的能力和验收边界。Phase 5最终环境闸门见
+`phase-5-closeout.md`。
 
-## P5-F1：Files契约冻结
+## P5-F1：Files
 
 - 已冻结File唯一owner Space、`sharedSpaceIds`、`isolation.files`三种读取策略，以及“扩大读取不转移管理权”的权限边界。
 - 已冻结原始二进制上传、MIME/大小/完整性校验、同名不覆盖、Message `fileIds`引用、时间线安全附件投影和File删除墓碑。
 - 已冻结Space归档保留附件、永久删除owner Space级联清理，以及Files附件根热迁移与逐文件hash验证/失败回滚。
-- 实现与验收仍在 `files.md`，本节只代表契约先于代码完成。
+- 已在`src/memory/files-*`模块实现二进制/元数据分离、
+  原子上传、路径/父目录符号链接防护、版本并发、共享策略、墓碑和owner Space
+  批量级联回滚。
+- 已实现`#/spaces/:spaceId/files`、Space设置入口、composer上传与附件chip、
+  时间线可用/删除投影，以及Files受控路径迁移。
+- 2026-07-17黑盒`p5-f1.1`至`p5-f1.7`通过：真实二进制、隔离/共享/全局读取、
+  Message引用、删除墓碑、路径穿越/MIME、热迁移、413与永久Space删除级联。
+- 固定`PORT=3210`临时gateway手测中，curl逐帧收到`space.updated` seq 1与
+  `file.created` seq 2；公开事件不含hash、storage name或宿主路径。
+
+## P5-X1：已完成的自动化收口切片
+
+- `isolation.memory`固定隔离与`isolation.files`三策略已由真实consumer和黑盒覆盖；
+  AgentState/Account bootstrap既有形状回归通过，没有提前实现联邦per-Space状态。
+- Memory链路已走真实临时gateway：A Space Message经假Codex隔离Digest生成带来源
+  Memory，B Space新SpaceSession/AgentSession收到常驻索引与该Memory Recall投影。
+- 第一方MCP的`memory_fetch_detail`确认同一generation只写一次`detail_opened`
+  usage signal；派生权重、vault索引缺失/损坏等价重建与embedding sidecar重建均有
+  独立自动化覆盖。
+- Files上传、读取矩阵、Message、下载、单File删除、owner Space级联、路径迁移和
+  失败回滚已进入`verify.mjs`。
+- 2026-07-17自动化基线：`npm test`为285项、282通过、3项显式真实provider
+  smoke跳过；`verify.mjs`为94/94；Web分析、后端`node --check`与
+  `git diff --check`通过。
+- 本切片不代表Phase 5已经冻结；真实浏览器与真实
+  `qwen3-embedding:0.6b`环境闸门仍见`phase-5-closeout.md`。
 
 ## P5-D0：契约冻结
 

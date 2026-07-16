@@ -65,6 +65,8 @@
 }
 
 .vera-bubble__content { grid-column: 2; }
+.vera-bubble__attachments { display: grid; gap: var(--vera-space-xs); grid-column: 2; margin-top: var(--vera-space-sm); }
+.vera-bubble__attachment { border: var(--vera-border-width) solid currentColor; border-radius: var(--vera-control-radius); color: inherit; padding: var(--vera-space-xs) var(--vera-space-sm); text-decoration: none; }
 
 .vera-activity {
   align-self: flex-start;
@@ -126,9 +128,40 @@
   border-top: var(--vera-border-width) solid var(--vera-color-border);
   display: grid;
   gap: var(--vera-space-sm);
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   min-height: var(--vera-composer-height);
   padding: var(--vera-space-sm) var(--vera-window-margin);
+}
+
+.vera-composer__attach {
+  background: transparent;
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  border-radius: var(--vera-bubble-radius);
+  color: var(--vera-color-text);
+  min-height: var(--vera-touch-target);
+  padding: var(--vera-space-sm);
+}
+
+.vera-composer__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--vera-space-xs);
+  grid-column: 1 / -1;
+}
+
+.vera-composer__attachment {
+  align-items: center;
+  background: var(--vera-color-bg);
+  border-radius: var(--vera-control-radius);
+  display: inline-flex;
+  gap: var(--vera-space-xs);
+  padding: var(--vera-space-xs) var(--vera-space-sm);
+}
+
+.vera-composer__attachment button {
+  background: transparent;
+  border: 0;
+  color: var(--vera-color-text-muted);
 }
 
 .vera-work-status { align-items: center; background: var(--vera-color-surface); color: var(--vera-color-text-muted); display: flex; font-size: var(--vera-font-size-small); justify-content: space-between; min-height: var(--vera-touch-target); padding: 0 var(--vera-window-margin); }
