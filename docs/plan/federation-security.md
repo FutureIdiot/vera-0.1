@@ -6,23 +6,27 @@
 
 ## AgentState
 
-- [ ] 跟踪键从`agentId`改为`agentId:spaceId`。
-- [ ] 形状包含`agentId, spaceId, status, detail, lastActiveAt`。
+- [ ] 跟踪键从`agentId`改为`agentId:accountId:spaceId`。
+- [ ] 形状包含`agentId, accountId, spaceId, status, detail, lastActiveAt`。
 - [ ] 状态支持`idle/thinking/typing/reading/coding/reviewing/on_task/away`。
-- [ ] `/api/agent-states`支持`spaceId`与`agentId`过滤。
+- [ ] `/api/agent-states`支持`spaceId`、`accountId`与`agentId`过滤。
 
 ## Presence与离线消息
 
-- [ ] Account持久形状提供`presence`与`lastSeenAt`。
-- [ ] daemon在线状态变化发布`account.presence.updated`。
-- [ ] @离线Agent时不创建Run；时间线写入`phase:"error", label:"agent-offline"`的Activity。
-- [ ] Agent重新上线后不补发离线期间错过的@。
+- [ ] Account公开`presence/lastSeenAt/activeAgentId`；activeAgentId来自会话，不是所有权。
+- [ ] daemon登录/接管/离线发布`account.presence.updated`。
+- [ ] @离线Account时不创建Run；时间线写入`account-offline`错误Activity。
+- [ ] Account重新上线后不补发离线期间错过的@。
 
-## Agent身份
+## Agent身份与Account访问权
 
 - [ ] 新增agent token加载与校验模块，token存于`~/.vera/agent-tokens.json`，不进repo。
 - [ ] Bearer token唯一解析为一个`agentId`；请求参数不得覆盖该身份。
 - [ ] 同一可信身份绑定Vera Memory MCP transport。
+- [ ] Account access key由User生成/轮换/撤销；gateway只保存salted hash/version，明文只返回一次。
+- [ ] enroll只允许Account key创建全新Agent并签发token，不得指定既有Agent；login同时验证Account key与agent token，任何一方都不能单独冒充另一方。
+- [ ] 非默认Agent登录或任一显式takeover必须提供非空reason，并进入可信delegationContext与接管审计。
+- [ ] Key泄露后的轮换撤销旧会话；日志、API、SSE和审计不泄露明文。
 
 ## Owner身份
 
@@ -34,7 +38,7 @@
 
 ## 验收
 
-- [ ] per-Space AgentState互不覆盖。
+- [ ] 同一Agent代表不同Account、或同一pair位于不同Space时，AgentState互不覆盖。
 - [ ] 在线/离线@行为、presence事件和lastSeenAt通过黑盒测试。
-- [ ] 无token、错token、跨Agent冒充和伪造owner头全部拒绝。
+- [ ] 无/错agent token、无/错Account key、跨Agent冒充、跨Account复用与伪造owner头全部拒绝。
 - [ ] 日志与API不泄露token、secret或宿主路径。

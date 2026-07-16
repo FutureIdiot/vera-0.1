@@ -1,7 +1,7 @@
 # Vera Memory Hook 搭建方案
 
 > **整合注记（2026-07-02，Phase 5 动工前生效）**：本文档成文早于接口契约，落地时按下列映射对齐——
-> 1. 术语：`room_id` → `spaceId`；旧`session_id/sessionState`不再承载产品会话。现行边界是SpaceSession（对话窗口）→ AgentSession（per-Agent上下文）→ generation（压缩代次）；下文snake_case只属历史素材。
+> 1. 术语：`room_id` → `spaceId`；旧`session_id/sessionState`不再承载产品会话。现行边界是SpaceSession（对话窗口）→ AgentSession（实际Agent代表某Account的上下文）→ generation（压缩代次）；下文snake_case只属历史素材。
 > 2. 接口边界：`/api/agents/:agentId/memory` 是owner前端管理API；Agent runtime统一使用gateway第一方Vera Memory MCP，tool参数不接受`agentId`。两者共用同一Memory facade/queue，不保留旧`/memory/*`兼容别名；具体形状以api-contract.md为准。
 > 3. 存储：已定稿，见下方《修订：文件库架构》。第 8 节 SQL schema 降级为派生索引的逻辑模型。
 > 4. 缓存纪律（ground truth 技术约束）：记忆注入段必须放 prompt **尾部**（靠近当前消息），不得插入稳定前缀——检索结果逐条消息变化，放前面会打穿 prompt cache。
@@ -72,7 +72,7 @@
 
 ### 现行身份与写入边界
 
-1. Memory 跟 `agentId` 走，不跟 Account 走。同一 Agent 在 Space A 获得并整理的长期 Memory 可在 Space B 检索；该 Agent 的主 Execution 或 subagent Execution 即使绑定不同 Account，也不切换 Memory。
+1. Memory 跟 `agentId` 走，不跟 Account 走。同一 Agent 在被授权代表Account时获得并整理的长期 Memory 可在其后续Execution检索；切换Account只改变可见Space/Workspace/项目数据，不切换、复制或读取其他Agent的Memory。
 2. 跨 Agent 共享必须是未来明示的、有契约和授权的功能；本阶段不因 Space 成员关系、Account 授权或 subagent 派生而隐式共享 Memory。
 3. slug 一经建立不可由普通 PATCH 改名。正式改名只能作为一个 gateway 维护事务执行“新建新 slug → 全库替换双链 → 验证 → 归档旧 slug”；任一步失败都不得留下半改名状态。
 4. 对默认`vera.markdown`，agent、Dream和CLI通过Vera Memory MCP提交create/update/archive/maintenance proposal，gateway memory queue是唯一程序写者；读取同样通过MCP list/search/fetch tools，不直接读取per-Agent vault。自定义Provider仍经同一facade鉴权和编排，但由Provider driver实现其原生事务与版本保证，gateway不绕过driver直写外部存储。
@@ -83,12 +83,12 @@
 1. **Hook定义生命周期触发点，gateway负责执行边界**：`vera.memory.recall`与`vera.memory.write`定义自动读写编排挂在哪个消息生命周期；gateway作为Hook宿主执行检索、更新水位、创建job、限制输入与operation，并在模型返回后校验和落盘。Digest或Dream任务模型不常驻监听对话，也不自行决定什么时候读、什么时候写。
 2. **Recall路径**：`vera.memory.recall`在每条用户消息的上下文编译前，从该Agent的active Memory Provider自动检索，把预算内召回节点追加到当前消息信封尾部；聊天Agent需要横向扩展或正文时，再按需调用Vera Memory MCP的`memory_search`、`memory_fetch_more`、`memory_fetch_detail`。Recall Hook是gateway程序逻辑，不调用任务模型；关闭它只停止自动注入，不影响MCP主动读取。
    Recall sidecar绑定`agentSessionId + generation`。compact、`/new`或CLI binding明确失效换代后清空delivered/cursor并在新generation首次Run重注常驻索引；API稳定history不保存Recall投影。
-3. **Write与Digest路径**：`vera.memory.write`在completed Message保存后观察该Agent的待整理水位，并按Data → Memory的自动trigger策略请求Memory Orchestrator创建`memory_digest` job：`realtime`可在越过字符阈值时立即创建，`scheduled`由Orchestrator在计划时间读取同一水位创建；`manual`由owner显式请求并绕过自动Hook开关。Write Hook本身不推理、不直接写Provider；Digest任务模型只接收冻结Message片段、允许参考的既有Memory及严格输出schema，返回create/update/archive/skip proposal，再由gateway完成来源绑定、事实去重、权限校验和单写者提交。关闭Write只停止`realtime/scheduled`自动Digest，不影响Message保存、基于已保存Message与Digest watermark计算`pendingContext`、owner手动Digest或MCP显式写入提议。
+3. **Write与Digest路径**：`vera.memory.write`在completed Message保存后按`agentId + accountId + spaceSessionId`观察该Agent经当前Account授权可见的待整理水位，并按Data → Memory的自动trigger策略请求Memory Orchestrator创建`memory_digest` job：`realtime`可在越过字符阈值时立即创建，`scheduled`由Orchestrator在计划时间读取同一水位创建；`manual`由owner显式请求并绕过自动Hook开关。`accountId`只冻结证据授权与来源窗口，Memory owner仍是`agentId`。Write Hook本身不推理、不直接写Provider；Digest任务模型只接收冻结Message片段、允许参考的既有Memory及严格输出schema，返回create/update/archive/skip proposal，再由gateway完成来源绑定、事实去重、权限校验和单写者提交。关闭Write只停止`realtime/scheduled`自动Digest，不影响Message保存、基于已保存Message与Digest watermark计算`pendingContext`、owner手动Digest或MCP显式写入提议。
 4. **Dream路径**：Memory Orchestrator按schedule或manual创建聊天外异步maintenance job，只处理既有长期Memory的明确重复合并、语义不变的结构/描述/双链整理和有明确替代项的冗余归档。Dream不接收原始Message正文，因此不得纠正/supersede事实值、凭常识宣布内容过时或删除来源；事实变化回到Digest或owner编辑。
-5. **任务归属与执行资源分离**：Digest与Dream始终归属于Memory所属owner Agent A，proposal也只能写A的active Memory Provider。Data → Memory为两类任务分别保存可选`executorAgentId`（`null`表示A自己）、`modelMode: inherit | fixed`与task model；若选择executor B，B只提供其Home Account connection、adapter/runtime和已通过该任务资格验证的模型，不取得A的Memory所有权，也不成为Hook执行者。`inherit`在入队时解析所选executor的默认聊天模型；`fixed`只能选择该executor Home Account同一connection下、已通过对应任务资格验证的模型。Digest资格与Dream资格分别验证，不互相推定。
-6. **隔离上下文、入队冻结与无静默fallback**：Digest/Dream只接收gateway冻结的受限任务包；即使executor是B，也不得继承B的AgentSession、checkpoint、API history、CLI provider binding、Memory、system prompt、Workspace或Tools。job仍冻结task/provider snapshot；设置变化只影响新job，所选executor/Account/model不可用时明确失败，不静默改投。
+5. **任务归属与执行资源分离**：Digest与Dream始终归属于Memory所属owner Agent A，proposal也只能写A的active Memory Provider。Data → Memory为两类任务分别保存可选`executorAgentId`（`null`表示A自己）、`modelMode: inherit | fixed`与task model；若选择executor B，B只提供自己的Agent runtime revision、adapter和已通过该任务资格验证的模型，不取得A的Memory所有权，也不成为Hook执行者。`inherit`在入队时解析所选executor runtime的默认聊天模型；`fixed`只能选择同一runtime revision下已通过对应任务资格验证的模型。Digest资格与Dream资格分别验证，不互相推定。
+6. **隔离上下文、入队冻结与无静默fallback**：Digest/Dream只接收gateway冻结的受限任务包；即使executor是B，也不得继承B的AgentSession、checkpoint、API history、CLI provider binding、Memory、system prompt、Account、Workspace或Tools。job冻结owner/executor、runtime revision、task model、资格和Provider snapshot，但不绑定执行Account；设置变化只影响新job，所选executor/runtime/model不可用时明确失败，不静默改投其他Agent、Account、模型或Provider。
 7. **Memory Provider**：Agent设置的Data → Memory选择该Agent的唯一主要Memory Provider。默认`vera.markdown`使用本文R1–R6的Markdown vault；选择已安装且声明Memory Provider契约的自定义Provider时，原始数据可保留在其自身文件、数据库或服务中，不要求转换为Obsidian Markdown，第一方Vera Memory MCP、自动检索、Digest与Dream经统一Provider契约访问它。普通第三方MCP仅是并列工具入口，不因提供相似工具就成为Provider，也不会自动进入Vera统一记忆闭环。
-8. **Data → Memory页面**：产品名“Memory结构”对应active Provider，默认显示`Vera（兼容 Obsidian）`；文件位置只读并跳受控路径管理。页面显示长期Memory条数/逻辑大小/token估算，以及按SpaceSession统计的未Digest Message数、字符数、估算token和当前AgentSession压力。跨Space总量不得说成下一轮精确消耗。Digest与Dream分别配置executor/model/trigger|schedule与手动动作。Recall/Write只在Hooks，本页不显示、不投影、不保存其状态。
+8. **Data → Memory页面**：产品名“Memory结构”对应active Provider，默认显示`Vera（兼容 Obsidian）`；文件位置只读并跳受控路径管理。页面显示长期Memory条数/逻辑大小/token估算，以及按Account + SpaceSession统计的未Digest Message数、字符数、估算token和当前AgentSession压力。跨Account/Space总量不得说成下一轮精确消耗。Digest与Dream分别配置executor/model/trigger|schedule与手动动作。Recall/Write只在Hooks，本页不显示、不投影、不保存其状态。
 9. **默认加载与一次迁移**：新Agent默认启用第一方Vera Memory MCP、`vera.memory.recall`与`vera.memory.write`；MCP无semantic Agent/model，Digest/Dream不登记为Hook unit。切换Provider不把普通第三方MCP提升成Provider；配置迁移后不长期双读双写。
 
 > **历史材料边界**：以下第 0–18 节保留最初的 hook 算法、prompt 与 UI 设计素材。其中的随机 `memory_id`、`room_id/session_id`、SQL 真值表、`/memory/*` API、CLI 直写、普通 rename 或隐式全 Agent 共享均不是现行契约。实施时以 R1–R6、上述现行边界与 `api-contract.md` 为准。
@@ -589,7 +589,7 @@ The agent previously stained this memory blue.
 
 ### 6.1 目标
 
-现行M4把Dream定义为Memory Orchestrator按schedule/manual创建的聊天外异步maintenance job，而不是Hook unit。任务归owner Agent，可借另一executor的Home Account runtime，但不继承任何AgentSession、Memory或Workspace。
+现行M4把Dream定义为Memory Orchestrator按schedule/manual创建的聊天外异步maintenance job，而不是Hook unit。任务归owner Agent，可借另一executor自己的Agent runtime与已验证任务模型，但不绑定任何Account，也不继承任何AgentSession、Memory或Workspace。
 
 它是批处理任务：异步启动，只读取 Memory 并向 gateway memory queue 提交维护 proposal，不直接写 vault，不发消息，不占用主流程 context。
 
@@ -1104,7 +1104,8 @@ PATCH /memory/:id/stain
 completed Message保存后触发vera.memory.write观察待整理水位
 → 按Data → Memory的realtime / scheduled自动策略请求创建memory_digest job（manual由owner直接请求）
 → 过滤非对话内容（文档、代码块、工具结果排除）
-→ 冻结Message范围与memoryTaskSnapshot（owner Agent、executor Agent、Home Account、任务model等）
+→ 按owner Agent + source Account + SpaceSession冻结Message范围
+→ 冻结无Account的memoryTaskSnapshot（owner Agent、executor Agent、runtime revision、任务model与资格）
 → 拉取允许参考的相关旧 memories
 → Digest任务模型只返回严格proposal
 → schema / 来源 / 事实身份 / 权限校验
@@ -1257,4 +1258,4 @@ Vera memory 必须满足：
 
 ## 18. 一句话版
 
-Vera memory 的颜色字段是一滴只存在于权威Memory和前端的沉默墨迹：agent 可以在写入和维护记忆时留下它，但普通推送调取时看不见它，也不能解释它；召回跨type开放扩散，节点以查询相关性、图接近度、长期派生权重、单轮交汇置信度和类型适配形成基础分，再经语义去重、粒度选择和可借用软配额重排，`vera.memory.recall`在消息编译前自动注入，`vera.memory.write`在completed Message保存后按配置请求Digest，聊天Agent仍可按需横向扩展、展开正文或沿SourceRef溯源；Digest与Dream都是Memory Orchestrator创建的隔离模型任务，Memory和proposal始终归owner Agent，但可借用另一个executor Agent的Home Account connection/runtime与经验证的低成本模型，且不继承executor的AgentSession、checkpoint、API history、CLI provider binding、Memory、system prompt、Workspace或Tools；两类任务只返回proposal，Digest把未整理Message证据合并归档进长期Memory，Dream只维护既有长期Memory的重复、结构、描述、双链与有替代项的冗余归档，不凭无原文的模型判断纠正事实；Vera只把真正有用的语义注入给agent，用来减少遗忘和重复错误，而不是制造新的标签。
+Vera memory 的颜色字段是一滴只存在于权威Memory和前端的沉默墨迹：agent 可以在写入和维护记忆时留下它，但普通推送调取时看不见它，也不能解释它；召回跨type开放扩散，节点以查询相关性、图接近度、长期派生权重、单轮交汇置信度和类型适配形成基础分，再经语义去重、粒度选择和可借用软配额重排，`vera.memory.recall`在消息编译前自动注入，`vera.memory.write`按实际Agent + source Account + SpaceSession的证据窗口在completed Message保存后请求Digest，聊天Agent仍可按需横向扩展、展开正文或沿SourceRef溯源；Digest与Dream都是Memory Orchestrator创建的隔离模型任务，Memory和proposal始终归owner Agent，但可借用另一个executor Agent自己的runtime revision与经验证的低成本模型，不绑定执行Account，也不继承executor的AgentSession、checkpoint、API history、CLI provider binding、Memory、system prompt、Workspace或Tools；两类任务只返回proposal，Digest把未整理Message证据合并归档进长期Memory，Dream只维护既有长期Memory的重复、结构、描述、双链与有替代项的冗余归档，不凭无原文的模型判断纠正事实；Vera只把真正有用的语义注入给agent，用来减少遗忘和重复错误，而不是制造新的标签。

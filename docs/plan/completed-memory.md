@@ -13,8 +13,9 @@
 - X1完成后最终回归再次通过：`npm test`退出码为0、`node scripts/verify.mjs`
   为94/94、`npm run analyze:web`与`git diff --check`通过；后端
   `node --check`已在F1实现验收中通过，本次冻结提交不含后端代码变更。
-- Phase 5下一阶段唯一指向`federation-account.md`，即Phase 5.5的
-  Home Account / Execution / Workspace迁移；本冻结不包含VPS迁移或原生工程生成。
+- Phase 5下一阶段唯一指向`federation-account.md`。2026-07-17已在Phase 5.5
+  契约中把早先Home Account方案替换为Account-first接入；本Phase 5冻结的per-Agent
+  Memory、Files与上下文实现不因此改写。
 
 ## P5-F1：Files
 
@@ -50,7 +51,8 @@
 
 ## P5-D0：契约冻结
 
-- 已冻结Home Account / Execution / Workspace、per-Agent Memory、slug不可普通改名和gateway单写者。
+- 已冻结per-Agent Memory、slug不可普通改名和gateway单写者；当时记录的Home Account
+  执行路由已由后续Phase 5.5 Account-first契约取代，不属于Phase 5实现事实。
 - 默认Provider为`vera.markdown`；Obsidian兼容是该Provider特性，不是所有Provider的强制格式。
 - 第一方Vera Memory MCP是统一Agent访问facade；自定义Provider运行时仍未实现。
 
@@ -93,7 +95,8 @@
 ## P5-M4后端：Provider、权重与Dream
 
 - 已完成per-Agent Provider/Digest/Dream配置、任务资格、冻结快照和旧全局配置一次迁移。
-- Digest/Dream始终写owner Agent的Provider；executor只提供Home Account connection/runtime与已验证任务模型，无静默fallback。
+- Digest/Dream始终写owner Agent的Provider；executor只提供自己的runtime与已验证任务模型，
+  无静默fallback。Phase 5进程内Account连接参数是待由5.5迁移的承载旧形态。
 - 已完成可重建派生权重。
 - Dream只允许语义不变的结构/description/links更新、明确重复merge和带active replacement的冗余archive；无Message证据时不得纠正事实。
 - 已完成Dream持久job、批量单写者、receipt恢复和IANA schedule。
