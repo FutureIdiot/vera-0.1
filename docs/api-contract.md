@@ -7,16 +7,16 @@
 
 ## 一、通用约定
 
-- 所有接口挂在 `/api/` 下，请求与响应均为 JSON（SSE 除外）。
+- 所有接口挂在 `/api/` 下；除SSE与Files原始二进制上传/下载外，请求与响应均为JSON。
 - 时间一律 ISO 8601 UTC 字符串（`2026-07-02T03:00:00.000Z`）。
-- ID 带类型前缀的随机串：`agt_` / `spc_` / `sps_`（SpaceSession）/ `ags_`（AgentSession）/ `msg_` / `run_`。
+- ID 带类型前缀的随机串：`agt_` / `spc_` / `sps_`（SpaceSession）/ `ags_`（AgentSession）/ `msg_` / `fil_` / `run_`。
 - 错误统一形状，HTTP 状态码配合语义：
 
 ```json
 { "error": { "code": "not_found", "message": "space spc_xxx does not exist" } }
 ```
 
-`code` 枚举：`invalid_request`(400) / `control_command_required`(400) / `memory_cursor_invalid`(400) / `unauthorized`(401) / `forbidden`(403) / `not_found`(404) / `memory_cursor_expired`(410) / `conflict`(409) / `account_busy`(409) / `session_busy`(409) / `context_capacity`(409) / `history_conflict`(409) / `memory_job_active`(409) / `memory_task_unavailable`(409) / `invalid_memory_file`(422) / `memory_provider_unsupported`(422) / `adapter_unavailable`(502) / `memory_retrieval_unavailable`(503) / `memory_provider_unavailable`(503) / `internal`(500)。`account_busy`专指目标Account的活跃Execution租约已被占用；`session_busy`表示SpaceSession仍有未结束Run或compact，不能执行`/new`；`context_capacity`表示目标AgentSession在hard水位前未能完成安全压缩；`history_conflict`表示API Run以过期`historyVersion`提交结果；`control_command_required`表示精确`/new`或`/compact`被错误提交到Message端点。`memory_job_active`表示Provider切换被该Agent在途Digest/Dream阻止；`memory_task_unavailable`专指已保存的Digest/Dream执行Agent、其Home Account、任务模型或对应资格当前不可用；`memory_provider_unsupported`表示候选未声明/未通过Memory Provider契约或不支持所需操作；`memory_provider_unavailable`表示active Provider已绑定但当前不可达。不得用泛化的`conflict`隐去这些原因。错误对象可带领域专用的`details.reason`等安全字段，但不得包含secret、provider原文、宿主路径或改变`code/message`的通用包络。
+`code` 枚举：`invalid_request`(400) / `control_command_required`(400) / `memory_cursor_invalid`(400) / `unauthorized`(401) / `forbidden`(403) / `not_found`(404) / `memory_cursor_expired`(410) / `conflict`(409) / `account_busy`(409) / `session_busy`(409) / `context_capacity`(409) / `history_conflict`(409) / `memory_job_active`(409) / `memory_task_unavailable`(409) / `file_too_large`(413) / `unsupported_file_type`(415) / `invalid_file`(422) / `invalid_memory_file`(422) / `memory_provider_unsupported`(422) / `adapter_unavailable`(502) / `memory_retrieval_unavailable`(503) / `memory_provider_unavailable`(503) / `internal`(500)。`account_busy`专指目标Account的活跃Execution租约已被占用；`session_busy`表示SpaceSession仍有未结束Run或compact，不能执行`/new`；`context_capacity`表示目标AgentSession在hard水位前未能完成安全压缩；`history_conflict`表示API Run以过期`historyVersion`提交结果；`control_command_required`表示精确`/new`或`/compact`被错误提交到Message端点。`file_too_large`表示请求声明或流式读取已超过配置上限；`unsupported_file_type`表示扩展名不在白名单或声明MIME与扩展冲突；`invalid_file`表示附件物理文件缺失、hash不符、是符号链接或不完整。`memory_job_active`表示Provider切换被该Agent在途Digest/Dream阻止；`memory_task_unavailable`专指已保存的Digest/Dream执行Agent、其Home Account、任务模型或对应资格当前不可用；`memory_provider_unsupported`表示候选未声明/未通过Memory Provider契约或不支持所需操作；`memory_provider_unavailable`表示active Provider已绑定但当前不可达。不得用泛化的`conflict`隐去这些原因。错误对象可带领域专用的`details.reason`等安全字段，但不得包含secret、provider原文、宿主路径或改变`code/message`的通用包络。
 
 - Secret 永不出现在任何响应中。API 型 agent 的 key 存 `~/.vera/secrets.json`，接口只引用键名（`secretRef`）。
 - 生产部署的全部 `/api/*` 只允许经 Tailscale Serve 私网入口到达。普通客户端请求校验 Serve 注入的 owner Tailscale identity；`/api/agent/*` 在 tailnet 门禁之外再用 `Authorization: Bearer <vera-agent-token>` 识别具体 agent（token 文件 `~/.vera/agent-tokens.json`）。不定义公网匿名入口。详见 ground truth 2.4。
@@ -249,6 +249,7 @@ Workspace = Account 对应的执行环境与项目工作边界；`Account 1:1 Wo
   "author": { "type": "user" },
   "target": { "type": "broadcast" },
   "content": "大家看一下这个报错",
+  "fileIds": ["fil_f1e2"],
   "runId": null,
   "status": "completed",
   "createdAt": "…"
@@ -257,7 +258,33 @@ Workspace = Account 对应的执行环境与项目工作边界；`Account 1:1 Wo
 
 - `author`：`{ "type": "user" }` 或 `{ "type": "agent", "agentId": "agt_…" }`。用户和 agent 在消息层对等。
 - `target`：`{ "type": "broadcast" }` 或 `{ "type": "direct", "agentIds": ["agt_…"] }`。
+- `fileIds` `[P5-F1]`：可选、默认`[]`，最多`config.files.maxAttachmentsPerMessage`项，必须去重。Message提交时gateway按当前目标Space与`isolation.files`重新校验每个File可读且未删除；非法、重复或不可读File id返回400/403/404，整条Message不落地。`content`与`fileIds`至少一项非空，因此允许纯附件Message。
+- 时间线、`message.created`与`message.completed`在Message安全投影旁派生`attachments:[{fileId,name,mime,sizeBytes,state:"available"|"deleted"|"unavailable"}]`；该字段不持久化，不包含物理存储名、hash或绝对路径。共享撤销、删除或owner Space永久删除后，历史Message仍保留`fileIds`，投影状态随当前事实变化。
 - `runId`：agent 消息关联其产生 run；用户消息为 null。
+
+### File `[P5-F1]`
+
+```json
+{
+  "id": "fil_f1e2",
+  "ownerSpaceId": "spc_a1b2",
+  "name": "error-log.txt",
+  "mime": "text/plain",
+  "sizeBytes": 1280,
+  "sha256": "sha256:…",
+  "sharedSpaceIds": ["spc_b2c3"],
+  "version": 1,
+  "createdAt": "…",
+  "updatedAt": "…",
+  "deletedAt": null
+}
+```
+
+- `ownerSpaceId`创建后不可修改；`sharedSpaceIds`只保存现存且不等于owner的明确Space id，去重并按id稳定排序。读取是否允许由当前`isolation.files`结合这两个字段计算，不把全局策略复制进File记录。
+- 对owner HTTP返回的File可带`canManage:true`；共享/全局可读投影带`canManage:false`。公开响应不得含物理`storageName`、临时文件名、附件根路径或宿主真实路径。
+- `sha256`只用于gateway完整性与迁移验证；列表可省略，详情仍可返回该摘要。删除把`deletedAt`置为时间戳、version加1并删除二进制；墓碑不出普通列表，历史Message附件投影仍可使用其`name/mime/sizeBytes`。
+- 同名或同hash不会覆盖或合并，每次成功上传都创建新id。展示名必须是单个文件名，拒绝`/`、`\`、NUL、`.`、`..`与路径穿越编码。
+- 首版扩展/MIME白名单：`.txt text/plain`、`.md text/markdown|text/plain`、`.json application/json`、`.csv text/csv|text/plain`、`.pdf application/pdf`、`.png image/png`、`.jpg|.jpeg image/jpeg`、`.gif image/gif`、`.webp image/webp`、`.zip application/zip`、`.docx application/vnd.openxmlformats-officedocument.wordprocessingml.document`、`.xlsx application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`、`.pptx application/vnd.openxmlformats-officedocument.presentationml.presentation`。空MIME或`application/octet-stream`可按扩展名归一；其他冲突返回415，当前阶段不做病毒扫描或内容智能识别。
 
 **多气泡规则（产品需求，契约级）**：一次 run 的回复**不是一条巨长消息，而是一串短消息**。gateway 在流式输出中按段落边界切分：当前气泡以 `status: "streaming"` 创建、随 delta 增长，检测到切分点即定稿（`completed`）并开下一个气泡。一个 run 产生 N 条 Message 记录，每条是独立气泡，历史记录里也保持切分后的形态。切分策略（边界规则、最小/最大长度）是 gateway 配置项，不硬编码；无段落边界的超长文本按就近空格软切；前端只负责渲染，不做切分。若 adapter 未产生任何 delta 只返回全文，gateway 以全文兜底切气泡（见 adapter-interface「run() 返回」）。
 
@@ -418,11 +445,26 @@ Vera全局Settings中的`#/settings/accounts`只负责系统层管理：按Agent
 | POST | `/api/spaces/:id/session/_compact` `[P5-C1]` | body严格为`{requestId}`；私聊压唯一Agent，群聊默认压当前全部seats。返回202`{job}`，命令本身不落Message。target创建时冻结Message高水位及已排在compact前面的active Run ids；后续新建pending Run的trigger不得进入本次checkpoint，排在前面的Run则等其完成后按完整轮次纳入。每个target取得对应Home Account的同一排他租约后执行；compact不是Run但不得与该Account Execution并发。各Agent独立提交generation，部分失败不回滚已成功项；gateway重启时遗留queued/running target统一失败终态化，旧generation保持有效 |
 | GET | `/api/spaces/:id/session/_compact/jobs/:jobId` `[P5-C1]` | 返回`{job:{id,spaceId,spaceSessionId,status,targets:[{agentId,agentSessionId,fromGeneration,toGeneration?,status,error?}],createdAt,finishedAt?}}`；job与target status都只允许`queued/running/succeeded/failed/cancelled`，job按targets派生；不返回checkpoint、history或provider binding |
 
+### Files `[P5-F1]`
+
+所有读取路径都把`:id`解释为“请求读取的Space”，不是File owner。gateway先确认Space存在，再按当前`isolation.files`判定目标File是否对该Space可读；只有`ownerSpaceId === :id`可更新共享范围或删除。
+
+| Method | Path | 说明 |
+|---|---|---|
+| GET | `/api/spaces/:id/files` | 返回该Space当前可读且未删除的`{files:[File safe summary],policy}`，按`createdAt desc,id asc`。`policy`为当前`isolation.files`；共享/全局读到的条目标`canManage:false`与owner Space安全摘要 |
+| POST | `/api/spaces/:id/files` | 上传到该owner Space；已归档Space返回409。请求体是原始二进制，`Content-Type`为客户端声明MIME，`X-Vera-File-Name`为`encodeURIComponent(displayName)`后的ASCII值，`Content-Length`可选。gateway流式写唯一临时文件并同时计数/hash；超过`config.files.maxUploadBytes`立即终止并清理。完整写入、白名单校验、flush与原子rename成功后才插入File元数据，返回201`{file}`并发布`file.created` |
+| GET | `/api/spaces/:id/files/:fileId` | 返回`{file}`详情。不可读按404处理，避免把其他Space私有File的存在变成探针；墓碑同样404 |
+| GET | `/api/spaces/:id/files/:fileId/download` | 流式返回二进制；响应`Content-Type`取权威MIME，`Content-Length`取权威大小，`Content-Disposition: attachment; filename*=UTF-8''<encoded>`。打开前必须拒绝符号链接、缺失文件、大小/hash不符；不支持Range的首版不得伪造206 |
+| PATCH | `/api/spaces/:id/files/:fileId` | 仅owner Space；body严格为`{sharedSpaceIds,ifMatch}`，`ifMatch`为整数version。共享id必须全部是现存Space且不含owner；成功返回`{file}`并发布`file.updated`。版本冲突409，`details.current.file`返回当前安全版本 |
+| DELETE | `/api/spaces/:id/files/:fileId?ifMatch=<version>` | 仅owner Space；二次确认由前端负责。成功删除二进制、保留墓碑元数据并返回204，发布`file.deleted {spaceId,fileId}`。不存在/已删除404，版本不符409 |
+
+上传中断、socket错误、大小超限、MIME冲突、flush/rename失败均不得创建File记录；启动时只可清理Files根内gateway命名的过期临时文件，不得删除未知用户文件。附件根布局只使用gateway生成的owner Space目录与storage name，任何显示名都不参与路径拼接。File详情与下载都要在打开后对`lstat`/size/hash做完整性校验，符号链接或替换文件返回422 `invalid_file`。
+
 **发消息**（用户或 agent 均走此接口；agent 发消息 `[P4]`）：
 
 ```json
 // 请求
-{ "author": { "type": "user" }, "target": { "type": "broadcast" }, "content": "…" }
+{ "author": { "type": "user" }, "target": { "type": "broadcast" }, "content": "…", "fileIds": ["fil_…"] }
 // 响应 201
 { "message": { …Message… }, "runs": [ { …Run… } ] }
 ```
@@ -849,6 +891,9 @@ data: { "seq": 1042, "type": "message.delta", "ts": "…", "data": { … } }
 | `agent.state.updated` | `{ agentState }` | per-Space AgentState 现 `agentId/spaceId/status/detail/lastActiveAt` 五字段（联邦形态精化） |
 | `account.presence.updated` | `{ accountId, presence, lastSeenAt }` | Account 所绑定 Workspace 宿主 daemon 的可执行性广播；不表示 Account 已被某 Agent 登录或独占。活跃控制权以 Execution 租约为准 |
 | `space.updated` / `agent.updated` / `account.upserted` | `{ space }` / `{ agent }` / `{ account }` | 配置变更广播；`account.upserted` 覆盖 account 创建与修改，前端按 `id` 合并联系人 |
+| `file.created` | `{spaceId,file}` | owner Space上传完整提交后发布；`file`是安全投影，不含storage name、hash或路径 |
+| `file.updated` | `{spaceId,file}` | owner修改`sharedSpaceIds`并提交version后发布；Files页按当前请求Space重新拉列表，不把事件本身当读取授权 |
+| `file.deleted` | `{spaceId,fileId}` | owner删除二进制并提交墓碑后发布；聊天页把匹配附件标成deleted，Files页重新拉列表 |
 | `space.deleted` | `{ spaceId }` | 已归档Space永久删除且Memory与store清理全部提交后发布；客户端移除活跃与归档投影 |
 | `space-session.archived` / `space-session.created` `[P5-C1]` | `{spaceId,spaceSession}` | `/new`的存储事务完整提交后才依次广播旧窗口归档与新active窗口；事件之间不存在可写的中间状态，归档窗口不会再产生写事件 |
 | `agent-session.compaction.updated` `[P5-C1]` | `{spaceId,spaceSessionId,jobId,agentSession:{id,agentId,generation,context,status}}` | 自动或手动compact进度/结果；不含checkpoint、history或provider binding |
@@ -903,9 +948,9 @@ run.ended          (completed)
 
 ### 全屏聊天主页 `#/spaces/:spaceId`
 
-- **SSE 事件输入**：既有Message/Activity/Approval/Run事件必须同时匹配当前`spaceSessionId`；新增`space-session.archived`、`space-session.created`切换active窗口，`agent-session.compaction.updated`刷新per-Agent generation/压力与手动job结果。归档历史页不消费写事件。
+- **SSE 事件输入**：既有Message/Activity/Approval/Run事件必须同时匹配当前`spaceSessionId`；新增`space-session.archived`、`space-session.created`切换active窗口，`agent-session.compaction.updated`刷新per-Agent generation/压力与手动job结果。`file.deleted`命中当前时间线附件时把链接标成deleted；`file.updated`不直接扩大本地授权，必要时重取时间线。归档历史页不消费写事件。
 - **API 读取**：`GET /api/bootstrap`（首屏）；`GET /api/spaces/:id/timeline?before=&limit=50`（向上翻页加载更早历史）。
-- **API 写入**：普通正文走`POST /api/spaces/:id/messages`；精确`/compact`与`/new`分别走`POST .../session/_compact`与`POST .../session/_new`，不落Message；取消Run和Approval回答沿用既有端点。
+- **API 写入**：普通正文/附件引用走`POST /api/spaces/:id/messages`；composer先通过Files上传端点取得File id，再随Message提交。精确`/compact`与`/new`分别走`POST .../session/_compact`与`POST .../session/_new`，不落Message；取消Run和Approval回答沿用既有端点。
 - **空错态**：Space 不存在（404）→ 主区显示「Space 不存在或已归档」+ 返回导航入口；时间线空 → 「还没有消息，发一条开始」；时间线长 → DOM 上限 200 items，更早走 `?before=` 分页；approval 失效（409）→ 卡片灰化；发送失败（4xx/5xx）→ composer 内联错误 + 保留草稿；SSE 断连 → 时间线冻结 + 顶部「重连中」；已归档 Space 通过此路由进入 → 消息发送返回 409，主区显示「已归档，去设置恢复」入口。
 
 ### SpaceSession历史 `#/spaces/:spaceId/history`、`#/spaces/:spaceId/history/:spaceSessionId` `[P5-C1]`
@@ -913,6 +958,13 @@ run.ended          (completed)
 - **API读取**：`GET /api/spaces/:id/sessions?status=archived`与指定Session timeline；只读分页。
 - **API写入**：无。归档SpaceSession不提供restore、composer、Run、compact或编辑。
 - **空错态**：无归档窗口显示“还没有历史对话”；当前SpaceSession不得混入归档列表。
+
+### Space Files `#/spaces/:spaceId/files` `[P5-F1]`
+
+- **SSE事件输入**：`file.created/updated/deleted`与`space.deleted`；事件只触发按当前Space重拉列表，不能绕过读取策略直接把事件里的File插入页面。
+- **API读取**：`GET /api/spaces/:id/files`；用户展开详情时`GET .../:fileId`，下载使用`GET .../:fileId/download`。页面可复用bootstrap中的Space列表显示owner与共享目标名称，不额外创建Files专用Space目录。
+- **API写入**：上传、owner共享列表PATCH、owner DELETE沿Files端点。上传按钮复用platform `pickFile`；Web是受限`<input type=file>`，原生能力未实现时明确显示unsupported。
+- **空错态**：Space不存在→整页“Space不存在”并返回；列表空→“这个Space还没有附件”；共享进来的File明确标“来自X，只读”；上传中显示逐文件状态且中断后重新拉列表确认无脏记录；413/415/422显示稳定原因；SSE断连时冻结列表并显示“重连中”；已归档Space可读/下载但禁用上传、共享修改与删除。
 
 ### Space导航 `#/spaces`（右滑 / 顶栏开关 / 打开期间常驻）
 
@@ -924,7 +976,7 @@ run.ended          (completed)
 ### 当前Space设置 `#/spaces/:spaceId/settings`
 
 - **SSE 事件输入**：`space.updated`（外部改动回显，多端同步）；`agent.updated` / `account.upserted` / `account.presence.updated`（参与 Agent 列表状态）。
-- **API 读取**：`GET /api/bootstrap`（参与 Agent + seats 组合）；Phase 6 前不读取或显示 Space Module，契约落地后再读取独立 binding API。
+- **API 读取**：`GET /api/bootstrap`（参与 Agent + seats 组合）；页面提供进入`#/spaces/:spaceId/files`的普通导航链接，不在设置页预取File列表。Phase 6 前不读取或显示 Space Module，契约落地后再读取独立 binding API。
 - **API 写入**：`PATCH /api/spaces/:id`（一次提交 seats / notifications / name / topic；Seat 字段 `agentId` / `responseMode` / `respondTo` / `blockAgentIds` 全在此）。
 - **空错态**：Space 不存在 → 整页「Space 不存在」+ 返回；历史/异常记录无 seats → 「还没有 Agent 参与」并允许选择至少一个Agent修复，保存时不得仍为空；保存失败 → 字段级错误回显，不整页崩溃；Phase 6 契约落地前不显示 Space Module 区；离开未保存改动 → 浏览器原生 confirm。
 
@@ -983,9 +1035,9 @@ run.ended          (completed)
 ### 路径管理 `#/settings/paths`
 
 - **SSE 事件输入**：无。
-- **API 读取**：`GET /api/paths`（返回 memory.vaultPath 当前值 + 是否存在 + 记忆条数；`gateway.dataPath` 当前值只读展示 + 大小估算；env-only 参数如 port/SSE 心跳不在本接口，去 `/api/status`）。
-- **API 写入**：`POST /api/paths/validate`（body `{ key, value }`，预检目标路径：绝对路径 / 可写或可创建 / 不在仓库内 / 磁盘空间足够；返回 `{ ok, errors[], warnings[], normalized }`，不写盘）；`POST /api/paths/migrate`（body `{ key, target }`：对 `memory.vaultPath` 走「校验 → mv → 改 config → 返回新值」；对 `gateway.dataPath` 走「校验 → 备份 → 复制 → 验证 → 改 config override → 返回 `{ restartRequired: true }`」，实际切换需 gateway 重启；旧路径留 `.legacy` 备份不自动删）。
-- **空错态**：路径校验失败 → 字段下方红字 + 不允许进入 migrate；migrate 失败 → toast 显示错误 + 路径不动（回滚已内置）；gateway.dataPath migrate 成功 → 「重启 gateway 后生效」+ 重启按钮（仅本地开发 / systemd manage 场景可用；VPS 部署后由 systemd 自重启）；memory.vaultPath 改完 → 直接生效（memory 模块重开）+ 不需要重启。
+- **API 读取**：`GET /api/paths`（返回memory vault、Files附件根的当前值/存在/计数/大小，以及`gateway.dataPath`当前值与大小估算；env-only参数如port/SSE心跳不在本接口，去`/api/status`）。
+- **API 写入**：`POST /api/paths/validate`与`POST /api/paths/migrate`支持`memory.vaultPath`、`files.attachmentsPath`与`gateway.dataPath`。Files迁移走「校验空目标→排空在途上传→搬移owner目录→逐File size/hash验证→写override→热切换」；失败恢复设置与已搬目录。gateway dataPath仍需重启。
+- **空错态**：路径校验失败 → 字段下方红字 + 不允许进入migrate；migrate失败 → toast显示错误 + 路径不动；gateway.dataPath成功后提示重启；Memory与Files热迁移成功后立即重读摘要，不需要重启。
 
 ### 中控台 `#/settings/control-center`
 
@@ -1012,14 +1064,14 @@ ground truth 4.1 末段把可配置路径分两类：用户数据位置（Memory
 | `memory.vaultPath` | Obsidian 兼容 vault 根目录 | 是 | 普通（仅 markdown 文件，失败不危及事实来源） |
 | `gateway.dataPath` | gateway 持久化数据根目录 | 是（仅 migrate，无直接文本框） | 高（含agents/spaces/SpaceSessions/AgentSessions/messages/runs全部事实来源） |
 | `accounts.*.workspace` `[P5.5]` | per-Account Workspace 绑定（`hostId/path/status/policy`）；实际文件在 daemon 宿主 | 否（daemon 报告，gateway 校验并存绑定） | 普通 |
-| `files.attachmentsPath` `[P5]` | Space 内附件存储根 | 否 | 普通 |
+| `files.attachmentsPath` `[P5-F1]` | Space附件二进制存储根 | 是 | 普通（元数据仍在gateway store，迁移需逐文件验证） |
 
 ### 端点
 
 | Method | Path | 说明 |
 |---|---|---|
-| GET | `/api/paths` | 返回当前路径摘要：`{ paths: { memory: { vaultPath, exists, memoryCount, legacyUnscopedCount }, gateway: { dataPath, sizeBytes, restartRequired: false } } }`。`memoryCount` 统计所有 `<agentId>/` 子目录中的记忆，不包含根目录未归属文件。`gateway.dataPath.sizeBytes` 是目录递归大小估算（du 等价），用于路径管理页展示。**不返回** port / SSE / store 节流等 env 配置（去 `/api/status`）。 |
-| POST | `/api/paths/validate` | body `{ key, value }`，`key` ∈ `memory.vaultPath` / `gateway.dataPath`；`value` 为绝对路径字符串（相对路径规范化为相对 cwd 的绝对）。返回 `{ ok: bool, errors: string[], warnings: string[], normalized: string }`，**不写盘**。校验项：绝对路径；路径可写或可创建（父目录存在且可写）；不在仓库工作树内（防止用户把 vault 指到 `~/projects/Vera-0.0.1/`）；对 `gateway.dataPath` 额外校验：目标目录为空或仅含可识别的 Vera store 文件（防覆盖陌生数据）；磁盘剩余空间 ≥ 当前 dataPath 大小（迁移用）。 |
+| GET | `/api/paths` | 返回当前路径摘要：`{paths:{memory:{vaultPath,exists,memoryCount,legacyUnscopedCount},files:{attachmentsPath,exists,activeCount,sizeBytes},gateway:{dataPath,sizeBytes,restartRequired:false}}}`。`memoryCount`统计所有`<agentId>/`子目录；Files计数只含未删除File，大小按权威元数据汇总并可与磁盘校验。**不返回**port/SSE/store节流等env配置。 |
+| POST | `/api/paths/validate` | body `{ key, value }`，`key` ∈ `memory.vaultPath` / `files.attachmentsPath` / `gateway.dataPath`；`value`为路径字符串并规范化为绝对路径。返回 `{ok,errors,warnings,normalized}`，不写盘。公共校验：可写/可创建、不在仓库工作树、源目标不互相包含、目标不是符号链接；Files目标必须为空，且磁盘空间≥当前active附件逻辑字节；gateway目标只允许已识别store文件。 |
 | POST | `/api/paths/migrate` | body `{ key, target }`；migrate 是 validate + 实际搬移 + 改 config override 的合动作。返回 `{ ok, key, from, to, restartRequired }`。失败时路径不动（已搬移的部分回滚），返回 400/409 + `{ errors }`。 |
 
 **migrate 各 key 行为**：
@@ -1027,6 +1079,8 @@ ground truth 4.1 末段把可配置路径分两类：用户数据位置（Memory
 - `memory.vaultPath`：
   1. 检查根目录未归属 `*.md`（存在则 409）→ 2. validate target → 3. `mkdir -p target` → 4. 把当前 vault 下**所有 agent 子目录**整体移到 target（保留 `<agentId>/` 子目录结构）→ 5. 验证 target 内子目录数与文件数一致 → 6. `PATCH /api/settings` 写 `paths.memoryVaultPath = target` override 并等待落盘 → 7. **gateway 热替换 memory 模块的 vaultPath**（memory 模块提供 `reopen({ vaultPath })` 方法，paths-routes 调用后立即生效；后续`listMemories/getMemory`与检索facade的`residentIndex/search/fetch_detail`都经该memory实例读取新路径）→ 8. 返回 `{ restartRequired: false }`。原 vault 目录留空不删（用户自行清理）。失败任一步回滚：恢复 setting override、把已搬到 target 的子目录 mv 回原 vault。
 - `.vera-index/`是可重建派生缓存，不属于vault迁移的用户数据；上一步“所有agent子目录”只匹配合法`<agentId>/`，不得复制`.vera-index/`。切换后在新vault从权威Markdown全量重建普通索引和embedding sidecar；旧sidecar不得继续标current。
+- `files.attachmentsPath`：
+  1. 取得Files领域排他锁并等待在途上传/删除结束 → 2. validate空目标 → 3. 搬移当前根下gateway生成的`<ownerSpaceId>/`目录，未知项导致409而不是顺手移动 → 4. 逐条读取未删除File元数据，在target中验证普通文件、size与sha256，任一缺失/符号链接/不一致都失败 → 5. 写`paths.filesAttachmentsPath` override并flush → 6. Files服务热`reopen`到target → 7. 返回`restartRequired:false`。失败时恢复override、服务根与所有已搬目录；旧根留空不删。
 - `gateway.dataPath`：
   1. validate target → 2. 复制当前 dataPath 全部内容到 target（rsync 等价，保留文件权限）→ 3. 在 target 上启动一个临时 store loader 试加载（只读模式，确认无损坏）→ 4. 通过后，`PATCH /api/settings` 写 `paths.gateway.dataPath = target` override——**注意 override 写入的是当前运行中的 settingsStore（仍在旧 dataPath）**，旧 dataPath 的 `settings.json` 因此获得 `paths.gateway.dataPath = target` override → 5. 旧 dataPath 不动（保留作回滚锚点），返回 `{ restartRequired: true }`。**gateway 实际切换到 target 在下次重启后生效**：server.js 启动时先从 env 默认 dataPath 读 `settings.json`，发现 `paths.gateway.dataPath` override → 用 override 路径建 store（见下「启动顺序」）。
 - **回滚**：migrate 失败任一步：已复制到 target 的内容删除；settings.json 不写 override；旧路径不动。重启后若 store 在新 path 加载失败 → gateway 启动报错（不做静默回滚——dataPath 是事实来源，路径错误必须响亮失败让用户介入）。
@@ -1036,15 +1090,15 @@ ground truth 4.1 末段把可配置路径分两类：用户数据位置（Memory
 2. **先读 `<config.dataPath>/settings.json`** 中的 `paths.gateway.dataPath` override（一次性轻量读，不走完整 settingsStore 构造）
 3. 若 override 存在且指向不同路径 → **将 `config.dataPath` 替换为 override 值**，后续 store / settingsStore / memory 全部用新路径
 4. 若 override 不存在或读取失败 → 用 env 默认 `config.dataPath`（当前行为不变）
-5. 同理读 `paths.memoryVaultPath` override 替换 `config.memory.vaultPath`
+5. 同理读`paths.memoryVaultPath`与`paths.filesAttachmentsPath` override，分别替换`config.memory.vaultPath`与`config.files.attachmentsPath`
 
 这一步消除「settings 在 dataPath 内」的 chicken-and-egg：启动只做一次轻量 JSON 读（不是完整 settingsStore），拿到 override 后再用真实路径建 store / settingsStore。
 
-**字段新增到 settings 白名单**：`paths.memoryVaultPath`（string）、`paths.gateway.dataPath`（string）。两个 key 都支持 `null` 恢复 config 默认（即 env `VERA_MEMORY_VAULT_PATH` / `VERA_DATA_PATH` 当前值）。**`paths.gateway.dataPath = null` 不会自动回滚已迁移的数据**——只是把 override 清掉，gateway 仍读 env 当前值；已迁移到 target 的数据需要用户手动 rsync 回 env 路径或在 env 改路径后重启。
+**字段新增到 settings 白名单**：`paths.memoryVaultPath`、`paths.filesAttachmentsPath`、`paths.gateway.dataPath`（均为string）。三个key都支持`null`恢复config默认（env分别为`VERA_MEMORY_VAULT_PATH`、`VERA_FILES_ATTACHMENTS_PATH`、`VERA_DATA_PATH`）。清除override不自动把已经迁移的数据搬回旧根。
 
 ### 持久化
 
-`paths.*` 与 `appearance.*` / 系统字段一样落 `<dataPath>/settings.json` override；consumer 是 server.js boot 时读 settingsStore override 决定实际 dataPath / vaultPath（**注意**：gateway.dataPath 是 chicken-and-egg——settings 文件本身在 dataPath 内，迁移后 settings.json 也会随 dataPath 一起搬走，不冲突）。
+`paths.*` 与 `appearance.*` / 系统字段一样落 `<dataPath>/settings.json` override；consumer是server.js boot时读settings override决定实际dataPath/vaultPath/attachmentsPath。Memory与Files迁移在当前进程热切换；gateway.dataPath仍在下次重启切换。
 
 ## 八、中控台 Status API `[P4.6/F1]`
 
@@ -1134,8 +1188,8 @@ ground truth 4.1 末段把可配置路径分两类：用户数据位置（Memory
     async requestPermission(): "granted" | "denied" | "unsupported",
     async notify({ title, body, spaceId, messageId }): "shown" | "unsupported",
   },
-  // 文件选择：Space Files / 路径校验回执
-  async pickFile({ accept? }): { path, name, mime } | unsupported,
+  // 文件选择：source是平台私有且只在当前进程使用的上传源；不得持久化或进API JSON
+  async pickFile({ accept? }): { name, mime, size, source } | unsupported,
   async pickDirectory(): { path } | unsupported,
   // 键盘 / 返回：原生壳决定是否拦截
   keyboard: { insets: { bottom, top }, onInsetChange(cb): unsubscribe },
@@ -1156,7 +1210,7 @@ ground truth 4.1 末段把可配置路径分两类：用户数据位置（Memory
 
 Web 实现位于 `src/platform/web.js`，对原生能力返回 `unsupported`：
 - `notifications.notify` → Web Notification API（permission denied 时返 `unsupported`）
-- `pickFile` / `pickDirectory` → `<input type="file">` / `showDirectoryPicker()`（不支持时返 `unsupported`）
+- `pickFile` → 受限`<input type="file">`，返回`source: File`供同源fetch原始body使用；取消时返`unsupported`。`pickDirectory`继续使用`showDirectoryPicker()`
 - `haptics` → 返 `unsupported`
 - `keyboard.insets` → 始终 `{ bottom: 0, top: 0 }`（视口尺寸变化由 viewport meta 处理）
 - `backButton` → Web 用 `popstate`；`consume()` 调 `history.back()`

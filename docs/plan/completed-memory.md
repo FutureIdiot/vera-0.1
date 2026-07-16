@@ -2,6 +2,13 @@
 
 本文只记录已经落地的能力和验收边界。未完成页面见 `memory-ui.md`，Files见 `files.md`。
 
+## P5-F1：Files契约冻结
+
+- 已冻结File唯一owner Space、`sharedSpaceIds`、`isolation.files`三种读取策略，以及“扩大读取不转移管理权”的权限边界。
+- 已冻结原始二进制上传、MIME/大小/完整性校验、同名不覆盖、Message `fileIds`引用、时间线安全附件投影和File删除墓碑。
+- 已冻结Space归档保留附件、永久删除owner Space级联清理，以及Files附件根热迁移与逐文件hash验证/失败回滚。
+- 实现与验收仍在 `files.md`，本节只代表契约先于代码完成。
+
 ## P5-D0：契约冻结
 
 - 已冻结Home Account / Execution / Workspace、per-Agent Memory、slug不可普通改名和gateway单写者。

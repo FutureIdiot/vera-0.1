@@ -19,7 +19,7 @@
 
 1. [~] [Agent使用管理、目录壳与内置Hooks/MCP接线（阶段A–B）](runtime-capabilities.md)
 2. [ ] [Data → Memory 页面](memory-ui.md)
-3. [ ] [Files：Space 附件](files.md)
+3. [~] [Files：Space 附件](files.md)
 4. [ ] [Phase 5 收口](phase-5-closeout.md)
 5. [ ] [Home Account / Execution / Workspace 迁移](federation-account.md)
 6. [ ] [联邦状态、身份与权限](federation-security.md)
