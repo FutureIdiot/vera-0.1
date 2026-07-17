@@ -8,9 +8,9 @@ export function estimateTokens(value) {
   ) / 4);
 }
 
-export function effectiveContextLimit(config, account) {
+export function effectiveContextLimit(config, runtime) {
   const configured = config.context.defaultLimitTokens;
-  const byteLimit = config?.[account.provider]?.maxInputBytes;
+  const byteLimit = config?.[runtime.provider]?.maxInputBytes;
   return Number.isFinite(byteLimit) && byteLimit > 0
     ? Math.min(configured, Math.floor(byteLimit / 4))
     : configured;
@@ -51,13 +51,14 @@ export function checkpointForAgent(store, {
 }) {
   const spaceSession = store.find("spaceSessions", spaceSessionId);
   const space = spaceSession ? store.find("spaces", spaceSession.spaceId) : null;
-  const seat = space?.seats?.find((item) => item.agentId === agentId);
-  const blockedAgentIds = new Set(seat?.blockAgentIds ?? []);
+  const ownerAccount = store.list("accounts").find((account) => account.ownerAgentId === agentId);
+  const seat = space?.seats?.find((item) => item.accountId === ownerAccount?.id);
+  const blockedAccountIds = new Set(seat?.blockAccountIds ?? []);
   const includedRuns = new Set(includedRunIds);
   const candidates = store.list("messages")
     .filter((item) => item.spaceSessionId === spaceSessionId && item.status === "completed")
     .filter((item) => (item._seq ?? 0) <= sourceSeq || (item.runId && includedRuns.has(item.runId)))
-    .filter((item) => item.author?.type !== "agent" || !blockedAgentIds.has(item.author.agentId))
+    .filter((item) => item.author?.type !== "account" || !blockedAccountIds.has(item.author.accountId))
     .sort((left, right) => (left._seq ?? 0) - (right._seq ?? 0));
   const messageById = new Map(candidates.map((item) => [item.id, item]));
   const availableTurns = store.list("runs")
@@ -114,7 +115,7 @@ export function checkpointForAgent(store, {
     ]));
     older = candidates.filter((item) => !recentMessageIds.has(item.id) && !priorSummaryIds.has(item.id));
     const olderText = older.map((item) => {
-      const author = item.author?.type === "agent" ? `agent:${item.author.agentId}` : "user";
+      const author = item.author?.type === "account" ? `account:${item.author.accountId}` : "user";
       return `${author}: ${item.content ?? ""}`;
     }).join("\n");
     rawSummary = [priorSummary, olderText].filter(Boolean).join("\n");

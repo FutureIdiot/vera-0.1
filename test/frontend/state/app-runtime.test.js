@@ -233,7 +233,7 @@ test("local Agent and Account mutations keep route transitions on the canonical 
   await runtime.start();
   await flushAsyncWork();
   const agent = { id: "agt_new", name: "New" };
-  const account = { id: "acc_new", owningAgentId: agent.id, name: "New account" };
+  const account = { id: "acc_new", ownerAgentId: agent.id, name: "New account" };
   runtime.mergeAgent(agent);
   runtime.mergeAccount(account);
   assert.deepEqual(runtime.getBootstrap().agents.find((item) => item.id === agent.id), agent);
@@ -243,6 +243,6 @@ test("local Agent and Account mutations keep route transitions on the canonical 
   runtime.mergeAccount(account);
   runtime.removeAgent(agent.id);
   assert.equal(runtime.getBootstrap().agents.some((item) => item.id === agent.id), false);
-  assert.equal(runtime.getBootstrap().accounts.some((item) => item.owningAgentId === agent.id), false);
+  assert.equal(runtime.getBootstrap().accounts.some((item) => item.ownerAgentId === agent.id), false);
   runtime.close();
 });

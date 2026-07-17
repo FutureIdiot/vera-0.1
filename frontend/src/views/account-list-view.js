@@ -1,10 +1,10 @@
 import { createHttpClient } from "../api/http-client.js";
-import { createAgentsClient } from "../api/agents-client.js";
+import { createAccountsClient } from "../api/accounts-client.js";
 import { createNotice, field, input, setBusy } from "../components/management-ui.js";
 
 export function mountAccountListView({ root, platform, runtime, shell } = {}) {
   root.dataset.routeScope = "management";
-  const agentsClient = createAgentsClient(createHttpClient(platform));
+  const accountsClient = createAccountsClient(createHttpClient(platform));
   let agents = [...runtime.getBootstrap().agents];
   let accounts = [...runtime.getBootstrap().accounts];
   shell?.setManagementHeader({ title: "Account", backHref: "#/settings", backLabel: "返回" });
@@ -12,13 +12,13 @@ export function mountAccountListView({ root, platform, runtime, shell } = {}) {
   content.className = "vera-management-content";
   const toolbar = document.createElement("form");
   toolbar.className = "vera-inline-form";
-  const name = input({ placeholder: "新 Agent 名称" });
+  const name = input({ placeholder: "Account 名称" });
   const create = document.createElement("button");
   create.type = "submit";
   create.className = "vera-primary-button";
-  create.textContent = "新建 Agent";
+  create.textContent = "新建 Account";
   const feedback = createNotice("");
-  toolbar.append(field("新建身份", name), create);
+  toolbar.append(field("新建 Account", name), create);
   const list = document.createElement("div");
   list.className = "vera-account-list";
   content.append(toolbar, feedback, list);
@@ -26,21 +26,26 @@ export function mountAccountListView({ root, platform, runtime, shell } = {}) {
 
   function render() {
     list.replaceChildren();
-    if (agents.length === 0) {
-      list.appendChild(createNotice("还没有 Agent，新建一个后会自动建立第一条 Account 连接。"));
+    if (accounts.length === 0) {
+      list.appendChild(createNotice("还没有 Account。新建后会生成一次性接入 Key。"));
       return;
     }
-    for (const agent of agents) {
-      const owned = accounts.filter((account) => account.owningAgentId === agent.id);
+    const agentById = new Map(agents.map((agent) => [agent.id, agent]));
+    for (const account of accounts) {
+      const owner = account.ownerAgentId ? agentById.get(account.ownerAgentId) : null;
+      const active = account.activeAgentId ? agentById.get(account.activeAgentId) : null;
       const row = document.createElement("a");
       row.className = "vera-account-row";
-      row.href = `#/settings/accounts/${encodeURIComponent(agent.id)}`;
+      row.href = `#/settings/accounts/${encodeURIComponent(account.id)}`;
       const identity = document.createElement("span");
       const title = document.createElement("strong");
-      title.textContent = agent.name;
+      title.textContent = account.name;
       const summary = document.createElement("small");
-      const online = owned.filter((account) => account.presence === "online").length;
-      summary.textContent = `${owned.length} 条连接 · ${online ? `${online} 在线` : "离线"} · Memory 按需查看`;
+      const ownership = owner ? `所属 ${owner.name}` : "等待所属 Agent 接入";
+      const presence = account.presence === "online"
+        ? `在线${active ? ` · 当前 ${active.name}` : ""}`
+        : "离线";
+      summary.textContent = `${ownership} · ${presence}`;
       identity.append(title, summary);
       const arrow = document.createElement("span");
       arrow.textContent = "›";
@@ -53,13 +58,13 @@ export function mountAccountListView({ root, platform, runtime, shell } = {}) {
     if (!name.value.trim()) return;
     setBusy(create, true, "创建中…");
     try {
-      const result = await agentsClient.create({ name: name.value.trim() });
-      agents = [...agents, result.agent];
+      const result = await accountsClient.create({ name: name.value.trim() });
       accounts = [...accounts, result.account];
-      runtime.mergeAgent(result.agent);
       runtime.mergeAccount(result.account);
       name.value = "";
-      feedback.textContent = "Agent 与第一条 Account 已创建";
+      feedback.textContent = result.accessKey
+        ? `Account 已创建。一次性接入 Key：${result.accessKey}`
+        : "Account 已创建";
       feedback.dataset.tone = "success";
       render();
     } catch (err) { feedback.textContent = err.message; feedback.dataset.tone = "danger"; }

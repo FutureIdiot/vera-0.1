@@ -26,7 +26,7 @@ export async function run(ctx) {
     const created = await httpRequest("POST", "/api/spaces", {
       name: "p5-c1-context-space",
       topic: "SpaceSession isolation",
-      seats: [{ agentId: ctx.agent.id, responseMode: "default" }],
+      seats: [{ accountId: ctx.owningAccount.id, responseMode: "default" }],
     });
     assertEqual(created.status, 201);
     space = created.json.space;

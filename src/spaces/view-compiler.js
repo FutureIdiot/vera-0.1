@@ -26,12 +26,12 @@ function compareCreated(a, b) {
   return ta - tb;
 }
 
-// 找该 agent 最后一次本人发言气泡作为 marker。满足 author.type === "agent" &&
-// author.agentId === agent.id 中 createdAt 最大者；同毫秒用 _seq 兜底。找不到返回 null。
+// 找该执行 Agent 最后一次本人发言气泡作为 marker。Account是展示身份，
+// executingAgentId才是执行者；同毫秒用 _seq 兜底。找不到返回 null。
 function findLastOwnMarker(messages, agentId) {
   let marker = null;
   for (const m of messages) {
-    if (m.author?.type !== "agent" || m.author?.agentId !== agentId) continue;
+    if (m.author?.type !== "account" || m.executingAgentId !== agentId) continue;
     if (marker === null || compareCreated(m, marker) > 0) {
       marker = m;
     }
@@ -41,17 +41,17 @@ function findLastOwnMarker(messages, agentId) {
 
 // 候选筛选：marker 之后（严格大于；同毫秒按 _seq）且 createdAt 严格小于触发消息（排除
 // 触发自身）的他人气泡。排除该 agent 的自我气泡。Activity / Approval 不读，硬边界。
-// blockAgentIds（seat 上）过滤声告段候选——被 block 的 agent 气泡不进段，等价于对它
+// blockAccountIds（seat 上）过滤声告段候选——被 block 的 Account 气泡不进段，等价于对它
 // 单向静默（ground truth 2.3「响应规则统一语义」/ api-contract Space 段）。marker 仍
-// 是该 agent 最后自我发言（不受 blockAgentIds 影响）；定向 @ 穿透 blockAgentIds 是
+// 是该 Agent 最后自我发言（不受 blockAccountIds 影响）；定向 @ 穿透 blockAccountIds 是
 // messages.js 那层判定（run 仍创建），编译层这层只过滤声告段。
-function pickCandidates({ messages, marker, agentId, triggerMessage, blockAgentIds }) {
-  const blocked = Array.isArray(blockAgentIds) && blockAgentIds.length > 0 ? new Set(blockAgentIds) : null;
+function pickCandidates({ messages, marker, agentId, triggerMessage, blockAccountIds }) {
+  const blocked = Array.isArray(blockAccountIds) && blockAccountIds.length > 0 ? new Set(blockAccountIds) : null;
   const candidates = [];
   for (const m of messages) {
     if (m.id === triggerMessage.id) continue; // 双保险，排除触发自身
-    if (m.author?.type === "agent" && m.author?.agentId === agentId) continue; // 排除自我气泡
-    if (blocked && m.author?.type === "agent" && blocked.has(m.author.agentId)) continue; // blockAgentIds 过滤
+    if (m.author?.type === "account" && m.executingAgentId === agentId) continue; // 排除自我气泡
+    if (blocked && m.author?.type === "account" && blocked.has(m.author.accountId)) continue;
     if (marker) {
       const c = compareCreated(m, marker);
       if (c <= 0) continue; // 必须 > marker
@@ -96,9 +96,9 @@ function applyLimits({ candidates, maxMessages, maxChars }) {
 
 function signatureFor({ m, agentId, store, userLabel }) {
   if (m.author?.type === "user") return userLabel;
-  if (m.author?.type === "agent") {
-    const agent = store.find("agents", m.author.agentId);
-    return agent?.name ?? "agent";
+  if (m.author?.type === "account") {
+    const account = store.find("accounts", m.author.accountId);
+    return account?.name ?? m.accountNameSnapshot ?? "account";
   }
   return "agent";
 }
@@ -120,14 +120,14 @@ function buildGroupDelta({ kept, truncated, config, store, agentId }) {
 }
 
 export async function compilePrompt({
-  store, space, seat, agent, triggerMessage, memoryRetrieval,
+  store, space, seat, agent, account, triggerMessage, memoryRetrieval,
   agentSessionId, generation, spaceSessionId, includeResidentIndex = false,
   apiHistory = null, checkpoint = null, runId, config,
 }) {
   // seat 可由调用方传入（messages.js 已知当前 seat），也可由编译层自己从 space.seats
-  // 找——run-controller 不传 seat 时走后者。blockAgentIds 来自 seat。
-  const resolvedSeat = seat ?? (space?.seats ?? []).find((s) => s.agentId === agent.id) ?? null;
-  const blockAgentIds = resolvedSeat?.blockAgentIds ?? null;
+  // 找——run-controller 不传 seat 时走后者。blockAccountIds 来自 seat。
+  const resolvedSeat = seat ?? (space?.seats ?? []).find((s) => s.accountId === account?.id) ?? null;
+  const blockAccountIds = resolvedSeat?.blockAccountIds ?? null;
 
   // 常驻索引块只由 AgentSession generation 的首次 Run 注入。是否首次由持有
   // generation 真值的 context service 判定，编译层不再读取 provider state。
@@ -144,7 +144,7 @@ export async function compilePrompt({
   const spaceMessages = store.list("messages").filter((m) =>
     m.spaceId === space.id && m.spaceSessionId === spaceSessionId);
   const marker = findLastOwnMarker(spaceMessages, agent.id);
-  const candidates = pickCandidates({ messages: spaceMessages, marker, agentId: agent.id, triggerMessage, blockAgentIds });
+  const candidates = pickCandidates({ messages: spaceMessages, marker, agentId: agent.id, triggerMessage, blockAccountIds });
   const { kept, truncated } = applyLimits({
     candidates,
     maxMessages: config.viewCompiler.groupDeltaMaxMessages,

@@ -11,7 +11,7 @@ import {
   newProviderBindingId,
   newSpaceSessionId,
 } from "../../core/id.js";
-import { providerFingerprintForAccount } from "../../spaces/context-state.js";
+import { providerFingerprintForRuntime } from "../../spaces/context-state.js";
 
 const MIGRATION_VERSION = 1;
 
@@ -229,7 +229,7 @@ export async function migrateContextSessions({ data, markDirty, now = new Date()
       agentSessionId: agentSession.id,
       generation: 1,
       accountId: account.id,
-      providerFingerprint: providerFingerprintForAccount(account),
+      providerFingerprint: providerFingerprintForRuntime(account),
       providerState: structuredClone(providerState),
       version: 1,
       createdAt: now,

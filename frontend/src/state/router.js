@@ -47,7 +47,7 @@ export function parseRoute(hash = "") {
 
   const accountMatch = path.match(/^\/settings\/accounts\/([^/]+)\/?$/);
   if (accountMatch) {
-    try { return { name: "account-detail", agentId: decodeURIComponent(accountMatch[1]) }; }
+    try { return { name: "account-detail", accountId: decodeURIComponent(accountMatch[1]) }; }
     catch { return { name: "not-found", path }; }
   }
 
@@ -190,6 +190,7 @@ export function createAppRouter({
         spaceId: route.spaceId,
         spaceSessionId: route.spaceSessionId,
         agentId: route.agentId,
+        accountId: route.accountId,
         shell,
       });
       if (currentTransition !== transition) { cleanup?.(); routeRoot.remove(); return; }

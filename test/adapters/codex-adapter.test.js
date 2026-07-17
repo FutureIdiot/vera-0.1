@@ -22,7 +22,7 @@ function makeCtx(command, overrides = {}) {
   return {
     ctx: {
       agent: { id: "agt_codex", name: "Codex" },
-      account: account(command),
+      runtime: account(command),
       prompt: { text: "INDEX\n\nquestion", turnText: "question", historyUserText: "question", residentBlock: "INDEX" },
       sessionMode: "main",
       providerBinding: null,
@@ -46,7 +46,7 @@ function makeCtx(command, overrides = {}) {
 
 function digestInput(command, overrides = {}) {
   const input = {
-    account: account(command, { model: "fake-proposal" }),
+    runtime: account(command, { model: "fake-proposal" }),
     payload: {
       agent: { id: "agt_codex", name: "Codex" },
       chunks: [{ id: "dch_1", messages: [{ messageId: "msg_1", content: "Vera test port is 3210." }] }],
@@ -55,7 +55,7 @@ function digestInput(command, overrides = {}) {
     signal: new AbortController().signal,
     ...overrides,
   };
-  if (!Object.hasOwn(overrides, "taskModel")) input.taskModel = input.account.model;
+  if (!Object.hasOwn(overrides, "taskModel")) input.taskModel = input.runtime.model;
   return input;
 }
 
@@ -86,10 +86,10 @@ test("kind/provider, secretRef and unsupported args fail before spawning", async
     account(fake.binary, { connection: { command: fake.binary, args: ["--search"], secretRef: null } }),
   ];
   for (const item of bad) {
-    await assert.rejects(() => adapter.run(makeCtx(fake.binary, { account: item }).ctx), (error) => error.code === "unavailable");
+    await assert.rejects(() => adapter.run(makeCtx(fake.binary, { runtime: item }).ctx), (error) => error.code === "unavailable");
   }
   await assert.rejects(
-    () => adapter.digestMemory(digestInput(fake.binary, { account: bad[0] })),
+    () => adapter.digestMemory(digestInput(fake.binary, { runtime: bad[0] })),
     (error) => error.code === "executor_unavailable",
   );
   assert.deepEqual(await fake.readInvocations(), []);
@@ -98,7 +98,7 @@ test("kind/provider, secretRef and unsupported args fail before spawning", async
 test("chat uses non-interactive exec, CAS-persists provider binding, resumes, and maps tool activity", async (t) => {
   const fake = await createFakeCodex(t);
   const adapter = createCodexAdapter({ config: { binary: fake.binary } });
-  const first = makeCtx(fake.binary, { account: account(fake.binary, { model: "fake-tool" }) });
+  const first = makeCtx(fake.binary, { runtime: account(fake.binary, { model: "fake-tool" }) });
   const firstResult = await adapter.run(first.ctx);
   assert.equal(firstResult.content, "CODEX_CHAT_OK");
   assert.deepEqual(first.deltas, ["CODEX_CHAT_OK"]);
@@ -166,7 +166,7 @@ test("invalid binding and explicit missing thread rotate, while ordinary provide
 
   const ordinaryRotateReasons = [];
   const failed = makeCtx(fake.binary, {
-    account: account(fake.binary, { model: "fake-provider-error" }),
+    runtime: account(fake.binary, { model: "fake-provider-error" }),
     providerBinding: { version: 1, providerState: { threadId: "healthy-thread" } },
     rotateProviderBinding: async (reason) => {
       ordinaryRotateReasons.push(reason);
@@ -195,11 +195,11 @@ test("isolated CLI run is one-shot and neither persists nor returns a binding", 
 test("chat parses fragmented JSONL and uses output-file fallback without fake deltas", async (t) => {
   const fake = await createFakeCodex(t);
   const adapter = createCodexAdapter({ config: { binary: fake.binary } });
-  const fragmented = makeCtx(fake.binary, { account: account(fake.binary, { model: "fake-fragmented" }) });
+  const fragmented = makeCtx(fake.binary, { runtime: account(fake.binary, { model: "fake-fragmented" }) });
   assert.equal((await adapter.run(fragmented.ctx)).content, "CODEX_CHAT_OK");
   assert.deepEqual(fragmented.deltas, ["CODEX_CHAT_OK"]);
 
-  const fallback = makeCtx(fake.binary, { account: account(fake.binary, { model: "fake-output-only" }) });
+  const fallback = makeCtx(fake.binary, { runtime: account(fake.binary, { model: "fake-output-only" }) });
   assert.equal((await adapter.run(fallback.ctx)).content, "CODEX_CHAT_OK");
   assert.deepEqual(fallback.deltas, []);
 });
@@ -215,7 +215,7 @@ test("chat enforces capacity, abort, timeout, malformed JSONL and idempotent shu
   await assert.rejects(() => small.run(makeCtx(fake.binary).ctx), (error) => error.code === "provider_error");
 
   const abortAdapter = createCodexAdapter({ config: { binary: fake.binary, watchdogMs: 1000 } });
-  const aborted = makeCtx(fake.binary, { account: account(fake.binary, { model: "fake-hang" }) });
+  const aborted = makeCtx(fake.binary, { runtime: account(fake.binary, { model: "fake-hang" }) });
   const pending = abortAdapter.run(aborted.ctx);
   pending.catch(() => {});
   while ((await fake.readInvocations()).length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
@@ -224,12 +224,12 @@ test("chat enforces capacity, abort, timeout, malformed JSONL and idempotent shu
 
   const timeout = createCodexAdapter({ config: { binary: fake.binary, watchdogMs: 30 } });
   await assert.rejects(
-    () => timeout.run(makeCtx(fake.binary, { account: account(fake.binary, { model: "fake-hang" }) }).ctx),
+    () => timeout.run(makeCtx(fake.binary, { runtime: account(fake.binary, { model: "fake-hang" }) }).ctx),
     (error) => error.code === "timed_out",
   );
   const malformed = createCodexAdapter({ config: { binary: fake.binary } });
   await assert.rejects(
-    () => malformed.run(makeCtx(fake.binary, { account: account(fake.binary, { model: "fake-bad-jsonl" }) }).ctx),
+    () => malformed.run(makeCtx(fake.binary, { runtime: account(fake.binary, { model: "fake-bad-jsonl" }) }).ctx),
     (error) => error.code === "provider_error",
   );
   await malformed.shutdown();
@@ -241,7 +241,7 @@ test("shutdown cancels and awaits the complete in-flight operation cleanup", asy
   const fake = await createFakeCodex(t);
   const adapter = createCodexAdapter({ config: { binary: fake.binary, watchdogMs: 1000 } });
   const running = adapter.run(makeCtx(fake.binary, {
-    account: account(fake.binary, { model: "fake-hang" }),
+    runtime: account(fake.binary, { model: "fake-hang" }),
   }).ctx);
   running.catch(() => {});
   while ((await fake.readInvocations()).length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
@@ -294,11 +294,11 @@ test("digest rejects tool use, bad envelopes, pre/mid abort and timeout", async 
   );
   assert.deepEqual(await fake.readInvocations(), []);
   await assert.rejects(
-    () => adapter.digestMemory(digestInput(fake.binary, { account: account(fake.binary, { model: "fake-tool" }) })),
+    () => adapter.digestMemory(digestInput(fake.binary, { runtime: account(fake.binary, { model: "fake-tool" }) })),
     (error) => error.code === "executor_failed",
   );
   await assert.rejects(
-    () => adapter.digestMemory(digestInput(fake.binary, { account: account(fake.binary, { model: "fake-bad-envelope" }) })),
+    () => adapter.digestMemory(digestInput(fake.binary, { runtime: account(fake.binary, { model: "fake-bad-envelope" }) })),
     (error) => error.code === "executor_failed",
   );
   const pre = new AbortController();
@@ -308,7 +308,7 @@ test("digest rejects tool use, bad envelopes, pre/mid abort and timeout", async 
 
   const mid = new AbortController();
   const pending = adapter.digestMemory(digestInput(fake.binary, {
-    account: account(fake.binary, { model: "fake-hang" }), signal: mid.signal,
+    runtime: account(fake.binary, { model: "fake-hang" }), signal: mid.signal,
   }));
   pending.catch(() => {});
   const seen = (await fake.readInvocations()).length;
@@ -318,7 +318,7 @@ test("digest rejects tool use, bad envelopes, pre/mid abort and timeout", async 
 
   const timeout = createCodexAdapter({ config: { binary: fake.binary, digestTimeoutMs: 30 } });
   await assert.rejects(
-    () => timeout.digestMemory(digestInput(fake.binary, { account: account(fake.binary, { model: "fake-hang" }) })),
+    () => timeout.digestMemory(digestInput(fake.binary, { runtime: account(fake.binary, { model: "fake-hang" }) })),
     (error) => error.code === "timed_out",
   );
 });

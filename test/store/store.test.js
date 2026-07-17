@@ -89,7 +89,10 @@ test("_seq is monotonically increasing across collections", async () => {
 // ---- 迁移 ----
 
 const LEGACY_CONTENT = {
-  agents: [{ id: "agt_old", name: "Iota", _seq: 1 }],
+  agents: [{
+    id: "agt_old", name: "Iota", kind: "cli", provider: "codex",
+    connection: {}, model: "gpt-test", _seq: 1,
+  }],
   spaces: [],
   messages: [{ id: "msg_old", spaceId: "spc_x", content: "老数据", _seq: 2 }],
   activities: [],

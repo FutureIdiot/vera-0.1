@@ -9,23 +9,24 @@ export function countUnicodeCodePoints(value) {
   return [...String(value ?? "")].length;
 }
 
-function isVisibleToAgent(message, agentId, blockedAgentIds) {
-  if (message.author?.type === "agent" && message.author.agentId === agentId) return true;
-  const directlyAddressed = message.target?.type === "direct" && message.target.agentIds?.includes(agentId);
+function isVisibleToAgent(message, agentId, accountId, blockedAccountIds) {
+  if (message.author?.type === "account" && message.executingAgentId === agentId) return true;
+  const directlyAddressed = message.target?.type === "direct" && message.target.accountIds?.includes(accountId);
   if (directlyAddressed) return true;
   if (message.target?.type !== "broadcast") return false;
-  return !(message.author?.type === "agent" && blockedAgentIds.has(message.author.agentId));
+  return !(message.author?.type === "account" && blockedAccountIds.has(message.author.accountId));
 }
 
 function orderedCompletedMessages(store, spaceId, spaceSessionId, agentId) {
   const space = store.find("spaces", spaceId);
   if (!space) throw new ApiError("not_found", `Space ${spaceId} does not exist`);
-  const seat = space.seats?.find((candidate) => candidate.agentId === agentId);
+  const account = store.list("accounts").find((candidate) => candidate.ownerAgentId === agentId);
+  const seat = space.seats?.find((candidate) => candidate.accountId === account?.id);
   if (!seat) throw invalid(`agent ${agentId} is not seated in Space ${spaceId}`);
-  const blocked = new Set(seat.blockAgentIds ?? []);
+  const blocked = new Set(seat.blockAccountIds ?? []);
   return store.list("messages")
     .filter((message) => message.spaceId === spaceId && message.spaceSessionId === spaceSessionId &&
-      message.status === "completed" && isVisibleToAgent(message, agentId, blocked))
+      message.status === "completed" && isVisibleToAgent(message, agentId, account.id, blocked))
     .sort((left, right) => (left._seq ?? 0) - (right._seq ?? 0));
 }
 

@@ -1,248 +1,235 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createAccountsClient } from "../api/accounts-client.js";
-import { createAgentsClient } from "../api/agents-client.js";
-import { createNotice, field, input, select, setBusy } from "../components/management-ui.js";
+import { createNotice, field, input, setBusy } from "../components/management-ui.js";
 
-function accountEditor(account, { onSave, onDelete }) {
-  const form = document.createElement("form");
-  form.className = "vera-account-card";
-  const name = input({ value: account.name });
-  const kind = select(account.kind ?? "", [["", "未指定"], ["cli", "CLI"], ["api", "API"]]);
-  const provider = input({ value: account.provider, placeholder: "例如 opencode / openai" });
-  const model = input({ value: account.model, placeholder: "模型名" });
-  const secretRef = input({
-    value: account.connection?.secretRef,
-    placeholder: "~/.vera/secrets.json 中的引用名",
-  });
-  const secretField = field("Secret 引用名", secretRef, "这里只保存引用名，不读取或返回密钥明文");
-  const capability = createNotice(
-    account.runtimeCapabilities === null ? "未连接，能力未知" : "已连接，能力快照可用",
-  );
-  const actions = document.createElement("div");
-  actions.className = "vera-form-actions";
-  const save = document.createElement("button");
-  save.type = "submit";
-  save.className = "vera-primary-button";
-  save.textContent = "保存连接";
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.className = "vera-danger-button";
-  remove.textContent = "删除这条连接";
-  actions.append(save, remove);
-  form.append(
-    field("连接名称", name),
-    field("类型", kind),
-    field("供应商", provider),
-    field("模型", model),
-    secretField,
-    capability,
-    actions,
-  );
-
-  function syncConnectionFields() {
-    secretField.hidden = kind.value !== "api";
-  }
-
-  kind.addEventListener("change", syncConnectionFields);
-  syncConnectionFields();
-
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    setBusy(save, true, "保存中…");
-    const connection = kind.value === "api"
-      ? { ...(account.connection ?? {}), secretRef: secretRef.value.trim() || null }
-      : account.connection ?? {};
-    try {
-      await onSave(account.id, {
-        name: name.value,
-        kind: kind.value || null,
-        provider: provider.value || null,
-        model: model.value,
-        connection,
-      });
-    } finally {
-      setBusy(save, false);
-    }
-  });
-
-  remove.addEventListener("click", async () => {
-    if (!window.confirm(`删除连接“${account.name}”？这不会删除 Agent 身份。`)) return;
-    setBusy(remove, true, "删除中…");
-    try {
-      await onDelete(account.id);
-    } finally {
-      setBusy(remove, false);
-    }
-  });
-  return form;
+function infoRow(label, value) {
+  const row = document.createElement("div");
+  row.className = "vera-agent-info-row";
+  const key = document.createElement("span");
+  key.className = "vera-agent-info-row__label";
+  key.textContent = label;
+  const content = document.createElement("span");
+  content.className = "vera-agent-info-row__value";
+  if (value instanceof Node) content.appendChild(value);
+  else content.textContent = value ?? "—";
+  row.append(key, content);
+  return row;
 }
 
-export async function mountAccountDetailView({ root, platform, runtime, agentId, shell } = {}) {
+function agentLink(agent, fallback = "—") {
+  if (!agent) return fallback;
+  const link = document.createElement("a");
+  link.href = `#/agents/${encodeURIComponent(agent.id)}`;
+  link.textContent = agent.name;
+  return link;
+}
+
+function formatTime(value) {
+  const timestamp = Date.parse(value ?? "");
+  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : "—";
+}
+
+export async function mountAccountDetailView({ root, platform, runtime, accountId, shell } = {}) {
   root.dataset.routeScope = "management";
-  const http = createHttpClient(platform);
-  const accountsClient = createAccountsClient(http);
-  const agentsClient = createAgentsClient(http);
-  let agent = runtime.getBootstrap().agents.find((item) => item.id === agentId);
-  let accounts = [];
+  const accountsClient = createAccountsClient(createHttpClient(platform));
+  let account = runtime.getBootstrap().accounts.find((item) => item.id === accountId) ?? null;
+  let detail = null;
   let disposed = false;
 
   shell?.setManagementHeader({
-    title: agent?.name ?? "Account",
+    title: account?.name ?? "Account",
     backHref: "#/settings/accounts",
     backLabel: "返回",
   });
-  if (!agent) {
-    root.appendChild(createNotice("Agent 不存在", "danger"));
-    return () => root.replaceChildren();
-  }
 
   const content = document.createElement("div");
   content.className = "vera-management-content";
-  const feedback = createNotice("正在读取系统账户信息…");
+  const feedback = createNotice("正在读取 Account 信息…");
 
   const identity = document.createElement("section");
   identity.className = "vera-management-section";
   const identityTitle = document.createElement("h2");
-  identityTitle.textContent = "Agent 系统身份";
+  identityTitle.textContent = "Account 身份";
   const renameForm = document.createElement("form");
   renameForm.className = "vera-inline-form";
-  const agentName = input({ value: agent.name });
+  const accountName = input({ value: account?.name, placeholder: "Account 名称" });
   const rename = document.createElement("button");
   rename.type = "submit";
   rename.className = "vera-secondary-button";
   rename.textContent = "修改名称";
-  renameForm.append(field("名称", agentName), rename);
-  const deleteAgent = document.createElement("button");
-  deleteAgent.type = "button";
-  deleteAgent.className = "vera-danger-button";
-  deleteAgent.textContent = "删除 Agent 身份";
-  identity.append(identityTitle, renameForm, deleteAgent);
+  renameForm.append(field("名称", accountName), rename);
+  const identityFacts = document.createElement("div");
+  identityFacts.className = "vera-agent-info-panel";
+  identity.append(identityTitle, renameForm, identityFacts);
 
-  const connections = document.createElement("section");
-  connections.className = "vera-management-section";
-  const connectionsTitle = document.createElement("h2");
-  connectionsTitle.textContent = "Account 连接";
-  const connectionList = document.createElement("div");
-  connectionList.className = "vera-account-grid";
-  const addForm = document.createElement("form");
-  addForm.className = "vera-inline-form";
-  const newName = input({ placeholder: "新连接名称" });
-  const add = document.createElement("button");
-  add.type = "submit";
-  add.className = "vera-secondary-button";
-  add.textContent = "添加连接";
-  addForm.append(field("新的 Account", newName), add);
-  connections.append(connectionsTitle, connectionList, addForm);
-  content.append(feedback, identity, connections);
+  const access = document.createElement("section");
+  access.className = "vera-management-section";
+  const accessTitle = document.createElement("h2");
+  accessTitle.textContent = "接入 Key";
+  const accessStatus = createNotice("");
+  const accessActions = document.createElement("div");
+  accessActions.className = "vera-form-actions";
+  const rotate = document.createElement("button");
+  rotate.type = "button";
+  rotate.className = "vera-secondary-button";
+  rotate.textContent = "生成 / 轮换 Key";
+  const revoke = document.createElement("button");
+  revoke.type = "button";
+  revoke.className = "vera-danger-button";
+  revoke.textContent = "撤销 Key";
+  accessActions.append(rotate, revoke);
+  access.append(accessTitle, accessStatus, accessActions);
+
+  const workspace = document.createElement("section");
+  workspace.className = "vera-management-section";
+  const workspaceTitle = document.createElement("h2");
+  workspaceTitle.textContent = "Workspace";
+  const workspaceFacts = document.createElement("div");
+  workspaceFacts.className = "vera-agent-info-panel";
+  workspace.append(workspaceTitle, workspaceFacts);
+
+  const audit = document.createElement("section");
+  audit.className = "vera-management-section";
+  const auditTitle = document.createElement("h2");
+  auditTitle.textContent = "最近登录";
+  const auditList = document.createElement("div");
+  auditList.className = "vera-account-grid";
+  audit.append(auditTitle, auditList);
+
+  content.append(feedback, identity, access, workspace, audit);
   root.appendChild(content);
 
-  function renderConnections() {
-    connectionList.replaceChildren();
-    if (!accounts.length) connectionList.appendChild(createNotice("这条 Agent 还没有连接。"));
-    for (const account of accounts) {
-      connectionList.appendChild(accountEditor(account, {
-        onSave: async (id, patch) => {
-          try {
-            const updated = (await accountsClient.update(id, patch)).account;
-            accounts = accounts.map((item) => item.id === id ? updated : item);
-            runtime.mergeAccount(updated);
-            feedback.textContent = "连接已保存";
-            feedback.dataset.tone = "success";
-            renderConnections();
-          } catch (err) {
-            feedback.textContent = err.message;
-            feedback.dataset.tone = "danger";
-          }
-        },
-        onDelete: async (id) => {
-          try {
-            await accountsClient.remove(id);
-            accounts = accounts.filter((item) => item.id !== id);
-            runtime.removeAccount(id);
-            feedback.textContent = "连接已删除，Agent 身份保留";
-            renderConnections();
-          } catch (err) {
-            feedback.textContent = err.message;
-            feedback.dataset.tone = "danger";
-          }
-        },
-      }));
+  function findAgent(id) {
+    return id ? runtime.getBootstrap().agents.find((item) => item.id === id) ?? null : null;
+  }
+
+  function render() {
+    if (!account) {
+      content.replaceChildren(createNotice("Account 不存在", "danger"));
+      return;
+    }
+    accountName.value = account.name ?? "";
+    shell?.setManagementHeader({ title: account.name, backHref: "#/settings/accounts", backLabel: "返回" });
+    const owner = detail?.ownerAgent ?? findAgent(account.ownerAgentId);
+    const active = detail?.activeAgent ?? findAgent(account.activeAgentId);
+    identityFacts.replaceChildren(
+      infoRow("所属 Agent", agentLink(owner, account.ownerAgentId ? "未知 Agent" : "等待首次接入")),
+      infoRow("当前 Agent", agentLink(active, account.presence === "online" ? "在线，身份待同步" : "—")),
+      infoRow("状态", account.presence ?? "offline"),
+      infoRow("最近在线", formatTime(account.lastSeenAt)),
+    );
+    accessStatus.textContent = `状态：${account.accessKeyState ?? "未知"} · 版本：${account.accessKeyVersion ?? "—"}`;
+    revoke.disabled = account.accessKeyState === "revoked";
+    const workspaceValue = detail?.workspace ?? account.workspace ?? null;
+    workspaceFacts.replaceChildren(
+      infoRow("状态", workspaceValue?.status ?? "尚未绑定"),
+      infoRow("宿主", workspaceValue?.hostId ?? "—"),
+      infoRow("最近校验", formatTime(workspaceValue?.lastValidatedAt)),
+    );
+    const entries = detail?.recentLogins ?? detail?.loginAudit ?? [];
+    auditList.replaceChildren();
+    if (!entries.length) auditList.appendChild(createNotice("还没有登录记录。"));
+    for (const entry of entries) {
+      const card = document.createElement("article");
+      card.className = "vera-management-card";
+      const title = document.createElement("strong");
+      title.textContent = findAgent(entry.agentId)?.name ?? entry.agentId ?? "Agent";
+      const summary = document.createElement("small");
+      summary.textContent = `${entry.status ?? entry.result ?? "记录"} · ${formatTime(entry.createdAt ?? entry.at)}`;
+      card.append(title, summary);
+      auditList.appendChild(card);
+    }
+  }
+
+  async function load() {
+    try {
+      const response = await accountsClient.get(accountId);
+      if (disposed) return;
+      detail = response;
+      account = response.account ?? account;
+      if (account) runtime.mergeAccount(account);
+      feedback.textContent = "Account 身份、Workspace 与运行时配置彼此独立。";
+      feedback.dataset.tone = "";
+      render();
+    } catch (error) {
+      if (disposed) return;
+      if (account && error.status === 404) account = null;
+      feedback.textContent = error.message;
+      feedback.dataset.tone = "danger";
+      render();
     }
   }
 
   renameForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    setBusy(rename, true);
+    if (!account || !accountName.value.trim()) return;
+    setBusy(rename, true, "保存中…");
     try {
-      agent = (await agentsClient.update(agentId, { name: agentName.value.trim() })).agent;
-      runtime.mergeAgent(agent);
-      shell?.setManagementHeader({
-        title: agent.name,
-        backHref: "#/settings/accounts",
-        backLabel: "返回",
-      });
-      feedback.textContent = "Agent 名称已保存";
+      account = (await accountsClient.update(account.id, { name: accountName.value.trim() })).account;
+      runtime.mergeAccount(account);
+      feedback.textContent = "Account 名称已保存";
       feedback.dataset.tone = "success";
-    } catch (err) {
-      feedback.textContent = err.message;
+      render();
+    } catch (error) {
+      feedback.textContent = error.message;
       feedback.dataset.tone = "danger";
     } finally {
       setBusy(rename, false);
     }
   });
 
-  addForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    setBusy(add, true, "添加中…");
+  rotate.addEventListener("click", async () => {
+    if (!account) return;
+    setBusy(rotate, true, "生成中…");
     try {
-      const result = await accountsClient.create(agentId, { name: newName.value.trim() || undefined });
-      accounts = [...accounts, result.account];
-      runtime.mergeAccount(result.account);
-      newName.value = "";
-      feedback.textContent = "已添加连接";
+      const response = await accountsClient.rotateAccessKey(account.id);
+      account = response.account ?? account;
+      runtime.mergeAccount(account);
+      feedback.textContent = `一次性接入 Key：${response.accessKey}`;
       feedback.dataset.tone = "success";
-      renderConnections();
-    } catch (err) {
-      feedback.textContent = err.message;
+      render();
+    } catch (error) {
+      feedback.textContent = error.message;
       feedback.dataset.tone = "danger";
     } finally {
-      setBusy(add, false);
+      setBusy(rotate, false);
     }
   });
 
-  deleteAgent.addEventListener("click", async () => {
-    if (!window.confirm(`删除 Agent“${agent.name}”及其自有连接？`)) return;
-    setBusy(deleteAgent, true, "删除中…");
+  revoke.addEventListener("click", async () => {
+    if (!account || !window.confirm(`撤销“${account.name}”的接入 Key？`)) return;
+    setBusy(revoke, true, "撤销中…");
     try {
-      await agentsClient.remove(agentId);
-      runtime.removeAgent(agentId);
-      window.location.hash = "#/settings/accounts";
-    } catch (err) {
-      feedback.textContent = err.message;
+      const response = await accountsClient.revokeAccessKey(account.id);
+      account = response?.account ?? { ...account, accessKeyState: "revoked" };
+      runtime.mergeAccount(account);
+      feedback.textContent = "接入 Key 已撤销";
+      feedback.dataset.tone = "success";
+      render();
+    } catch (error) {
+      feedback.textContent = error.message;
       feedback.dataset.tone = "danger";
-      setBusy(deleteAgent, false);
+    } finally {
+      setBusy(revoke, false);
     }
   });
 
-  try {
-    accounts = (await accountsClient.list(agentId)).accounts;
-    if (!disposed) {
-      feedback.textContent = "此页只管理 Vera 系统身份与 Account 连接。";
-      renderConnections();
-    }
-  } catch (err) {
-    feedback.textContent = err.message;
-    feedback.dataset.tone = "danger";
-  }
-
+  render();
+  await load();
   const unsubscribe = runtime.subscribe((envelope) => {
-    if (envelope.type !== "account.presence.updated" && envelope.type !== "account.upserted") return;
-    void accountsClient.list(agentId).then((response) => {
-      if (!disposed) {
-        accounts = response.accounts;
-        renderConnections();
-      }
-    });
+    if (envelope.type === "runtime.reset") {
+      account = envelope.data.bootstrap.accounts.find((item) => item.id === accountId) ?? null;
+      void load();
+      return;
+    }
+    if (envelope.type === "account.upserted" && envelope.data?.account?.id === accountId) {
+      account = envelope.data.account;
+      render();
+    }
+    if (envelope.type === "account.presence.updated" && envelope.data?.accountId === accountId) {
+      account = runtime.getBootstrap().accounts.find((item) => item.id === accountId) ?? account;
+      render();
+    }
   });
   return () => {
     disposed = true;

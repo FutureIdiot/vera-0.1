@@ -37,7 +37,7 @@ export function createContextCompactionService({ store, hub, config }) {
       let job = getContextCompactionJob(store, jobId);
       const target = job ? getContextCompactionTarget(store, { jobId, agentId }) : null;
       if (!job || !target || !["queued", "running"].includes(target.status)) return job;
-      const account = getOwningAccount(store, agentId);
+      const account = store.find("accounts", target.accountId);
       if (!account) {
         job = updateContextCompactionTarget(store, {
           jobId, agentId,
@@ -104,9 +104,14 @@ export function createContextCompactionService({ store, hub, config }) {
     const space = store.find("spaces", spaceId);
     if (!space) throw new ApiError("not_found", `space ${spaceId} does not exist`);
     const targets = (space.seats ?? []).map((seat) => {
-      const { agentSession } = getActiveContext(store, { spaceId, agentId: seat.agentId });
+      const account = store.find("accounts", seat.accountId);
+      if (!account?.ownerAgentId) throw new ApiError("conflict", `account ${seat.accountId} has no owner Agent`);
+      const { agentSession } = getActiveContext(store, {
+        spaceId, accountId: account.id, agentId: account.ownerAgentId,
+      });
       return {
-        agentId: seat.agentId,
+        agentId: account.ownerAgentId,
+        accountId: account.id,
         agentSessionId: agentSession.id,
         fromGeneration: agentSession.generation,
         recentTurnLimit: config.context.checkpointRecentTurns,
@@ -118,13 +123,16 @@ export function createContextCompactionService({ store, hub, config }) {
   }
 
   async function compactAgent({ spaceId, agentId, requestId }) {
-    const { agentSession } = getActiveContext(store, { spaceId, agentId });
-    ensureAgentSession(store, { spaceSessionId: agentSession.spaceSessionId, agentId });
+    const account = getOwningAccount(store, agentId);
+    if (!account) throw new ApiError("conflict", `agent ${agentId} has no owner Account`);
+    const { agentSession } = getActiveContext(store, { spaceId, accountId: account.id, agentId });
+    ensureAgentSession(store, { spaceSessionId: agentSession.spaceSessionId, accountId: account.id, agentId });
     const job = createContextCompactionJob(store, {
       spaceId,
       requestId,
       targets: [{
         agentId,
+        accountId: account.id,
         agentSessionId: agentSession.id,
         fromGeneration: agentSession.generation,
         recentTurnLimit: config.context.checkpointRecentTurns,

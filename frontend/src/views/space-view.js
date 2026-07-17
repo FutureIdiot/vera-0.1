@@ -80,8 +80,8 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
   root.append(statusBar, olderButton, timelineEl, runStatus.element);
   const store = createTimelineStore({ maxItems: TIMELINE_DOM_LIMIT });
   const nodeByKey = new Map();
-  const agentNameById = new Map();
-  const bubbleCtx = { agentName: (id) => agentNameById.get(id) };
+  const accountNameById = new Map();
+  const bubbleCtx = { accountName: (id) => accountNameById.get(id) };
 
   async function handleAnswer(approvalId, answer) {
     try {
@@ -201,8 +201,8 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     const generation = ++hydrationGeneration;
     hydrating = true;
     if (clearPending) pendingEvents = [];
-    agentNameById.clear();
-    for (const agent of bootstrap.agents ?? []) agentNameById.set(agent.id, agent.name);
+    accountNameById.clear();
+    for (const account of bootstrap.accounts ?? []) accountNameById.set(account.id, account.name);
     space = requestedSpaceId
       ? bootstrap.spaces.find((candidate) => candidate.id === requestedSpaceId) ?? null
       : bootstrap.spaces[0] ?? null;
@@ -228,7 +228,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
       if (space.archivedAt) showArchivedStatus();
       else setStatus(timeline.items.length ? "" : "还没有消息，发一条开始。");
       composer.setDisabled(Boolean(space.archivedAt));
-      composer.setTargets(bootstrap.agents.filter((agent) => space.seats.some((seat) => seat.agentId === agent.id)));
+      composer.setTargets(bootstrap.accounts.filter((account) => space.seats.some((seat) => seat.accountId === account.id)));
       shell?.setSpace(space);
       if (!requestedSpaceId && window.location.hash !== `#/spaces/${encodeURIComponent(space.id)}`) {
         window.history.replaceState(null, "", `#/spaces/${encodeURIComponent(space.id)}`);
@@ -266,7 +266,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
       space = envelope.data.space;
       shell?.setSpace(space);
       composer.setDisabled(Boolean(space.archivedAt));
-      composer.setTargets(runtime.getBootstrap().agents.filter((agent) => space.seats.some((seat) => seat.agentId === agent.id)));
+      composer.setTargets(runtime.getBootstrap().accounts.filter((account) => space.seats.some((seat) => seat.accountId === account.id)));
       if (space.archivedAt) showArchivedStatus();
       else setStatus(null);
     }
@@ -295,7 +295,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     ? bootstrap.spaces.find((candidate) => candidate.id === requestedSpaceId)
     : bootstrap.spaces[0];
   const composer = createComposer({
-    targets: bootstrap.agents.filter((agent) => initialSpace?.seats.some((seat) => seat.agentId === agent.id)),
+    targets: bootstrap.accounts.filter((account) => initialSpace?.seats.some((seat) => seat.accountId === account.id)),
     onPickAttachment: async () => {
       if (!space) throw new Error("当前没有可上传附件的 Space");
       const selection = await platform.pickFile({ accept: FILE_ACCEPT });

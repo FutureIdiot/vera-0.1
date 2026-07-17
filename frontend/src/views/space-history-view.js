@@ -6,13 +6,13 @@ function formatTime(value) {
   return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : "时间未知";
 }
 
-function historyItem(item, agents) {
+function historyItem(item, accounts) {
   const row = document.createElement("article");
   row.className = "vera-management-card";
   const label = document.createElement("strong");
   if (item.itemType === "message") {
-    label.textContent = item.author?.type === "agent"
-      ? agents.get(item.author.agentId) ?? "Agent"
+    label.textContent = item.author?.type === "account"
+      ? item.author.accountNameSnapshot ?? accounts.get(item.author.accountId) ?? "Account"
       : "用户";
   } else if (item.itemType === "activity") {
     label.textContent = `Activity · ${item.label ?? item.phase ?? "过程"}`;
@@ -27,11 +27,11 @@ function historyItem(item, agents) {
   return row;
 }
 
-function runItem(run, agents) {
+function runItem(run, accounts) {
   const row = document.createElement("article");
   row.className = "vera-management-card";
   const label = document.createElement("strong");
-  label.textContent = `${agents.get(run.agentId) ?? "Agent"} · Run`;
+  label.textContent = `${accounts.get(run.accountId) ?? "Account"} · Run`;
   const content = document.createElement("p");
   content.textContent = run.error?.message ? `${run.status} · ${run.error.message}` : run.status;
   const time = document.createElement("small");
@@ -48,7 +48,7 @@ export async function mountSpaceHistoryView({
   const client = createSpacesClient(createHttpClient(platform));
   const bootstrap = runtime.getBootstrap();
   const space = bootstrap.spaces.find((item) => item.id === spaceId);
-  const agents = new Map(bootstrap.agents.map((agent) => [agent.id, agent.name]));
+  const accounts = new Map(bootstrap.accounts.map((account) => [account.id, account.name]));
   shell?.setManagementHeader({
     title: spaceSessionId ? "历史对话" : "对话历史",
     backHref: spaceSessionId
@@ -88,8 +88,8 @@ export async function mountSpaceHistoryView({
         status.textContent = "这个历史窗口没有时间线内容。";
         root.appendChild(status);
       } else {
-        for (const item of [...response.items].reverse()) root.appendChild(historyItem(item, agents));
-        for (const run of response.runs ?? []) root.appendChild(runItem(run, agents));
+        for (const item of [...response.items].reverse()) root.appendChild(historyItem(item, accounts));
+        for (const run of response.runs ?? []) root.appendChild(runItem(run, accounts));
       }
     }
   } catch (error) {

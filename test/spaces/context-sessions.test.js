@@ -15,7 +15,7 @@ import {
   compareAndSetProviderBinding,
   getApiHistory,
   getProviderBinding,
-  providerFingerprintForAccount,
+  providerFingerprintForRuntime,
   rotateContextGeneration,
   updateContextPressure,
 } from "../../src/spaces/context-state.js";
@@ -32,13 +32,16 @@ import { checkpointForAgent } from "../../src/spaces/run-context.js";
 async function fixture(fn) {
   const root = await mkdtemp(join(tmpdir(), "vera-context-test-"));
   const store = await createStore({ dataPath: join(root, "data"), debounceMs: 5 });
-  store.insert("agents", { id: "agt_a", name: "A" });
+  store.insert("agents", {
+    id: "agt_a", name: "A",
+    runtimeProfile: { schemaVersion: 1, kind: "cli", provider: "codex", model: "gpt-test" },
+    runtimeBinding: { connection: {} }, runtimeRevision: "sha256:test-runtime",
+  });
   store.insert("accounts", {
-    id: "acc_a", owningAgentId: "agt_a", kind: "cli", provider: "codex",
-    connection: {}, model: "gpt-test",
+    id: "acc_a", name: "A", ownerAgentId: "agt_a",
   });
   store.insert("spaces", {
-    id: "spc_a", name: "A", seats: [{ agentId: "agt_a", responseMode: "default" }], createdAt: "2026-01-01T00:00:00.000Z",
+    id: "spc_a", name: "A", seats: [{ accountId: "acc_a", responseMode: "default" }], createdAt: "2026-01-01T00:00:00.000Z",
   });
   try { await fn(store); }
   finally { await store.close(); await rm(root, { recursive: true, force: true }); }
@@ -59,9 +62,9 @@ test("active SpaceSession and per-agent AgentSession are unique and pressure is 
     const second = ensureActiveSpaceSession(store, "spc_a");
     assert.equal(second.id, first.id);
     const agentSession = ensureAgentSession(store, {
-      spaceSessionId: first.id, agentId: "agt_a", context: { effectiveLimitTokens: 100 },
+      spaceSessionId: first.id, accountId: "acc_a", agentId: "agt_a", context: { effectiveLimitTokens: 100 },
     });
-    assert.equal(ensureAgentSession(store, { spaceSessionId: first.id, agentId: "agt_a" }).id, agentSession.id);
+    assert.equal(ensureAgentSession(store, { spaceSessionId: first.id, accountId: "acc_a", agentId: "agt_a" }).id, agentSession.id);
     const measured = updateContextPressure(store, {
       agentSessionId: agentSession.id, generation: 1,
       estimatedInputTokens: 96, effectiveLimitTokens: 100, measurement: "provider_reported",
@@ -88,9 +91,10 @@ test("active SpaceSession and per-agent AgentSession are unique and pressure is 
 test("provider binding and API history use positive integer CAS versions", async () => {
   await fixture(async (store) => {
     const spaceSession = ensureActiveSpaceSession(store, "spc_a");
-    const agentSession = ensureAgentSession(store, { spaceSessionId: spaceSession.id, agentId: "agt_a" });
+    const agentSession = ensureAgentSession(store, { spaceSessionId: spaceSession.id, accountId: "acc_a", agentId: "agt_a" });
     const account = store.find("accounts", "acc_a");
-    const fingerprint = providerFingerprintForAccount(account);
+    const agent = store.find("agents", "agt_a");
+    const fingerprint = providerFingerprintForRuntime({ ...agent.runtimeProfile, connection: agent.runtimeBinding.connection });
     const binding = compareAndSetProviderBinding(store, {
       agentSessionId: agentSession.id, generation: 1, accountId: account.id,
       providerFingerprint: fingerprint, providerState: { threadId: "thr_a" }, ifVersion: 0,
@@ -124,7 +128,7 @@ test("provider binding and API history use positive integer CAS versions", async
 test("/new archives the complete old context, is request-id idempotent, and refuses active work", async () => {
   await fixture(async (store) => {
     const oldSpaceSession = ensureActiveSpaceSession(store, "spc_a");
-    const oldAgentSession = ensureAgentSession(store, { spaceSessionId: oldSpaceSession.id, agentId: "agt_a" });
+    const oldAgentSession = ensureAgentSession(store, { spaceSessionId: oldSpaceSession.id, accountId: "acc_a", agentId: "agt_a" });
     store.insert("memoryRecallSessions", {
       id: "mrs_old", agentId: "agt_a", agentSessionId: oldAgentSession.id,
       generation: 1, status: "active", deliveredSlugs: [], cursors: [],
@@ -134,14 +138,14 @@ test("/new archives the complete old context, is request-id idempotent, and refu
       agentSessionId: oldAgentSession.id, generation: 1, baseHistoryVersion: 0, turn,
     });
     store.update("spaces", "spc_a", {
-      seats: [{ agentId: "agt_a", responseMode: "default" }, { agentId: "agt_missing", responseMode: "default" }],
+      seats: [{ accountId: "acc_a", responseMode: "default" }, { accountId: "acc_missing", responseMode: "default" }],
     });
     assert.throws(() => startNewSpaceSession(store, {
       spaceId: "spc_a", requestId: "req_invalid_membership",
     }), (error) => error.code === "conflict");
     assert.equal(store.find("spaceSessions", oldSpaceSession.id).status, "active",
       "failed /new preflight must not archive the current session");
-    store.update("spaces", "spc_a", { seats: [{ agentId: "agt_a", responseMode: "default" }] });
+    store.update("spaces", "spc_a", { seats: [{ accountId: "acc_a", responseMode: "default" }] });
     store.insert("runs", { id: "run_busy", spaceId: "spc_a", spaceSessionId: oldSpaceSession.id, status: "pending" });
     assert.throws(() => startNewSpaceSession(store, { spaceId: "spc_a", requestId: "req_busy" }),
       (error) => error.code === "session_busy");
@@ -164,7 +168,7 @@ test("/new archives the complete old context, is request-id idempotent, and refu
 test("compaction jobs derive status and rotate each target generation with identical-result retry", async () => {
   await fixture(async (store) => {
     const spaceSession = ensureActiveSpaceSession(store, "spc_a");
-    const agentSession = ensureAgentSession(store, { spaceSessionId: spaceSession.id, agentId: "agt_a" });
+    const agentSession = ensureAgentSession(store, { spaceSessionId: spaceSession.id, accountId: "acc_a", agentId: "agt_a" });
     store.insert("memoryRecallSessions", {
       id: "mrs_generation_1", agentId: "agt_a", agentSessionId: agentSession.id,
       generation: 1, status: "active", deliveredSlugs: [], cursors: [],
@@ -172,11 +176,11 @@ test("compaction jobs derive status and rotate each target generation with ident
     });
     const job = createContextCompactionJob(store, {
       spaceId: "spc_a", requestId: "req_compact",
-      targets: [{ agentId: "agt_a", mode: "checkpoint_new_binding" }],
+      targets: [{ agentId: "agt_a", accountId: "acc_a", mode: "checkpoint_new_binding" }],
     });
     assert.equal(job.status, "queued");
     assert.equal(createContextCompactionJob(store, {
-      spaceId: "spc_a", requestId: "req_compact", targets: [{ agentId: "agt_a" }],
+      spaceId: "spc_a", requestId: "req_compact", targets: [{ agentId: "agt_a", accountId: "acc_a" }],
     }).id, job.id);
     assert.equal(markContextCompactionTargetRunning(store, { jobId: job.id, agentId: "agt_a" }).status, "running");
     const result = {
@@ -196,7 +200,9 @@ test("compaction jobs derive status and rotate each target generation with ident
     assert.equal(store.find("agentSessions", agentSession.id).checkpoints[0].checkpoint.summary, "stable");
     assert.equal(getContextCompactionJob(store, job.id).targets[0].mode, undefined, "public job hides execution mode");
 
-    store.update("accounts", "acc_a", { kind: "api", provider: "ollama" });
+    store.update("agents", "agt_a", {
+      runtimeProfile: { schemaVersion: 1, kind: "api", provider: "ollama", model: "gpt-test" },
+    });
     compareAndSetApiHistory(store, {
       agentSessionId: agentSession.id,
       generation: 2,
@@ -204,7 +210,7 @@ test("compaction jobs derive status and rotate each target generation with ident
       turn,
     });
     const apiJob = createContextCompactionJob(store, {
-      spaceId: "spc_a", requestId: "req_api_compact", targets: [{ agentId: "agt_a" }],
+      spaceId: "spc_a", requestId: "req_api_compact", targets: [{ agentId: "agt_a", accountId: "acc_a" }],
     });
     updateContextCompactionTarget(store, {
       jobId: apiJob.id, agentId: "agt_a", agentSessionId: agentSession.id,
@@ -223,9 +229,9 @@ test("compaction jobs derive status and rotate each target generation with ident
 test("restart recovery terminalizes interrupted compaction so /new is not permanently busy", async () => {
   await fixture(async (store) => {
     const spaceSession = ensureActiveSpaceSession(store, "spc_a");
-    ensureAgentSession(store, { spaceSessionId: spaceSession.id, agentId: "agt_a" });
+    ensureAgentSession(store, { spaceSessionId: spaceSession.id, accountId: "acc_a", agentId: "agt_a" });
     const job = createContextCompactionJob(store, {
-      spaceId: "spc_a", requestId: "req_interrupted", targets: [{ agentId: "agt_a" }],
+      spaceId: "spc_a", requestId: "req_interrupted", targets: [{ agentId: "agt_a", accountId: "acc_a" }],
     });
     markContextCompactionTargetRunning(store, { jobId: job.id, agentId: "agt_a" });
     recoverInterruptedContextCompactions(store, { now: "2026-01-03T00:00:00.000Z" });
@@ -239,7 +245,7 @@ test("restart recovery terminalizes interrupted compaction so /new is not perman
 test("compaction freezes its source boundary and includes only the Run already ahead of it", async () => {
   await fixture(async (store) => {
     const spaceSession = ensureActiveSpaceSession(store, "spc_a");
-    const agentSession = ensureAgentSession(store, { spaceSessionId: spaceSession.id, agentId: "agt_a" });
+    const agentSession = ensureAgentSession(store, { spaceSessionId: spaceSession.id, accountId: "acc_a", agentId: "agt_a" });
     store.insert("messages", {
       id: "msg_before", spaceId: "spc_a", spaceSessionId: spaceSession.id,
       author: { type: "user" }, target: { type: "broadcast" }, content: "before compact",
@@ -252,7 +258,7 @@ test("compaction freezes its source boundary and includes only the Run already a
       createdAt: "2026-01-01T00:00:01.000Z", endedAt: null,
     });
     const job = createContextCompactionJob(store, {
-      spaceId: "spc_a", requestId: "req_boundary", targets: [{ agentId: "agt_a" }],
+      spaceId: "spc_a", requestId: "req_boundary", targets: [{ agentId: "agt_a", accountId: "acc_a" }],
     });
     const frozen = getContextCompactionTarget(store, { jobId: job.id, agentId: "agt_a" });
     assert.deepEqual(frozen.includedRunIds, ["run_ahead"]);

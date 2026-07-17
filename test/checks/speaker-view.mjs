@@ -10,6 +10,7 @@ export async function run(ctx) {
 
   // 模块局部状态：l.1 拿到的 agentB reply content 给 l.2 阳性对照用。
   let agentB;
+  let accountB;
   let l1Space;
   let l1AgentBReplyContent = null;
 
@@ -23,12 +24,13 @@ export async function run(ctx) {
     });
     assertEqual(agentBResp.status, 201);
     agentB = agentBResp.json.agent;
+    accountB = agentBResp.json.account;
 
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "l1-space",
       seats: [
-        { agentId: ctx.agent.id, responseMode: "default" },
-        { agentId: agentB.id, responseMode: "default" },
+        { accountId: ctx.owningAccount.id, responseMode: "default" },
+        { accountId: accountB.id, responseMode: "default" },
       ],
     });
     assertEqual(spaceResp.status, 201);
@@ -37,7 +39,7 @@ export async function run(ctx) {
     const l1UserMsg1Content = "l.1 第一条用户消息 @agent";
     const post1 = await httpRequest("POST", `/api/spaces/${l1Space.id}/messages`, {
       author: { type: "user" },
-      target: { type: "direct", agentIds: [ctx.agent.id] },
+      target: { type: "direct", accountIds: [ctx.owningAccount.id] },
       content: l1UserMsg1Content,
     });
     assertEqual(post1.status, 201);
@@ -52,7 +54,7 @@ export async function run(ctx) {
 
     const post2 = await httpRequest("POST", `/api/spaces/${l1Space.id}/messages`, {
       author: { type: "user" },
-      target: { type: "direct", agentIds: [agentB.id] },
+      target: { type: "direct", accountIds: [accountB.id] },
       content: "l.1 第二条 @agentB 触发",
     });
     assertEqual(post2.status, 201);
@@ -78,9 +80,9 @@ export async function run(ctx) {
       l1AgentBReplyContent.includes(`- 用户: ${l1UserMsg1Content}`),
       `expected user signature with msg1 content, got: ${l1AgentBReplyContent}`,
     );
-    const sig = `- ${ctx.agent.name}: `;
+    const sig = `- ${ctx.owningAccount.name}: `;
     const sigIdx = l1AgentBReplyContent.indexOf(sig);
-    assert(sigIdx !== -1, `expected agent ${ctx.agent.name} signature line, got: ${l1AgentBReplyContent}`);
+    assert(sigIdx !== -1, `expected account ${ctx.owningAccount.name} signature line, got: ${l1AgentBReplyContent}`);
     const afterSig = l1AgentBReplyContent.slice(sigIdx + sig.length);
     assert(/回声第 \d+ 次/.test(afterSig), `expected echo counter after agent signature, got: ${afterSig}`);
   });
@@ -122,13 +124,14 @@ updatedAt: 2026-07-08T00:00:00.000Z
     });
     assertEqual(agentCResp.status, 201);
     const agentC = agentCResp.json.agent;
+    const accountC = agentCResp.json.account;
     const agentVaultPath = join(vaultPath, agentC.id);
     await mkdir(agentVaultPath, { recursive: true });
     await writeFile(join(agentVaultPath, "decision-test.md"), decisionFile, "utf8");
 
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "l3-space",
-      seats: [{ agentId: agentC.id, responseMode: "default" }],
+      seats: [{ accountId: accountC.id, responseMode: "default" }],
     });
     assertEqual(spaceResp.status, 201);
     const l3Space = spaceResp.json.space;
@@ -182,12 +185,13 @@ updatedAt: 2026-07-08T00:00:00.000Z
     });
     assertEqual(newAgentResp.status, 201);
     const newAgent = newAgentResp.json.agent;
+    const newAccount = newAgentResp.json.account;
 
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "l4-space",
       seats: [
-        { agentId: ctx.agent.id, responseMode: "default" },
-        { agentId: newAgent.id, responseMode: "focused" },
+        { accountId: ctx.owningAccount.id, responseMode: "default" },
+        { accountId: newAccount.id, responseMode: "focused" },
       ],
     });
     assertEqual(spaceResp.status, 201);
@@ -211,7 +215,7 @@ updatedAt: 2026-07-08T00:00:00.000Z
     for (let i = 0; i < 25; i += 1) {
       const post = await httpRequest("POST", `/api/spaces/${l4Space.id}/messages`, {
         author: { type: "user" },
-        target: { type: "direct", agentIds: ["agt_nonexistent"] },
+        target: { type: "direct", accountIds: ["acc_nonexistent"] },
         content: `l.4 direct 消息编号 ${i}`,
       });
       assertEqual(post.status, 201);
@@ -220,7 +224,7 @@ updatedAt: 2026-07-08T00:00:00.000Z
 
     const triggerPost = await httpRequest("POST", `/api/spaces/${l4Space.id}/messages`, {
       author: { type: "user" },
-      target: { type: "direct", agentIds: [newAgent.id] },
+      target: { type: "direct", accountIds: [newAccount.id] },
       content: "l.4 触发 newAgent",
     });
     assertEqual(triggerPost.status, 201);

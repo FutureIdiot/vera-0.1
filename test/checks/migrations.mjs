@@ -24,7 +24,7 @@ async function killChild(child) {
 export async function run(ctx) {
   const { check, httpRequest, assertEqual, assert, sleep, getFreePort, fileExistsAt, repoRoot } = ctx;
 
-  await check("k. v0 -> v1 启动迁移：agent 连接字段拆到 account、session-states 键重映射", async () => {
+  await check("k. legacy -> federation 启动迁移：portable Agent profile、Account seat、session 键重映射", async () => {
     const migDataDir = await mkdtemp(join(tmpdir(), "vera-migrate-"));
     const legacyStorePath = join(migDataDir, "store.json");
     const AGENT_ID = "agt_legacy01";
@@ -86,26 +86,20 @@ export async function run(ctx) {
       assertEqual(bs.status, 200);
       const legAgent = bs.json.agents[0];
       assertEqual(legAgent.id, AGENT_ID);
-      assert(
-        !("kind" in legAgent) &&
-          !("provider" in legAgent) &&
-          !("connection" in legAgent) &&
-          !("model" in legAgent),
-        "legacy agent must be stripped of connection fields",
-      );
+      assertEqual(JSON.stringify(legAgent.runtimeProfile), JSON.stringify({ schemaVersion: 1, kind: "cli", provider: "mock", model: "mock-v1" }));
+      assert(!("runtimeBinding" in legAgent), "public Agent must not expose runtime binding");
       assertEqual(bs.json.accounts.length, 1, "exactly one owning account derived from legacy agent");
       const account = bs.json.accounts[0];
-      assertEqual(account.owningAgentId, AGENT_ID);
-      assertEqual(account.provider, "mock");
-      assertEqual(account.model, "mock-v1");
-      assertEqual(account.kind, "cli");
+      assertEqual(account.ownerAgentId, AGENT_ID);
+      assertEqual(account.activeAgentId, null);
+      assert(!("provider" in account) && !("model" in account) && !("kind" in account));
 
-      // 4.4 反迁移：seat.accountId 应被剥掉（4.1 backfill 的旧值一次性清理）
+      // Phase 5.5：Space 成员身份固定为 Account。
       const space = bs.json.spaces[0];
       assertEqual(space.id, SPACE_ID);
       assert(
-        !("accountId" in space.seats[0]),
-        "seat should not carry accountId after 4.4 strip",
+        !("agentId" in space.seats[0]) && typeof space.seats[0].accountId === "string",
+        "seat should carry Account identity only",
       );
 
       // session-states 键重映射：post 消息后 mock 计数器应从 7 续到 8
@@ -124,7 +118,7 @@ export async function run(ctx) {
         const tl = await httpRequest("GET", `/api/spaces/${SPACE_ID}/timeline?limit=50`, undefined, migPort);
         const found = tl.json.items.find(
           (i) => i.itemType === "message" && i.runId === post.json.runs[0].id
-            && i.author?.type === "agent" && /\u56de\u58f0\u7b2c/.test(i.content),
+            && i.author?.type === "account" && /\u56de\u58f0\u7b2c/.test(i.content),
         );
         if (found && found.status === "completed") {
           legacyMsg = found;
@@ -148,7 +142,7 @@ export async function run(ctx) {
     }
   });
 
-  await check("k. v0 分文件 → v1 启动迁移：备份旧 agents/spaces/session-states 等分文件为 .legacy", async () => {
+  await check("k. legacy 分文件 → federation：备份旧 agents/spaces/session-states 等分文件为 .legacy", async () => {
     const migDir = await mkdtemp(join(tmpdir(), "vera-migrate-split-"));
     const AGENT_ID = "agt_split01";
     const SPACE_ID = "spc_split01";
@@ -210,16 +204,14 @@ export async function run(ctx) {
       assertEqual(bs.status, 200);
       const legAgent = bs.json.agents[0];
       assertEqual(legAgent.id, AGENT_ID);
-      assert(
-        !("kind" in legAgent) && !("provider" in legAgent) && !("connection" in legAgent) && !("model" in legAgent),
-        "split legacy agent must be stripped",
-      );
+      assertEqual(JSON.stringify(legAgent.runtimeProfile), JSON.stringify({ schemaVersion: 1, kind: "cli", provider: "mock", model: "mock-v1" }));
+      assert(!("runtimeBinding" in legAgent), "split public Agent must not expose runtime binding");
       assertEqual(bs.json.accounts.length, 1);
       const account = bs.json.accounts[0];
-      assertEqual(account.owningAgentId, AGENT_ID);
-      assertEqual(account.provider, "mock");
-      assertEqual(account.model, "mock-v1");
-      assert(!("accountId" in bs.json.spaces[0].seats[0]), "seat should not carry accountId after 4.4 strip");
+      assertEqual(account.ownerAgentId, AGENT_ID);
+      assertEqual(account.activeAgentId, null);
+      assert(!("agentId" in bs.json.spaces[0].seats[0]), "seat should not carry Agent identity");
+      assert(typeof bs.json.spaces[0].seats[0].accountId === "string", "seat should carry Account identity");
 
       assert(await fileExistsAt(join(migDir, "agents.json.legacy")), "agents.json.legacy backup missing");
       assert(await fileExistsAt(join(migDir, "session-states.json.legacy")), "session-states.json.legacy backup missing");
@@ -240,7 +232,7 @@ export async function run(ctx) {
         const tl = await httpRequest("GET", `/api/spaces/${SPACE_ID}/timeline?limit=50`, undefined, migPort);
         const found = tl.json.items.find(
           (i) => i.itemType === "message" && i.runId === post.json.runs[0].id
-            && i.author?.type === "agent" && /\u56de\u58f0\u7b2c/.test(i.content),
+            && i.author?.type === "account" && /\u56de\u58f0\u7b2c/.test(i.content),
         );
         if (found && found.status === "completed") {
           legacyMsg = found;

@@ -10,15 +10,19 @@ export async function run(ctx) {
     for (const account of response.json.accounts) {
       assertEqual(account.presence, "offline");
       assertEqual(account.runtimeCapabilities, null);
-      assert(Array.isArray(account.authorizedAgentIds), "authorizedAgentIds should be present");
+      assert(typeof account.ownerAgentId === "string", "ownerAgentId should be present");
+      assertEqual(account.activeAgentId, null);
     }
   });
 
   await check("q.2 presentation settings hot-update the active bubble consumer", async () => {
-    const created = await httpRequest("POST", "/api/agents", { name: "F4 bubble runtime", provider: "mock" });
+    const created = await httpRequest("POST", "/api/agents", {
+      name: "F4 bubble runtime", kind: "cli", provider: "mock", model: "mock-v1", connection: {},
+    });
     assertEqual(created.status, 201);
     const agentId = created.json.agent.id;
-    const space = await httpRequest("POST", "/api/spaces", { name: "F4 bubble runtime", seats: [{ agentId }] });
+    const accountId = created.json.account.id;
+    const space = await httpRequest("POST", "/api/spaces", { name: "F4 bubble runtime", seats: [{ accountId }] });
     assertEqual(space.status, 201);
     const setting = await httpRequest("PATCH", "/api/settings", {
       settings: {
@@ -30,7 +34,7 @@ export async function run(ctx) {
     assertEqual(setting.status, 200);
     const sent = await httpRequest("POST", `/api/spaces/${space.json.space.id}/messages`, {
       author: { type: "user", userId: "owner" },
-      target: { type: "agent", agentId },
+      target: { type: "direct", accountIds: [accountId] },
       content: "runtime-setting-abcdefghijklmnopqrstuvwxyz",
     });
     assertEqual(sent.status, 201);
@@ -44,17 +48,20 @@ export async function run(ctx) {
   });
 
   await check("q.3 resident-index budget hot-updates before a new external session", async () => {
-    const created = await httpRequest("POST", "/api/agents", { name: "F4 memory budget", provider: "mock" });
+    const created = await httpRequest("POST", "/api/agents", {
+      name: "F4 memory budget", kind: "cli", provider: "mock", model: "mock-v1", connection: {},
+    });
     assertEqual(created.status, 201);
     const agentId = created.json.agent.id;
     await httpRequest("POST", `/api/agents/${agentId}/memory`, { slug: "first-memory", type: "decision", description: "first hook", content: "first" });
     await httpRequest("POST", `/api/agents/${agentId}/memory`, { slug: "second-memory", type: "decision", description: "second hook", content: "second" });
     const setting = await httpRequest("PATCH", "/api/settings", { settings: { "memory.injectionBudgetResidentLines": 1 } });
     assertEqual(setting.status, 200);
-    const space = await httpRequest("POST", "/api/spaces", { name: "F4 memory budget", seats: [{ agentId }] });
+    const accountId = created.json.account.id;
+    const space = await httpRequest("POST", "/api/spaces", { name: "F4 memory budget", seats: [{ accountId }] });
     const sent = await httpRequest("POST", `/api/spaces/${space.json.space.id}/messages`, {
       author: { type: "user", userId: "owner" },
-      target: { type: "agent", agentId },
+      target: { type: "direct", accountIds: [accountId] },
       content: "budget-check",
     });
     const runId = sent.json.runs[0].id;

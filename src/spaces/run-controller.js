@@ -13,7 +13,7 @@ import {
   compareAndSetProviderBinding,
   getApiHistory,
   getProviderBinding,
-  providerFingerprintForAccount,
+  providerFingerprintForRuntime,
   rotateContextGeneration,
   updateContextPressure,
 } from "./context-state.js";
@@ -73,10 +73,14 @@ export function executeRun({
   triggerMessage, adapter, agentStates, memoryRetrieval, memoryDigestScheduler,
   contextCompaction,
 }) {
+  const runtime = {
+    ...(agent.runtimeProfile ?? {}),
+    connection: agent.runtimeBinding?.connection ?? {},
+  };
   let activeSpaceSession = spaceSession;
   let activeAgentSession = agentSession;
   if (!activeSpaceSession || !activeAgentSession) {
-    const active = getActiveContext(store, { spaceId: space.id, agentId: agent.id });
+    const active = getActiveContext(store, { spaceId: space.id, accountId: account.id, agentId: agent.id });
     activeSpaceSession = active.spaceSession;
     activeAgentSession = active.agentSession;
   }
@@ -91,6 +95,9 @@ export function executeRun({
     spaceSessionId: activeSpaceSession.id,
     agentSessionId: activeAgentSession.id,
     contextGeneration: activeAgentSession.generation,
+    runtimeRevision: agent.runtimeRevision ?? null,
+    effectiveModel: runtime.model ?? "",
+    delegated: agent.id !== account.ownerAgentId,
     triggerMessageId: triggerMessage.id,
     replyMessageIds: [],
     status: "pending",
@@ -151,12 +158,12 @@ export function executeRun({
     if (assessContextPressure(activeAgentSession, config.context).mustCompact) {
       throw new ApiError("context_capacity", "AgentSession must be compacted before Run start");
     }
-    let providerBinding = account.kind === "api" ? null : getProviderBinding(store, {
+    let providerBinding = runtime.kind === "api" ? null : getProviderBinding(store, {
       agentSessionId: activeAgentSession.id,
       generation: activeAgentSession.generation,
       accountId: account.id,
     });
-    const providerFingerprint = providerFingerprintForAccount(account);
+    const providerFingerprint = providerFingerprintForRuntime(runtime);
     if (providerBinding && providerBinding.providerFingerprint !== providerFingerprint) {
       const checkpoint = checkpointForAgent(store, {
         spaceSessionId: activeSpaceSession.id,
@@ -173,12 +180,12 @@ export function executeRun({
       store.update("runs", storedRun.id, { contextGeneration: activeAgentSession.generation });
     }
 
-    let apiHistory = account.kind === "api" ? getApiHistory(store, {
+    let apiHistory = runtime.kind === "api" ? getApiHistory(store, {
       agentSessionId: activeAgentSession.id,
       generation: activeAgentSession.generation,
     }) : null;
     let historyVersion = apiHistory?.version ?? 0;
-    const effectiveLimitTokens = effectiveContextLimit(config, account);
+    const effectiveLimitTokens = effectiveContextLimit(config, runtime);
 
     const compileCurrentPrompt = async () => {
       await memoryRetrieval?.ensureSession({
@@ -196,13 +203,13 @@ export function executeRun({
         spaceSessionId: activeSpaceSession.id,
         agentSessionId: activeAgentSession.id,
         generation: activeAgentSession.generation,
-        includeResidentIndex: account.kind !== "api" && providerBinding === null,
+        includeResidentIndex: runtime.kind !== "api" && providerBinding === null,
         apiHistory,
         checkpoint: latestCheckpoint(store, activeAgentSession.id),
         runId: storedRun.id,
         config,
       });
-      if (account.kind === "api") {
+      if (runtime.kind === "api") {
         prompt.apiMessages = boundApiMessages(
           prompt.apiMessages,
           Math.floor(effectiveLimitTokens * config.context.hardRatio),
@@ -236,7 +243,10 @@ export function executeRun({
       spaceId: space.id,
       spaceSessionId: activeSpaceSession.id,
       runId: storedRun.id,
-      agentId: agent.id,
+      agent,
+      account,
+      effectiveModel: runtime.model ?? "",
+      delegated: agent.id !== account.ownerAgentId,
     });
     const { bubbles, onActivity, requestApproval } = output;
 
@@ -244,13 +254,14 @@ export function executeRun({
     const ctx = {
       agent,
       account,
+      runtime,
       spaceSessionId: activeSpaceSession.id,
       agentSessionId: activeAgentSession.id,
       contextGeneration: activeAgentSession.generation,
       sessionMode: "main",
       prompt,
       providerBinding,
-      historyVersion: account.kind === "api" ? historyVersion : undefined,
+      historyVersion: runtime.kind === "api" ? historyVersion : undefined,
       workspacePath: process.cwd(),
       onDelta: (text) => bubbles.delta(text),
       onActivity,
@@ -304,7 +315,7 @@ export function executeRun({
     try {
       const result = await adapter.run(ctx);
       bubbles.finish(result?.content);
-      if (account.kind === "api") {
+      if (runtime.kind === "api") {
         const replies = bubbles.replyMessageIds.map((id) => store.find("messages", id));
         if (replies.length === 0 || replies.some((message) => message?.status !== "completed")) {
           throw new ApiError("history_conflict", "API Run has no completed reply Messages");
@@ -335,12 +346,12 @@ export function executeRun({
         apiHistory = history;
         historyVersion = history.version;
       }
-      const priorEstimate = account.kind === "api" ? 0 : activeAgentSession.context?.estimatedInputTokens ?? 0;
+      const priorEstimate = runtime.kind === "api" ? 0 : activeAgentSession.context?.estimatedInputTokens ?? 0;
       const providerInputTokens = result?.usage?.inputTokens;
       const hasProviderMeasurement = Number.isFinite(providerInputTokens) && providerInputTokens >= 0;
       const measured = hasProviderMeasurement
         ? providerInputTokens
-        : account.kind === "api"
+        : runtime.kind === "api"
           ? estimateTokens(apiHistory)
           : priorEstimate + estimateTokens(prompt.text) + estimateTokens(result?.content ?? "");
       activeAgentSession = updateContextPressure(store, {

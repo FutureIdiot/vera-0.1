@@ -1,5 +1,5 @@
-// m. 响应规则收口 + Seat 去 accountId 反迁移（Phase 4.3 + 4.4）：
-// silent 默认 / silent+respondTo / focused / blockAgentIds 声告段过滤 + 直向 @ 穿透。
+// m. 响应规则收口：Account Seat / silent / respondTo / focused /
+// blockAccountIds 声告段过滤 + 直向 @ 穿透。
 
 export async function run(ctx) {
   const { check, httpRequest, sse, assertEqual, assert } = ctx;
@@ -14,15 +14,16 @@ export async function run(ctx) {
     });
     assertEqual(agentS1Resp.status, 201);
     const agentS1 = agentS1Resp.json.agent;
+    const accountS1 = agentS1Resp.json.account;
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m1-space",
-      seats: [{ agentId: agentS1.id, responseMode: "silent" }],
+      seats: [{ accountId: accountS1.id, responseMode: "silent" }],
     });
     assertEqual(spaceResp.status, 201);
     const m1Space = spaceResp.json.space;
     assert(
-      !("accountId" in m1Space.seats[0]),
-      "m.1 seat should not carry accountId after 4.4 strip",
+      !("agentId" in m1Space.seats[0]),
+      "m.1 seat should carry Account identity only",
     );
 
     const bc = await httpRequest("POST", `/api/spaces/${m1Space.id}/messages`, {
@@ -35,7 +36,7 @@ export async function run(ctx) {
 
     const dc = await httpRequest("POST", `/api/spaces/${m1Space.id}/messages`, {
       author: { type: "user" },
-      target: { type: "direct", agentIds: [agentS1.id] },
+      target: { type: "direct", accountIds: [accountS1.id] },
       content: "m.1 direct @",
     });
     assertEqual(dc.status, 201);
@@ -54,6 +55,7 @@ export async function run(ctx) {
     });
     assertEqual(agentS2Resp.status, 201);
     const agentS2 = agentS2Resp.json.agent;
+    const accountS2 = agentS2Resp.json.account;
     const agentS2bResp = await httpRequest("POST", "/api/agents", {
       name: "VerifyMockS2b",
       kind: "cli",
@@ -63,11 +65,12 @@ export async function run(ctx) {
     });
     assertEqual(agentS2bResp.status, 201);
     const agentS2b = agentS2bResp.json.agent;
+    const accountS2b = agentS2bResp.json.account;
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m2-space",
       seats: [
-        { agentId: agentS2.id, responseMode: "silent", respondTo: ["user"] },
-        { agentId: agentS2b.id, responseMode: "focused" },
+        { accountId: accountS2.id, responseMode: "silent", respondTo: ["user"] },
+        { accountId: accountS2b.id, responseMode: "focused" },
       ],
     });
     assertEqual(spaceResp.status, 201);
@@ -85,7 +88,7 @@ export async function run(ctx) {
     await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === bc1.json.runs[0].id, 10000);
 
     const bc2 = await httpRequest("POST", `/api/spaces/${m2Space.id}/messages`, {
-      author: { type: "agent", agentId: agentS2b.id },
+      author: { type: "account", accountId: accountS2b.id },
       target: { type: "broadcast" },
       content: "m.2 agent broadcast",
     });
@@ -94,7 +97,7 @@ export async function run(ctx) {
 
     const dc = await httpRequest("POST", `/api/spaces/${m2Space.id}/messages`, {
       author: { type: "user" },
-      target: { type: "direct", agentIds: [agentS2.id] },
+      target: { type: "direct", accountIds: [accountS2.id] },
       content: "m.2 direct @",
     });
     assertEqual(dc.status, 201);
@@ -113,9 +116,10 @@ export async function run(ctx) {
     });
     assertEqual(agentF3Resp.status, 201);
     const agentF3 = agentF3Resp.json.agent;
+    const accountF3 = agentF3Resp.json.account;
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m3-space",
-      seats: [{ agentId: agentF3.id, responseMode: "focused" }],
+      seats: [{ accountId: accountF3.id, responseMode: "focused" }],
     });
     assertEqual(spaceResp.status, 201);
     const m3Space = spaceResp.json.space;
@@ -130,7 +134,7 @@ export async function run(ctx) {
 
     const dc = await httpRequest("POST", `/api/spaces/${m3Space.id}/messages`, {
       author: { type: "user" },
-      target: { type: "direct", agentIds: [agentF3.id] },
+      target: { type: "direct", accountIds: [accountF3.id] },
       content: "m.3 direct @",
     });
     assertEqual(dc.status, 201);
@@ -139,7 +143,7 @@ export async function run(ctx) {
     await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === dc.json.runs[0].id, 10000);
   });
 
-  await check("m.4 blockAgentIds：声告段过滤 + 不影响 shouldRespond + direct @ 穿透", async () => {
+  await check("m.4 blockAccountIds：声告段过滤 + 不影响 shouldRespond + direct @ 穿透", async () => {
     const agentXResp = await httpRequest("POST", "/api/agents", {
       name: "VerifyMockX",
       kind: "cli",
@@ -149,6 +153,7 @@ export async function run(ctx) {
     });
     assertEqual(agentXResp.status, 201);
     const agentX = agentXResp.json.agent;
+    const accountX = agentXResp.json.account;
     const agentYResp = await httpRequest("POST", "/api/agents", {
       name: "VerifyMockY",
       kind: "cli",
@@ -158,20 +163,21 @@ export async function run(ctx) {
     });
     assertEqual(agentYResp.status, 201);
     const agentY = agentYResp.json.agent;
+    const accountY = agentYResp.json.account;
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m4-space",
       seats: [
-        { agentId: agentX.id, responseMode: "default" },
-        { agentId: agentY.id, responseMode: "default", blockAgentIds: [agentX.id] },
+        { accountId: accountX.id, responseMode: "default" },
+        { accountId: accountY.id, responseMode: "default", blockAccountIds: [accountX.id] },
       ],
     });
     assertEqual(spaceResp.status, 201);
     const m4Space = spaceResp.json.space;
-    assertEqual(m4Space.seats[1].blockAgentIds[0], agentX.id, "blockAgentIds should persist on seat");
+    assertEqual(m4Space.seats[1].blockAccountIds[0], accountX.id, "blockAccountIds should persist on seat");
 
     const post1 = await httpRequest("POST", `/api/spaces/${m4Space.id}/messages`, {
       author: { type: "user" },
-      target: { type: "direct", agentIds: [agentX.id] },
+      target: { type: "direct", accountIds: [accountX.id] },
       content: "m.4 msg1 @X",
     });
     assertEqual(post1.status, 201);
@@ -183,17 +189,17 @@ export async function run(ctx) {
     const tl = await httpRequest("GET", `/api/spaces/${m4Space.id}/timeline?limit=50`);
     assertEqual(tl.status, 200);
     const hasXReply = tl.json.items.some(
-      (i) => i.itemType === "message" && i.author?.type === "agent" && i.author?.agentId === agentX.id,
+      (i) => i.itemType === "message" && i.author?.type === "account" && i.author?.accountId === accountX.id,
     );
     assert(hasXReply, "timeline should contain X's reply bubble (positive control)");
 
     const post2 = await httpRequest("POST", `/api/spaces/${m4Space.id}/messages`, {
       author: { type: "user" },
-      target: { type: "direct", agentIds: [agentY.id] },
+      target: { type: "direct", accountIds: [accountY.id] },
       content: "m.4 msg2 @Y",
     });
     assertEqual(post2.status, 201);
-    assertEqual(post2.json.runs.length, 1, "direct @Y should create run (blockAgentIds does not block shouldRespond)");
+    assertEqual(post2.json.runs.length, 1, "direct @Y should create run (blockAccountIds does not block shouldRespond)");
     assertEqual(post2.json.runs[0].agentId, agentY.id);
     const end2 = await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === post2.json.runs[0].id, 10000);
     assertEqual(end2.data.run.status, "completed");
@@ -202,8 +208,8 @@ export async function run(ctx) {
       .map((e) => e.data.message.content)
       .join(" ");
     assert(
-      !yReply.includes(`- ${agentX.name}: `),
-      `Y's reply should not contain X's signature (blockAgentIds filters announcement), got: ${yReply}`,
+      !yReply.includes(`- ${accountX.name}: `),
+      `Y's reply should not contain X's signature (blockAccountIds filters announcement), got: ${yReply}`,
     );
     assert(
       yReply.includes("- 用户: "),
@@ -219,7 +225,7 @@ export async function run(ctx) {
     assertEqual(
       post3.json.runs.length,
       2,
-      "broadcast should trigger both X and Y (blockAgentIds does not affect shouldRespond)",
+      "broadcast should trigger both X and Y (blockAccountIds does not affect shouldRespond)",
     );
     await Promise.all(
       post3.json.runs.map((r) => sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === r.id, 10000)),

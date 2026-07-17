@@ -1,11 +1,11 @@
 export function createAccountsClient(http) {
   return {
-    list(agentId) {
-      const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
-      return http.get(`/api/accounts${query}`);
-    },
-    create(agentId, body) { return http.post(`/api/agents/${agentId}/accounts`, body); },
+    list() { return http.get("/api/accounts"); },
+    get(accountId) { return http.get(`/api/accounts/${encodeURIComponent(accountId)}`); },
+    create(body) { return http.post("/api/accounts", body); },
     update(accountId, body) { return http.patch(`/api/accounts/${accountId}`, body); },
     remove(accountId) { return http.delete(`/api/accounts/${accountId}`); },
+    rotateAccessKey(accountId) { return http.post(`/api/accounts/${encodeURIComponent(accountId)}/access-key/rotate`, {}); },
+    revokeAccessKey(accountId) { return http.delete(`/api/accounts/${encodeURIComponent(accountId)}/access-key`); },
   };
 }

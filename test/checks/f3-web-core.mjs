@@ -1,13 +1,13 @@
 // p. F3 Web核心体验所依赖的 Space mutation SSE 与设置入参边界。
 
 export async function run(ctx) {
-  const { check, httpRequest, assertEqual, assert, sse, agent } = ctx;
+  const { check, httpRequest, assertEqual, assert, sse, owningAccount } = ctx;
   let spaceId = null;
 
   await check("p.1 Space create/update/archive/restore 均发布 space.updated", async () => {
     const created = await httpRequest("POST", "/api/spaces", {
       name: "f3-live-space",
-      seats: [{ agentId: agent.id, responseMode: "focused" }],
+      seats: [{ accountId: owningAccount.id, responseMode: "focused" }],
       notifications: { mode: "all", includeActivityErrors: false },
     });
     assertEqual(created.status, 201);
@@ -32,15 +32,15 @@ export async function run(ctx) {
   await check("p.2 Space settings 拒绝重复/未知 Seat 与非法枚举", async () => {
     const duplicate = await httpRequest("PATCH", `/api/spaces/${spaceId}`, {
       seats: [
-        { agentId: agent.id, responseMode: "default" },
-        { agentId: agent.id, responseMode: "focused" },
+        { accountId: owningAccount.id, responseMode: "default" },
+        { accountId: owningAccount.id, responseMode: "focused" },
       ],
     });
     assertEqual(duplicate.status, 400);
     assertEqual(duplicate.json.error.code, "invalid_request");
 
     const unknown = await httpRequest("PATCH", `/api/spaces/${spaceId}`, {
-      seats: [{ agentId: "agt_missing", responseMode: "default" }],
+      seats: [{ accountId: "acc_missing", responseMode: "default" }],
     });
     assertEqual(unknown.status, 400);
 
@@ -49,7 +49,7 @@ export async function run(ctx) {
     assertEqual(empty.json.error.code, "invalid_request");
 
     const badMode = await httpRequest("PATCH", `/api/spaces/${spaceId}`, {
-      seats: [{ agentId: agent.id, responseMode: "sometimes" }],
+      seats: [{ accountId: owningAccount.id, responseMode: "sometimes" }],
     });
     assertEqual(badMode.status, 400);
 
@@ -69,8 +69,8 @@ export async function run(ctx) {
   await check("p.3 Space 设置一次 PATCH 后由活跃列表返回权威形状", async () => {
     const response = await httpRequest("PATCH", `/api/spaces/${spaceId}`, {
       topic: "F3 settings",
-      seats: [{ agentId: agent.id, responseMode: "silent", respondTo: ["user"] }],
-      notifications: { mode: "agentMessages", includeActivityErrors: true },
+      seats: [{ accountId: owningAccount.id, responseMode: "silent", respondTo: ["user"] }],
+      notifications: { mode: "accountMessages", includeActivityErrors: true },
     });
     assertEqual(response.status, 200);
     const listed = await httpRequest("GET", "/api/spaces");

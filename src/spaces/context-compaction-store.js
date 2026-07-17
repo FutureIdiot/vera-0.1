@@ -71,14 +71,14 @@ function resolveTarget(store, spaceSession, target) {
   const agentSession = target.agentSessionId
     ? store.find("agentSessions", target.agentSessionId)
     : store.list("agentSessions").find((item) =>
-      item.spaceSessionId === spaceSession.id && item.agentId === target.agentId);
+      item.spaceSessionId === spaceSession.id && item.accountId === target.accountId && item.agentId === target.agentId);
   if (!agentSession || agentSession.spaceSessionId !== spaceSession.id || agentSession.agentId !== target.agentId ||
       agentSession.status !== "active") throw conflict(`agent ${target.agentId} has no active AgentSession`);
-  const owned = store.list("accounts").filter((account) => account.owningAgentId === target.agentId);
-  const accountId = target.accountId ?? (owned.length === 1 ? owned[0].id : null);
+  const accountId = target.accountId;
   const account = accountId ? store.find("accounts", accountId) : null;
-  if (!account || account.owningAgentId !== target.agentId) throw conflict(`agent ${target.agentId} has no unique Home Account`);
-  const mode = target.mode ?? (account.kind === "api" ? "gateway_history" : "checkpoint_new_binding");
+  if (!account || account.ownerAgentId !== target.agentId) throw conflict(`agent ${target.agentId} is not the owner of account ${accountId}`);
+  const agent = store.find("agents", target.agentId);
+  const mode = target.mode ?? (agent?.runtimeProfile?.kind === "api" ? "gateway_history" : "checkpoint_new_binding");
   if (!MODES.has(mode)) throw invalid("target.mode is invalid");
   const recentTurnLimit = target.recentTurnLimit ?? 8;
   if (!Number.isInteger(recentTurnLimit) || recentTurnLimit < 1) {

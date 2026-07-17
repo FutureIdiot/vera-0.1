@@ -87,9 +87,9 @@ export function createStatusTracker({ config, pkgVersion = "0.0.1" }) {
     const dataPathSize = await dirSize(config.dataPath);
 
     // accounts presence（联邦前全 offline）
-    const accounts = store.list("accounts").map(({ id, owningAgentId, presence, lastSeenAt }) => ({
+    const accounts = store.list("accounts").map(({ id, ownerAgentId, presence, lastSeenAt }) => ({
       accountId: id,
-      agentId: owningAgentId,
+      agentId: ownerAgentId,
       presence: presence ?? "offline",
       lastSeenAt: lastSeenAt ?? null,
     }));

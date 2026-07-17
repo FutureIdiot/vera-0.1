@@ -5,9 +5,12 @@ export async function run(ctx) {
   const { check, httpRequest, assertEqual, assert, sse } = ctx;
 
   await check("r.1 M3 retrieval injects safely once per session and keeps SSE unchanged", async () => {
-    const created = await httpRequest("POST", "/api/agents", { name: "M3 alpha", provider: "mock" });
+    const created = await httpRequest("POST", "/api/agents", {
+      name: "M3 alpha", kind: "cli", provider: "mock", model: "mock-v1", connection: {},
+    });
     assertEqual(created.status, 201);
     const agentId = created.json.agent.id;
+    ctx.m3AccountId = created.json.account.id;
     const memories = [
       ["orchid-alpha", "兰花协议甲：检索必须保持确定性"],
       ["orchid-pinned", "兰花协议乙：游标必须保持稳定"],
@@ -28,11 +31,12 @@ export async function run(ctx) {
     assertEqual(listed.json.memories.find((item) => item.slug === "orchid-pinned").pinned, true);
 
     await httpRequest("PATCH", "/api/settings", { settings: { "memory.injectionBudgetResidentLines": 1 } });
-    const space = await httpRequest("POST", "/api/spaces", { name: "M3 retrieval", seats: [{ agentId }] });
+    const accountId = created.json.account.id;
+    const space = await httpRequest("POST", "/api/spaces", { name: "M3 retrieval", seats: [{ accountId }] });
     assertEqual(space.status, 201);
     const beforeSeq = Math.max(0, ...sse.events.map((event) => event.seq ?? 0));
     const sent = await httpRequest("POST", `/api/spaces/${space.json.space.id}/messages`, {
-      author: { type: "user", userId: "owner" }, target: { type: "agent", agentId },
+      author: { type: "user", userId: "owner" }, target: { type: "direct", accountIds: [accountId] },
       content: "请回忆兰花协议的检索、游标和同会话规则",
     });
     assertEqual(sent.status, 201);
@@ -49,7 +53,7 @@ export async function run(ctx) {
     assert(!runEvents.some((event) => String(event.type).startsWith("memory.")), "M3 retrieval must not add SSE events");
 
     const sentAgain = await httpRequest("POST", `/api/spaces/${space.json.space.id}/messages`, {
-      author: { type: "user", userId: "owner" }, target: { type: "agent", agentId },
+      author: { type: "user", userId: "owner" }, target: { type: "direct", accountIds: [accountId] },
       content: "再次回忆兰花协议的检索、游标和同会话规则",
     });
     const againRunId = sentAgain.json.runs[0].id;
@@ -63,9 +67,10 @@ export async function run(ctx) {
 
   await check("r.2 one Agent recalls the same Memory from a new Space session", async () => {
     const agentId = ctx.m3AgentId;
-    const space = await httpRequest("POST", "/api/spaces", { name: "M3 cross Space", seats: [{ agentId }] });
+    const accountId = ctx.m3AccountId;
+    const space = await httpRequest("POST", "/api/spaces", { name: "M3 cross Space", seats: [{ accountId }] });
     const sent = await httpRequest("POST", `/api/spaces/${space.json.space.id}/messages`, {
-      author: { type: "user", userId: "owner" }, target: { type: "agent", agentId }, content: "兰花协议",
+      author: { type: "user", userId: "owner" }, target: { type: "direct", accountIds: [accountId] }, content: "兰花协议",
     });
     const runId = sent.json.runs[0].id;
     await sse.waitFor((event) => event.type === "run.ended" && event.data.run.id === runId);
@@ -75,15 +80,18 @@ export async function run(ctx) {
   });
 
   await check("r.3 M3 retrieval never crosses Agent scope", async () => {
-    const created = await httpRequest("POST", "/api/agents", { name: "M3 beta", provider: "mock" });
+    const created = await httpRequest("POST", "/api/agents", {
+      name: "M3 beta", kind: "cli", provider: "mock", model: "mock-v1", connection: {},
+    });
     const agentId = created.json.agent.id;
+    const accountId = created.json.account.id;
     await httpRequest("POST", `/api/agents/${agentId}/memory`, {
       slug: "beta-orchid", type: "project_rule", description: "兰花协议仅属于beta",
       content: "beta authority",
     });
-    const space = await httpRequest("POST", "/api/spaces", { name: "M3 beta", seats: [{ agentId }] });
+    const space = await httpRequest("POST", "/api/spaces", { name: "M3 beta", seats: [{ accountId }] });
     const sent = await httpRequest("POST", `/api/spaces/${space.json.space.id}/messages`, {
-      author: { type: "user", userId: "owner" }, target: { type: "agent", agentId }, content: "兰花协议",
+      author: { type: "user", userId: "owner" }, target: { type: "direct", accountIds: [accountId] }, content: "兰花协议",
     });
     const runId = sent.json.runs[0].id;
     await sse.waitFor((event) => event.type === "run.ended" && event.data.run.id === runId);

@@ -22,12 +22,12 @@ function stable(value) {
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
 }
 
-export function providerFingerprintForAccount(account) {
+export function providerFingerprintForRuntime(runtime) {
   const route = {
-    kind: account?.kind ?? null,
-    provider: account?.provider ?? null,
-    model: account?.model ?? "",
-    connection: account?.connection ?? {},
+    kind: runtime?.kind ?? null,
+    provider: runtime?.provider ?? null,
+    model: runtime?.model ?? "",
+    connection: runtime?.connection ?? {},
   };
   return `sha256:${createHash("sha256").update(JSON.stringify(stable(route))).digest("hex")}`;
 }

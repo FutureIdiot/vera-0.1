@@ -10,10 +10,14 @@ async function fixture(fn) {
   const root = await mkdtemp(join(tmpdir(), "vera-memory-task-runtime-test-"));
   const store = await createStore({ dataPath: join(root, "data"), debounceMs: 5 });
   store.insert("agents", { id: "agt_owner", name: "Owner" });
-  store.insert("agents", { id: "agt_executor", name: "Executor" });
+  store.insert("agents", {
+    id: "agt_executor", name: "Executor",
+    runtimeProfile: { schemaVersion: 1, kind: "cli", provider: "codex", model: "chat-model" },
+    runtimeBinding: { connection: { command: "codex", args: [], secretRef: "secret-ref" } },
+    runtimeRevision: "sha256:runtime-one",
+  });
   store.insert("accounts", {
-    id: "acc_executor", owningAgentId: "agt_executor", kind: "cli", provider: "codex",
-    model: "chat-model", connection: { command: "codex", args: [], secretRef: "secret-ref" },
+    id: "acc_executor", ownerAgentId: "agt_executor",
   });
   const runtime = createMemoryTaskRuntime({ store, now: () => "2026-07-15T00:00:00.000Z" });
   try { await fn({ store, runtime }); }
@@ -28,7 +32,7 @@ test("verified inherit task resolves a frozen secret-free executor snapshot", as
       taskConfig: { executorAgentId: "agt_executor", modelMode: "inherit", model: null },
     });
     assert.deepEqual(snapshot, {
-      ownerAgentId: "agt_owner", executorAgentId: "agt_executor", accountId: "acc_executor",
+      ownerAgentId: "agt_owner", executorAgentId: "agt_executor", runtimeRevision: "sha256:runtime-one",
       kind: "cli", provider: "codex", modelMode: "inherit", taskModel: "chat-model",
       verificationId: verification.id, connectionFingerprint: verification.connectionFingerprint,
     });
@@ -57,7 +61,9 @@ test("connection changes invalidate exact verification and safe options", async 
     assert.equal(combined.dream.executors.find((item) => item.agentId === "agt_executor").models.length, 0);
     assert.equal(runtime.listOptions({ ownerAgentId: "agt_owner", taskKind: "digest" }).executors
       .find((item) => item.agentId === "agt_executor").models.length, 1);
-    store.update("accounts", "acc_executor", { connection: { command: "codex-new", args: [], secretRef: "secret-ref" } });
+    store.update("agents", "agt_executor", {
+      runtimeBinding: { connection: { command: "codex-new", args: [], secretRef: "secret-ref" } },
+    });
     const option = runtime.listOptions({ ownerAgentId: "agt_owner", taskKind: "digest" }).executors
       .find((item) => item.agentId === "agt_executor");
     assert.deepEqual(option.models, []);
@@ -69,17 +75,15 @@ test("connection changes invalidate exact verification and safe options", async 
   });
 });
 
-test("zero or multiple owning Accounts are unavailable in the Phase 5 transition", async () => {
+test("Memory task execution depends on Agent runtime, not Account ownership count", async () => {
   await fixture(async ({ store, runtime }) => {
     assert.throws(() => runtime.recordVerification({ taskKind: "digest", executorAgentId: "agt_owner", model: "x" }),
       (error) => error.code === "memory_task_unavailable");
     store.insert("accounts", {
-      id: "acc_executor_two", owningAgentId: "agt_executor", kind: "api", provider: "ollama",
-      model: "other", connection: { baseUrl: "http://127.0.0.1:11434" },
+      id: "acc_executor_two", ownerAgentId: "agt_executor",
     });
-    assert.throws(() => runtime.recordVerification({ taskKind: "digest", executorAgentId: "agt_executor", model: "x" }),
-      (error) => error.code === "memory_task_unavailable");
+    runtime.recordVerification({ taskKind: "digest", executorAgentId: "agt_executor", model: "x" });
     const options = runtime.listOptions({ ownerAgentId: "agt_owner", taskKind: "digest" });
-    assert.equal(options.executors.every((item) => item.availability === "unavailable"), true);
+    assert.equal(options.executors.find((item) => item.agentId === "agt_executor").availability, "available");
   });
 });

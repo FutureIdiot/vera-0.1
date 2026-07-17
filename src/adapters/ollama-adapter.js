@@ -119,27 +119,27 @@ function normalizeOllamaDigestProposals(proposals) {
   });
 }
 
-function resolveAccount(account, taskModel = null) {
-  if (account?.kind !== "api" || account?.provider !== "ollama") {
-    throw new AdapterError("unavailable", "Ollama adapter Account kind/provider mismatch");
+function resolveRuntime(runtime, taskModel = null) {
+  if (runtime?.kind !== "api" || runtime?.provider !== "ollama") {
+    throw new AdapterError("unavailable", "Ollama adapter runtime kind/provider mismatch");
   }
-  const model = String(taskModel ?? account.model ?? "").trim();
-  if (!model) throw new AdapterError("unavailable", "Ollama Account model is unavailable");
-  if (account.connection?.secretRef != null) {
-    throw new AdapterError("unavailable", "Ollama Account secret resolution is unavailable");
+  const model = String(taskModel ?? runtime.model ?? "").trim();
+  if (!model) throw new AdapterError("unavailable", "Ollama runtime model is unavailable");
+  if (runtime.connection?.secretRef != null) {
+    throw new AdapterError("unavailable", "Ollama runtime secret resolution is unavailable");
   }
   let url;
   try {
-    url = new URL(String(account.connection?.baseUrl ?? ""));
+    url = new URL(String(runtime.connection?.baseUrl ?? ""));
   } catch {
-    throw new AdapterError("unavailable", "Ollama Account base URL is unavailable");
+    throw new AdapterError("unavailable", "Ollama runtime base URL is unavailable");
   }
   const loopback = ["127.0.0.1", "localhost", "[::1]", "::1"].includes(url.hostname);
   if (url.username || url.password || url.search || url.hash) {
-    throw new AdapterError("unavailable", "Ollama Account base URL is not allowed");
+    throw new AdapterError("unavailable", "Ollama runtime base URL is not allowed");
   }
   if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
-    throw new AdapterError("unavailable", "Ollama Account base URL is not allowed");
+    throw new AdapterError("unavailable", "Ollama runtime base URL is not allowed");
   }
   url.pathname = url.pathname.replace(/\/+$/u, "");
   url.search = "";
@@ -187,7 +187,7 @@ export function createOllamaAdapter({ config }) {
 
   async function run(ctx) {
     assertOpen("unavailable");
-    const { baseUrl, model } = resolveAccount(ctx.account);
+    const { baseUrl, model } = resolveRuntime(ctx.runtime);
     if (ctx.signal?.aborted) throw new AdapterError("cancelled", "Ollama run cancelled");
     const messages = ctx.prompt?.apiMessages;
     if (!Array.isArray(messages) || messages.some((message) => (
@@ -257,10 +257,10 @@ export function createOllamaAdapter({ config }) {
     }
   }
 
-  async function digestMemory({ account, taskModel, payload, signal }) {
+  async function digestMemory({ runtime, taskModel, payload, signal }) {
     assertOpen("executor_unavailable");
     let resolved;
-    try { resolved = resolveAccount(account, taskModel); } catch { throw new AdapterError("executor_unavailable", "Ollama memory digest executor is unavailable"); }
+    try { resolved = resolveRuntime(runtime, taskModel); } catch { throw new AdapterError("executor_unavailable", "Ollama memory digest executor is unavailable"); }
     if (signal?.aborted) throw new AdapterError("cancelled", "Ollama memory digest cancelled");
     const prompt = buildMemoryDigestPrompt(payload);
     if (inputByteLength(OLLAMA_DIGEST_SYSTEM_PROMPT) + inputByteLength(prompt) > maxInputBytes) {
@@ -341,10 +341,10 @@ export function createOllamaAdapter({ config }) {
     });
   }
 
-  async function dreamMemory({ account, taskModel, payload, signal }) {
+  async function dreamMemory({ runtime, taskModel, payload, signal }) {
     assertOpen("executor_unavailable");
     let resolved;
-    try { resolved = resolveAccount(account, taskModel); } catch { throw new AdapterError("executor_unavailable", "Ollama memory Dream executor is unavailable"); }
+    try { resolved = resolveRuntime(runtime, taskModel); } catch { throw new AdapterError("executor_unavailable", "Ollama memory Dream executor is unavailable"); }
     if (signal?.aborted) throw new AdapterError("cancelled", "Ollama memory Dream cancelled");
     const prompt = buildMemoryDreamPrompt(payload);
     if (inputByteLength(OLLAMA_DREAM_SYSTEM_PROMPT) + inputByteLength(prompt) > maxInputBytes) throw new AdapterError("executor_failed", "Ollama memory Dream input exceeds the configured capacity");

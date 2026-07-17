@@ -33,6 +33,7 @@ import { registerPathsRoutes } from "./api/paths-routes.js";
 import { registerThemesRoutes } from "./api/themes-routes.js";
 import { applyRuntimeSettings } from "./core/runtime-settings.js";
 import { listAccounts } from "./agents/accounts.js";
+import { listAgents } from "./agents/agents.js";
 import { ensureUnitBindings, getUnitBinding } from "./agents/unit-bindings.js";
 import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOllamaAdapter } from "./adapters/ollama-adapter.js";
@@ -114,8 +115,8 @@ const memoryDigestAdapters = {
   codex: adapters.codex,
 };
 
-function resolveAdapter(account) {
-  return adapters[account.provider] ?? null;
+function resolveAdapter(agent) {
+  return adapters[agent.runtimeProfile?.provider] ?? null;
 }
 
 const contextCompaction = createContextCompactionService({ store, hub, config });
@@ -142,13 +143,13 @@ function validateMemoryTask({ memoryTaskSnapshot, memoryProviderSnapshot }) {
 
 async function executeMemoryDigest({ job, chunks, facts, proposalSchema, signal }) {
   const agent = store.find("agents", job.agentId);
-  const { account, taskModel } = validateMemoryTask(job);
-  const adapter = memoryDigestAdapters[account.provider] ?? null;
+  const { runtime, taskModel } = validateMemoryTask(job);
+  const adapter = memoryDigestAdapters[runtime.provider] ?? null;
   if (!agent || !adapter?.digestMemory) {
     throw Object.assign(new Error("Memory digest executor is unavailable"), { code: "memory_task_unavailable" });
   }
   return adapter.digestMemory({
-    account,
+    runtime,
     taskModel,
     payload: { agent: { id: agent.id, name: agent.name }, chunks, facts, proposalSchema },
     signal,
@@ -156,12 +157,12 @@ async function executeMemoryDigest({ job, chunks, facts, proposalSchema, signal 
 }
 
 async function executeMemoryDream({ job, payload, signal }) {
-  const { account, taskModel } = validateMemoryTask(job);
-  const adapter = memoryDigestAdapters[account.provider] ?? null;
+  const { runtime, taskModel } = validateMemoryTask(job);
+  const adapter = memoryDigestAdapters[runtime.provider] ?? null;
   if (!adapter?.dreamMemory) {
     throw Object.assign(new Error("Memory Dream executor is unavailable"), { code: "memory_task_unavailable" });
   }
-  return adapter.dreamMemory({ account, taskModel, payload, signal });
+  return adapter.dreamMemory({ runtime, taskModel, payload, signal });
 }
 
 applyRuntimeSettings({ settings: settingsStore.getAll(), config, memoryRetrieval });
@@ -200,7 +201,7 @@ router.get("/api/health", ({ res }) => sendJson(res, 200, { app: "vera", ok: tru
 
 router.get("/api/bootstrap", ({ res }) => {
   sendJson(res, 200, {
-    agents: store.list("agents").map(({ _seq, ...rest }) => rest),
+    agents: listAgents(store),
     accounts: listAccounts(store),
     spaces: listSpaces(store), // 默认只返活跃（api-contract.md 260）
     agentStates: agentStates.list(),

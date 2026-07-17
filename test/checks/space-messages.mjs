@@ -13,16 +13,16 @@ export async function run(ctx) {
     assertEqual(empty.json.error.code, "invalid_request");
   });
 
-  await check("c. POST /api/spaces creates space with agent seated", async () => {
+  await check("c. POST /api/spaces creates space with Account seated", async () => {
     const { status, json } = await httpRequest("POST", "/api/spaces", {
       name: "verify-space",
       topic: "verify.mjs 黑盒验收",
-      seats: [{ agentId: ctx.agent.id, responseMode: "default" }],
+      seats: [{ accountId: ctx.owningAccount.id, responseMode: "default" }],
     });
     assertEqual(status, 201);
     assert(json.space?.id?.startsWith("spc_"), "space id should have spc_ prefix");
     assertEqual(json.space.seats.length, 1);
-    assertEqual(json.space.seats[0].agentId, ctx.agent.id);
+    assertEqual(json.space.seats[0].accountId, ctx.owningAccount.id);
     assertEqual(json.space.seats[0].responseMode, "default");
     ctx.space = json.space;
   });

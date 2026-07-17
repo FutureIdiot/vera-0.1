@@ -33,6 +33,15 @@ function deriveOwningAccountId(agentId) {
 // account、或任一 seat 残留 accountId、或任一 session-states 键以 agt_ 起头。
 // 检测早返以避免每次启动都落盘。
 export function needsMigration({ data }) {
+  // Phase 5.5 renamed the ownership field and moved runtime data back to the
+  // Agent. A crash may flush those collection files before the new migration
+  // version reaches meta.json. In that replay window this legacy detector must
+  // stand down, otherwise it would mistake every migrated Agent for an orphan
+  // and derive duplicate Accounts.
+  const hasFederationShape = data.accounts.some((account) =>
+    Object.prototype.hasOwnProperty.call(account, "ownerAgentId")) ||
+    data.agents.some((agent) => Object.prototype.hasOwnProperty.call(agent, "runtimeProfile"));
+  if (hasFederationShape || (data.federationAccountMigrationVersion ?? 0) >= 1) return false;
   const needsAgentStrip = data.agents.some(hasLegacyAgentConnection);
   const owningAccountByAgent = new Map(data.accounts.map((account) => [account.owningAgentId, account]));
   const agentsNeedingAccount = data.agents.filter((agent) => !owningAccountByAgent.has(agent.id));

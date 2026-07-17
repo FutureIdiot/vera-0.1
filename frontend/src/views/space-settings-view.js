@@ -53,16 +53,16 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
 
   const participants = document.createElement("fieldset");
   const participantLegend = document.createElement("legend");
-  participantLegend.textContent = "参与 Agent 与响应规则";
+  participantLegend.textContent = "参与 Account 与响应规则";
   participants.appendChild(participantLegend);
   const seatControls = new Map();
-  for (const agent of bootstrap.agents) {
-    const seat = space.seats.find((candidate) => candidate.agentId === agent.id);
+  for (const account of bootstrap.accounts) {
+    const seat = space.seats.find((candidate) => candidate.accountId === account.id);
     const row = document.createElement("section");
     row.className = "vera-agent-rule";
-    const included = checkbox(agent.name, Boolean(seat));
+    const included = checkbox(account.name, Boolean(seat));
     const mode = document.createElement("select");
-    mode.setAttribute("aria-label", `${agent.name} 响应模式`);
+    mode.setAttribute("aria-label", `${account.name} 响应模式`);
     for (const [value, label] of [["default", "默认：都响应"], ["silent", "静默：仅指定来源 @"], ["focused", "专注：仅 @自己"]]) {
       const option = document.createElement("option");
       option.value = value;
@@ -78,29 +78,29 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
     sources.appendChild(userSource.label);
     const respondSources = new Map([["user", userSource.input]]);
     const blocked = new Map();
-    for (const other of bootstrap.agents.filter((candidate) => candidate.id !== agent.id)) {
+    for (const other of bootstrap.accounts.filter((candidate) => candidate.id !== account.id)) {
       const responseSource = checkbox(`响应 ${other.name}`, seat?.respondTo?.includes(other.id));
-      const control = checkbox(`屏蔽 ${other.name}`, seat?.blockAgentIds?.includes(other.id));
+      const control = checkbox(`屏蔽 ${other.name}`, seat?.blockAccountIds?.includes(other.id));
       respondSources.set(other.id, responseSource.input);
       blocked.set(other.id, control.input);
       sources.append(responseSource.label, control.label);
     }
     row.append(included.label, mode, sources);
     participants.appendChild(row);
-    seatControls.set(agent.id, { included: included.input, mode, respondSources, blocked });
+    seatControls.set(account.id, { included: included.input, mode, respondSources, blocked });
   }
 
   const notifications = document.createElement("fieldset");
   const notificationLegend = document.createElement("legend");
   notificationLegend.textContent = "消息提醒";
   const notificationMode = document.createElement("select");
-  for (const [value, label] of [["all", "全部消息与 Activity"], ["agentMessages", "只提醒 Agent 消息"], ["off", "关闭"]]) {
+  for (const [value, label] of [["all", "全部消息与 Activity"], ["accountMessages", "只提醒 Account 消息"], ["off", "关闭"]]) {
     const option = document.createElement("option");
     option.value = value;
     option.textContent = label;
     notificationMode.appendChild(option);
   }
-  notificationMode.value = space.notifications?.mode ?? "agentMessages";
+  notificationMode.value = space.notifications?.mode ?? "accountMessages";
   const includeErrors = checkbox("仍提醒错误 Activity", space.notifications?.includeActivityErrors !== false);
   notifications.append(notificationLegend, notificationMode, includeErrors.label);
 
@@ -126,15 +126,15 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
     space = nextSpace;
     name.value = space.name;
     topic.value = space.topic ?? "";
-    notificationMode.value = space.notifications?.mode ?? "agentMessages";
+    notificationMode.value = space.notifications?.mode ?? "accountMessages";
     includeErrors.input.checked = space.notifications?.includeActivityErrors !== false;
-    for (const [agentId, control] of seatControls) {
-      const seat = space.seats.find((candidate) => candidate.agentId === agentId);
+    for (const [accountId, control] of seatControls) {
+      const seat = space.seats.find((candidate) => candidate.accountId === accountId);
       control.included.checked = Boolean(seat);
       control.mode.disabled = !seat;
       control.mode.value = seat?.responseMode ?? "default";
       for (const [sourceId, input] of control.respondSources) input.checked = seat?.respondTo?.includes(sourceId) ?? false;
-      for (const [blockedId, input] of control.blocked) input.checked = seat?.blockAgentIds?.includes(blockedId) ?? false;
+      for (const [blockedId, input] of control.blocked) input.checked = seat?.blockAccountIds?.includes(blockedId) ?? false;
     }
     shell?.setSpace(space);
   }
@@ -144,14 +144,14 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
     event.preventDefault();
     error.hidden = true;
     const seats = [];
-    for (const [agentId, control] of seatControls) {
+    for (const [accountId, control] of seatControls) {
       if (!control.included.checked) continue;
       const respondTo = [...control.respondSources].filter(([, input]) => input.checked).map(([id]) => id);
-      const blockAgentIds = [...control.blocked].filter(([, input]) => input.checked).map(([id]) => id);
-      seats.push({ agentId, responseMode: control.mode.value, ...(respondTo.length ? { respondTo } : {}), ...(blockAgentIds.length ? { blockAgentIds } : {}) });
+      const blockAccountIds = [...control.blocked].filter(([, input]) => input.checked).map(([id]) => id);
+      seats.push({ accountId, responseMode: control.mode.value, ...(respondTo.length ? { respondTo } : {}), ...(blockAccountIds.length ? { blockAccountIds } : {}) });
     }
     if (!seats.length) {
-      error.textContent = "Space 至少需要一个参与 Agent。";
+      error.textContent = "Space 至少需要一个参与 Account。";
       error.hidden = false;
       return;
     }

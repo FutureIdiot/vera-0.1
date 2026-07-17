@@ -83,24 +83,24 @@ export function createCodexAdapter({ config = {} }) {
     return operation;
   }
 
-  function assertAccount(account, code = "unavailable") {
-    if (account?.kind !== "cli" || account?.provider !== "codex") {
-      throw new AdapterError(code, "Codex adapter Account kind/provider mismatch");
+  function assertRuntime(runtime, code = "unavailable") {
+    if (runtime?.kind !== "cli" || runtime?.provider !== "codex") {
+      throw new AdapterError(code, "Codex adapter runtime kind/provider mismatch");
     }
-    if (account.connection?.secretRef != null) {
-      throw new AdapterError(code, "Codex Account secretRef is not supported");
+    if (runtime.connection?.secretRef != null) {
+      throw new AdapterError(code, "Codex runtime secretRef is not supported");
     }
-    if (Array.isArray(account.connection?.args) && account.connection.args.length) {
-      throw new AdapterError(code, "Codex Account connection args are not supported");
+    if (Array.isArray(runtime.connection?.args) && runtime.connection.args.length) {
+      throw new AdapterError(code, "Codex runtime connection args are not supported");
     }
-    const command = String(account.connection?.command ?? "").trim();
+    const command = String(runtime.connection?.command ?? "").trim();
     if (command && basename(command) !== "codex") {
-      throw new AdapterError(code, "Codex Account command is invalid");
+      throw new AdapterError(code, "Codex runtime command is invalid");
     }
   }
 
-  function resolveBinary(account) {
-    const command = String(account?.connection?.command ?? "").trim();
+  function resolveBinary(runtime) {
+    const command = String(runtime?.connection?.command ?? "").trim();
     return command && basename(command) === "codex" ? command : defaultBinary;
   }
 
@@ -217,7 +217,7 @@ export function createCodexAdapter({ config = {} }) {
   }
 
   async function runAttempt(ctx, providerBinding = null) {
-    const binary = resolveBinary(ctx.account);
+    const binary = resolveBinary(ctx.runtime);
     await assertBinary(binary, "unavailable");
     const directory = await mkdtemp(join(tmpdir(), "vera-codex-chat-"));
     const outputPath = join(directory, "last-message.txt");
@@ -231,7 +231,7 @@ export function createCodexAdapter({ config = {} }) {
     const args = ["-C", workspacePath, "-a", "never", "-s", chatSandbox, "exec"];
     if (threadId) args.push("resume", threadId);
     args.push("--json", "--skip-git-repo-check", "--output-last-message", outputPath);
-    const model = String(ctx.account.model ?? "").trim();
+    const model = String(ctx.runtime.model ?? "").trim();
     if (model) args.push("-m", model);
     args.push("-");
     try {
@@ -278,7 +278,7 @@ export function createCodexAdapter({ config = {} }) {
   }
 
   async function runInner(ctx) {
-    assertAccount(ctx.account);
+    assertRuntime(ctx.runtime);
     const assertPromptCapacity = (prompt) => {
       if (byteLength(prompt?.text) <= maxInputBytes) return;
       throw new AdapterError("provider_error", "Codex current prompt exceeds the configured input capacity");
@@ -311,9 +311,9 @@ export function createCodexAdapter({ config = {} }) {
     return trackOperation(runInner(ctx));
   }
 
-  async function digestMemoryInner({ account, taskModel, payload, signal }) {
-    assertAccount(account, "executor_unavailable");
-    const binary = resolveBinary(account);
+  async function digestMemoryInner({ runtime, taskModel, payload, signal }) {
+    assertRuntime(runtime, "executor_unavailable");
+    const binary = resolveBinary(runtime);
     await assertBinary(binary, "executor_unavailable");
     const prompt = `${MEMORY_DIGEST_SYSTEM_PROMPT}\n\n${buildMemoryDigestPrompt(payload)}`;
     if (byteLength(prompt) > maxInputBytes) {
@@ -371,9 +371,9 @@ export function createCodexAdapter({ config = {} }) {
     return trackOperation(digestMemoryInner(input));
   }
 
-  async function dreamMemoryInner({ account, taskModel, payload, signal }) {
-    assertAccount(account, "executor_unavailable");
-    const binary = resolveBinary(account);
+  async function dreamMemoryInner({ runtime, taskModel, payload, signal }) {
+    assertRuntime(runtime, "executor_unavailable");
+    const binary = resolveBinary(runtime);
     await assertBinary(binary, "executor_unavailable");
     const prompt = `${MEMORY_DREAM_SYSTEM_PROMPT}\n\n${buildMemoryDreamPrompt(payload)}`;
     if (byteLength(prompt) > maxInputBytes) throw new AdapterError("executor_failed", "Codex memory Dream input exceeds the configured capacity");

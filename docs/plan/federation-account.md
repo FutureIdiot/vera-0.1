@@ -4,20 +4,7 @@
 
 - Phase 5已完成；本文件是当前唯一下一执行项
 - 本文件负责Account固定owner数据模型、Space Seat、Execution绑定、Workspace、前端管理，以及Agent Token + Account Key +进程内Account Session的完整凭证闭环；SSE、Run上报与provider执行wire仍在后续文件
-
-## 迁移
-
-- [ ] `owningAgentId`一次迁为不可变`ownerAgentId`，并把存量`Agent 1:N Account`收敛为严格1:1；无法唯一处理时阻止迁移，不复制Memory或静默拆Agent。
-- [ ] 删除Account上的`kind/provider/connection/model/authorizedAgentIds`旧字段与所有双读双写。
-- [ ] Account改为首层持久身份：`name/ownerAgentId/presence/lastSeenAt/activeAgentId/accessKeyState/accessKeyVersion`。
-- [ ] Account与owner Agent严格1:1；首次enroll原子建立唯一owner，普通API不得改绑，同一Agent不得拥有第二个Account。
-- [ ] 每个Agent固定拥有一个owner Account；未来临时代表其他Account只写Account Session、`activeAgentId`与Execution，不改`ownerAgentId`、不复制或混用Memory/profile/provider binding。
-- [ ] Agent持有私有Memory与版本化纯JSON `runtimeProfile`；当前严格为`{schemaVersion:1,kind,provider,model}`，不得含Account/Workspace/host/session/presence/lease/token/Key/secret/secretRef/绝对路径。普通前端不得创建空Agent。
-- [ ] daemon派生的revision/capabilities/fingerprint/在线状态只进runtime snapshot，不写回profile；profile归一化后可直接稳定JSON导出，本步不新增导入/导出endpoint。
-- [ ] Space Seat从`agentId`一次迁移为`accountId`；旧`blockAgentIds`迁为`blockAccountIds`，`respondTo`同步改用Account id。
-- [ ] Space通知模式`agentMessages`一次迁为`accountMessages`并删除旧token。
-- [ ] AgentSession唯一键迁为`spaceSessionId + accountId + agentId`；当前`agentId`只允许owner，且任一Agent不得继承另一Agent的provider binding/history。
-- [ ] 每个Execution创建时固定`agentId + accountId + runtimeRevision + effectiveModel + delegated`。
+- 固定owner、Account Seat、Execution身份与portable Agent profile迁移已完成；事实与验收证据见`completed-foundation.md`
 
 ## 租约与Workspace
 
@@ -31,7 +18,6 @@
 ## 凭证安全与Account Session
 
 - [ ] 实现per-Agent高熵Agent Token加载/校验；gateway校验材料在`~/.vera/agent-tokens.json`，daemon明文只在本机secret store，不进repo、日志或API响应。
-- [ ] Account Key由User生成/轮换/撤销；gateway只保存salted hash与单调`accessKeyVersion`，明文只在创建/轮换时返回一次。
 - [ ] `enroll`只允许`ownerAgentId:null`的Account创建唯一owner Agent并签发Agent Token；owner建立后不得再次enroll，既有Agent不得认领第二个Account。
 - [ ] `login`支持互斥的重新授权与普通续连：重新授权验证Agent Token + Account Key；续连验证Agent Token + `X-Vera-Account-Session`，不得每次网络/SSE重连重复校验Key。
 - [ ] 两端每次启动生成不落盘的boot id；Key模式成功后签发高熵opaque Account Session Token，绑定`agentId/accountId/Agent Token fingerprint/accessKeyVersion/daemonBootId/gatewayBootId`。只在login成功响应返回一次，gateway仅存进程内Token hash、daemon仅存进程内明文并经header发送，禁止持久化、日志、query、请求body或SSE data泄露。
@@ -51,12 +37,7 @@
 
 ## 前端与消息展示
 
-- [ ] `#/settings/accounts`首动作改为“新建Account”；删除“新建Agent”“添加连接”旧动作。
 - [ ] Account详情提供一次性Key生成/轮换、所属/当前Agent、Workspace与登录审计；不提供owner改绑、接管或代上线入口。
-- [ ] Space联系人和设置均按Account；@解析目标为Account。
-- [ ] Account消息展示`Account名 · effectiveModel`；当前不显示代上线语义，相关样式只作为未来兼容位。
-- [ ] Message持久化`accountNameSnapshot/executingAgentId/effectiveModel/delegated`，历史不随配置漂移。
-- [ ] effectiveModel必须是实际非空模型名，禁止`default`、Account名或provider名占位。
 
 ## 验收
 

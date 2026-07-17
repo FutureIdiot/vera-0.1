@@ -10,7 +10,7 @@ export function createAccountsState() {
     listByAgent() {
       return agents.map((agent) => ({
         agent,
-        accounts: accounts.filter((account) => account.agentId === agent.id || account.owningAgentId === agent.id),
+        accounts: accounts.filter((account) => account.ownerAgentId === agent.id),
       }));
     },
     clear() { agents = []; accounts = []; },

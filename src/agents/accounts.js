@@ -1,89 +1,177 @@
-// Account CRUD（api-contract.md 二、Account 形状）。
-// Account 是供应商连接 + 项目/会话上下文；Agent 只保留身份。
-// F1 补 presence/lastSeenAt/runtimeCapabilities/authorizedAgentIds 字段形状
-// （值在联邦 Phase 5.5 前为 offline/null/[owningAgentId]，但字段必须在）。
+// Account identity domain. Runtime/provider data belongs to the owner Agent;
+// Account remains the stable Space/Workspace identity boundary.
 
 import { newAccountId } from "../core/id.js";
 import { ApiError } from "../core/errors.js";
+import { randomBytes, scryptSync } from "node:crypto";
 
-function stripInternal({ _seq, ...rest }) {
-  return rest;
+function invalid(message) {
+  return new ApiError("invalid_request", message);
 }
 
-// 旧 Account 记录可能缺联邦字段（F1 前创建的），读取时补默认。
-// 不做一次性 store 迁移——updateAccount 会自然把字段写进去，新创建的都有。
-function normalizeAccount(account) {
-  const normalized = stripInternal(account);
-  normalized.presence = account.presence ?? "offline";
-  normalized.lastSeenAt = account.lastSeenAt ?? null;
-  normalized.runtimeCapabilities = account.runtimeCapabilities ?? null;
-  normalized.authorizedAgentIds = account.authorizedAgentIds ?? [account.owningAgentId];
-  return normalized;
+function requireName(value, field = "name") {
+  if (typeof value !== "string" || !value.trim()) throw invalid(`${field} is required`);
+  return value.trim();
+}
+
+function strictNameBody(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw invalid("body must be an object");
+  if (Object.keys(body).some((key) => key !== "name")) throw invalid("Account create body only accepts name");
+  return requireName(body.name);
+}
+
+function issueAccessKey() {
+  const accessKey = `vak_${randomBytes(32).toString("base64url")}`;
+  const salt = randomBytes(16);
+  const cost = 16384;
+  const blockSize = 8;
+  const parallelization = 1;
+  const keyLength = 32;
+  const digest = scryptSync(accessKey, salt, keyLength, {
+    N: cost,
+    r: blockSize,
+    p: parallelization,
+  });
+  return {
+    accessKey,
+    accessKeyHash: {
+      algorithm: "scrypt",
+      salt: salt.toString("base64url"),
+      digest: digest.toString("base64url"),
+      cost,
+      blockSize,
+      parallelization,
+      keyLength,
+    },
+  };
+}
+
+export function projectAccount({
+  _seq,
+  accessKeyHash,
+  ...account
+}) {
+  // accessKeyHash is reserved for the credentials slice and must never enter a
+  // normal Account response even if a later migration adds it to the record.
+  return structuredClone(account);
 }
 
 export function accountDisplayName(agent, body = {}) {
-  if (body.name) return body.name;
-  const provider = body.provider ? ` ${body.provider}` : "";
-  return `${agent.name}${provider} account`;
+  return typeof body.name === "string" && body.name.trim()
+    ? body.name.trim()
+    : `${agent.name} account`;
 }
 
-export function listAccounts(store, { agentId } = {}) {
-  const accounts = store.list("accounts");
-  const filtered = agentId ? accounts.filter((account) => account.owningAgentId === agentId) : accounts;
-  return filtered.map(normalizeAccount);
+export function listAccounts(store, { agentId, ownerAgentId, activeAgentId } = {}) {
+  const ownerFilter = ownerAgentId ?? agentId;
+  return store.list("accounts")
+    .filter((account) => ownerFilter ? account.ownerAgentId === ownerFilter : true)
+    .filter((account) => activeAgentId ? account.activeAgentId === activeAgentId : true)
+    .map(projectAccount);
 }
 
 export function getOwningAccount(store, agentId) {
-  const account = store.list("accounts").find((account) => account.owningAgentId === agentId) ?? null;
-  return account ? normalizeAccount(account) : null;
+  const matches = store.list("accounts").filter((account) => account.ownerAgentId === agentId);
+  if (matches.length > 1) throw new ApiError("conflict", `agent ${agentId} owns multiple Accounts`);
+  return matches[0] ? projectAccount(matches[0]) : null;
 }
 
 export function getAccountOrThrow(store, id) {
   const account = store.find("accounts", id);
   if (!account) throw new ApiError("not_found", `account ${id} does not exist`);
-  return normalizeAccount(account);
+  return projectAccount(account);
 }
 
+export function createUnownedAccount(store, body) {
+  const name = strictNameBody(body);
+  const { accessKey, accessKeyHash } = issueAccessKey();
+  const now = new Date().toISOString();
+  const account = store.insert("accounts", {
+    id: newAccountId(),
+    name,
+    ownerAgentId: null,
+    presence: "offline",
+    lastSeenAt: null,
+    activeAgentId: null,
+    runtimeCapabilities: null,
+    accessKeyState: "active",
+    accessKeyVersion: 1,
+    accessKeyHash,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { account: projectAccount(account), accessKey };
+}
+
+export function rotateAccountAccessKey(store, id) {
+  const account = store.find("accounts", id);
+  if (!account) throw new ApiError("not_found", `account ${id} does not exist`);
+  const { accessKey, accessKeyHash } = issueAccessKey();
+  const updated = store.update("accounts", id, {
+    accessKeyState: "active",
+    accessKeyVersion: (Number.isInteger(account.accessKeyVersion) ? account.accessKeyVersion : 0) + 1,
+    accessKeyHash,
+    updatedAt: new Date().toISOString(),
+  });
+  return { account: projectAccount(updated), accessKey };
+}
+
+export function revokeAccountAccessKey(store, id) {
+  const account = store.find("accounts", id);
+  if (!account) throw new ApiError("not_found", `account ${id} does not exist`);
+  const updated = store.update("accounts", id, {
+    accessKeyState: "revoked",
+    accessKeyVersion: (Number.isInteger(account.accessKeyVersion) ? account.accessKeyVersion : 0) + 1,
+    accessKeyHash: null,
+    updatedAt: new Date().toISOString(),
+  });
+  return projectAccount(updated);
+}
+
+// Transitional bridge used by POST /api/agents until enroll owns creation.
+// It is intentionally strict 1:1 and cannot add a second Account.
 export function createAccount(store, agentId, body = {}) {
   const agent = store.find("agents", agentId);
   if (!agent) throw new ApiError("not_found", `agent ${agentId} does not exist`);
-
+  if (store.list("accounts").some((account) => account.ownerAgentId === agentId)) {
+    throw new ApiError("conflict", `agent ${agentId} already owns an Account`);
+  }
   const now = new Date().toISOString();
-  const account = {
+  const account = store.insert("accounts", {
     id: newAccountId(),
-    owningAgentId: agentId,
     name: accountDisplayName(agent, body),
-    kind: body.kind ?? null,
-    provider: body.provider ?? null,
-    connection: body.connection ?? {},
-    model: body.model ?? "",
+    ownerAgentId: agentId,
     presence: "offline",
     lastSeenAt: null,
+    activeAgentId: null,
     runtimeCapabilities: null,
-    authorizedAgentIds: [agentId],
+    accessKeyState: "revoked",
+    accessKeyVersion: 0,
     createdAt: now,
     updatedAt: now,
-  };
-  return stripInternal(store.insert("accounts", account));
+  });
+  return projectAccount(account);
 }
 
 export function updateAccount(store, id, patch) {
-  const account = getAccountOrThrow(store, id);
-  const next = {};
-  for (const key of ["name", "kind", "provider", "connection", "model"]) {
-    if (patch[key] !== undefined) next[key] = patch[key];
-  }
-  next.updatedAt = new Date().toISOString();
-  const updated = store.update("accounts", account.id, next);
-  return normalizeAccount(updated);
+  const account = store.find("accounts", id);
+  if (!account) throw new ApiError("not_found", `account ${id} does not exist`);
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw invalid("patch must be an object");
+  const keys = Object.keys(patch);
+  if (keys.some((key) => key !== "name")) throw invalid("Account PATCH only accepts name");
+  if (!keys.includes("name")) throw invalid("name is required");
+  const updated = store.update("accounts", id, {
+    name: requireName(patch.name),
+    updatedAt: new Date().toISOString(),
+  });
+  return projectAccount(updated);
 }
 
 export function deleteAccount(store, id) {
-  const account = getAccountOrThrow(store, id);
-  const ownerExists = Boolean(store.find("agents", account.owningAgentId));
-  const ownerAccounts = store.list("accounts").filter((item) => item.owningAgentId === account.owningAgentId);
-  if (ownerExists && ownerAccounts.length === 1) {
-    throw new ApiError("conflict", `account ${id} is the only account for agent ${account.owningAgentId}`);
+  const account = store.find("accounts", id);
+  if (!account) throw new ApiError("not_found", `account ${id} does not exist`);
+  if (account.ownerAgentId && store.find("agents", account.ownerAgentId)) {
+    throw new ApiError("conflict", `account ${id} is still owned by agent ${account.ownerAgentId}`);
   }
   for (const binding of [...store.list("providerBindings")]) {
     if (binding.accountId === id) store.remove("providerBindings", binding.id);

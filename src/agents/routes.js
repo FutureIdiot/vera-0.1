@@ -2,7 +2,16 @@
 
 import { asHandler, readJsonBody, sendJson, sendNoContent } from "../api/http.js";
 import { listAgents, createAgent, updateAgent, deleteAgent } from "./agents.js";
-import { listAccounts, createAccount, updateAccount, deleteAccount } from "./accounts.js";
+import {
+  listAccounts,
+  getAccountOrThrow,
+  createAccount,
+  createUnownedAccount,
+  rotateAccountAccessKey,
+  revokeAccountAccessKey,
+  updateAccount,
+  deleteAccount,
+} from "./accounts.js";
 import { listUnitBindings, updateUnitBinding } from "./unit-bindings.js";
 
 export function registerAgentRoutes(router, { store, agentStates, memoryConfigService = null }) {
@@ -69,7 +78,44 @@ export function registerAgentRoutes(router, { store, agentStates, memoryConfigSe
   router.get(
     "/api/accounts",
     asHandler(async ({ res, query }) => {
-      sendJson(res, 200, { accounts: listAccounts(store, { agentId: query.get("agentId") || undefined }) });
+      sendJson(res, 200, { accounts: listAccounts(store, {
+        ownerAgentId: query.get("ownerAgentId") || query.get("agentId") || undefined,
+        activeAgentId: query.get("activeAgentId") || undefined,
+      }) });
+    }),
+  );
+
+  router.post(
+    "/api/accounts",
+    asHandler(async ({ req, res }) => {
+      const body = await readJsonBody(req);
+      const result = createUnownedAccount(store, body);
+      res.setHeader("Cache-Control", "no-store");
+      sendJson(res, 201, result);
+    }),
+  );
+
+  router.get(
+    "/api/accounts/:id",
+    asHandler(async ({ res, params }) => {
+      sendJson(res, 200, { account: getAccountOrThrow(store, params.id) });
+    }),
+  );
+
+  router.post(
+    "/api/accounts/:id/access-key/rotate",
+    asHandler(async ({ res, params }) => {
+      const result = rotateAccountAccessKey(store, params.id);
+      res.setHeader("Cache-Control", "no-store");
+      sendJson(res, 200, result);
+    }),
+  );
+
+  router.delete(
+    "/api/accounts/:id/access-key",
+    asHandler(async ({ res, params }) => {
+      const account = revokeAccountAccessKey(store, params.id);
+      sendJson(res, 200, { account });
     }),
   );
 

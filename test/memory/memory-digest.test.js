@@ -11,12 +11,18 @@ import { deriveFactHashes, validateDigestProposals } from "../../src/memory/memo
 import { createMemoryDigestService } from "../../src/memory/memory-digest-service.js";
 
 const AGENT = "agt_alpha";
+const ACCOUNT = "acc_alpha";
 const SPACE = "spc_alpha";
 const SPACE_SESSION = "sps_alpha";
 
 function createFakeStore(records = {}) {
   const data = {
-    spaces: records.spaces ?? [{ id: SPACE, seats: [{ agentId: AGENT, blockAgentIds: ["agt_blocked"] }] }],
+    accounts: records.accounts ?? [
+      { id: ACCOUNT, ownerAgentId: AGENT },
+      { id: "acc_blocked", ownerAgentId: "agt_blocked" },
+      { id: "acc_other", ownerAgentId: "agt_other" },
+    ],
+    spaces: records.spaces ?? [{ id: SPACE, seats: [{ accountId: ACCOUNT, blockAccountIds: ["acc_blocked"] }] }],
     messages: records.messages ?? [],
     memoryDigestJobs: records.memoryDigestJobs ?? [],
   };
@@ -71,10 +77,10 @@ async function withService(messages, executor, fn, jobs = []) {
 test("range counts Unicode code points, chunks deterministically, and filters the Agent view", () => {
   const messages = [
     message("msg_user", 1, "A😀"),
-    message("msg_blocked", 2, "hidden", { author: { type: "agent", agentId: "agt_blocked" } }),
-    message("msg_direct_other", 3, "private", { target: { type: "direct", agentIds: ["agt_other"] } }),
-    message("msg_direct_me", 4, "visible", { author: { type: "agent", agentId: "agt_blocked" }, target: { type: "direct", agentIds: [AGENT] } }),
-    message("msg_own", 5, "own", { author: { type: "agent", agentId: AGENT }, target: { type: "direct", agentIds: ["agt_other"] } }),
+    message("msg_blocked", 2, "hidden", { author: { type: "account", accountId: "acc_blocked" }, executingAgentId: "agt_blocked" }),
+    message("msg_direct_other", 3, "private", { target: { type: "direct", accountIds: ["acc_other"] } }),
+    message("msg_direct_me", 4, "visible", { author: { type: "account", accountId: "acc_blocked" }, executingAgentId: "agt_blocked", target: { type: "direct", accountIds: [ACCOUNT] } }),
+    message("msg_own", 5, "own", { author: { type: "account", accountId: ACCOUNT }, executingAgentId: AGENT, target: { type: "direct", accountIds: ["acc_other"] } }),
   ];
   const store = createFakeStore({ messages });
   const result = resolveDigestRange({ store, agentId: AGENT, spaceId: SPACE, spaceSessionId: SPACE_SESSION, fromMessageId: "msg_user", toMessageId: "msg_own" });
@@ -90,7 +96,7 @@ test("range counts Unicode code points, chunks deterministically, and filters th
 test("incremental watermark does not rewind when later visibility rules hide its boundary Message", () => {
   const messages = [
     message("msg_one", 1, "visible one"),
-    message("msg_two", 2, "agent message", { author: { type: "agent", agentId: "agt_blocked" } }),
+    message("msg_two", 2, "account message", { author: { type: "account", accountId: "acc_blocked" }, executingAgentId: "agt_blocked" }),
     message("msg_three", 3, "visible three"),
   ];
   const store = createFakeStore({ messages });
@@ -283,7 +289,7 @@ test("fact catalogs remain isolated when two Agents use the same slug", async ()
   };
   const store = createFakeStore({
     spaces: [
-      { id: SPACE, seats: [{ agentId: AGENT }] },
+      { id: SPACE, seats: [{ accountId: ACCOUNT }] },
       { id: "spc_beta", seats: [{ agentId: beta }] },
     ],
     messages,

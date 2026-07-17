@@ -6,8 +6,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createBinaryHttpClient, createHttpClient, startGateway } from "./_helpers.mjs";
 
-async function createSpace(httpRequest, agentId, name) {
-  const response = await httpRequest("POST", "/api/spaces", { name, seats: [{ agentId }] });
+async function createSpace(httpRequest, accountId, name) {
+  const response = await httpRequest("POST", "/api/spaces", { name, seats: [{ accountId }] });
   if (response.status !== 201) throw new Error(`failed to create ${name}`);
   return response.json.space;
 }
@@ -24,7 +24,7 @@ async function upload(binaryRequest, spaceId, name, mime, body, portOverride) {
 }
 
 export async function run(ctx) {
-  const { check, httpRequest, binaryRequest, assertEqual, assert, agent, sse, dataDir } = ctx;
+  const { check, httpRequest, binaryRequest, assertEqual, assert, owningAccount, sse, dataDir } = ctx;
   let owner;
   let shared;
   let third;
@@ -32,9 +32,9 @@ export async function run(ctx) {
   const bytes = Buffer.from([0, 1, 2, 10, 13, 255, 42]);
 
   await check("p5-f1.1 raw upload is atomic, binary-safe, and same names do not overwrite", async () => {
-    owner = await createSpace(httpRequest, agent.id, "Files owner");
-    shared = await createSpace(httpRequest, agent.id, "Files shared");
-    third = await createSpace(httpRequest, agent.id, "Files global");
+    owner = await createSpace(httpRequest, owningAccount.id, "Files owner");
+    shared = await createSpace(httpRequest, owningAccount.id, "Files shared");
+    third = await createSpace(httpRequest, owningAccount.id, "Files global");
     const createdEventPromise = sse.waitFor((event) =>
       event.type === "file.created" && event.data?.spaceId === owner.id);
     const first = await upload(binaryRequest, owner.id, "same-name.txt", "text/plain", bytes);
@@ -141,8 +141,10 @@ export async function run(ctx) {
       });
       const http = createHttpClient(gateway.port);
       const binary = createBinaryHttpClient(gateway.port);
-      const createdAgent = await http("POST", "/api/agents", { name: "Files limit", provider: "mock" });
-      const space = await createSpace(http, createdAgent.json.agent.id, "Files limit");
+      const createdAgent = await http("POST", "/api/agents", {
+        name: "Files limit", kind: "cli", provider: "mock", model: "mock-v1", connection: {},
+      });
+      const space = await createSpace(http, createdAgent.json.account.id, "Files limit");
       const tooLarge = await upload(binary, space.id, "large.txt", "text/plain", Buffer.from("123456789"));
       assertEqual(tooLarge.status, 413);
       assertEqual((await http("GET", `/api/spaces/${space.id}/files`)).json.files.length, 0);

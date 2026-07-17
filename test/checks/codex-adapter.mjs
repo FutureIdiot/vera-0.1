@@ -24,7 +24,7 @@ async function waitForAgentReply(request, spaceId, sleep, timeoutMs) {
   while (Date.now() < deadline) {
     const timeline = await request("GET", `/api/spaces/${spaceId}/timeline?limit=20`);
     const reply = timeline.json.items.find((item) => item.itemType === "message"
-      && item.author?.type === "agent" && item.status === "completed");
+      && item.author?.type === "account" && item.status === "completed");
     if (reply) return reply;
     await sleep(50);
   }
@@ -49,7 +49,7 @@ async function createScenario(request, { name, command, model, responseMode = "d
   });
   const { agent, account } = created.json;
   const madeSpace = await request("POST", "/api/spaces", {
-    name, seats: [{ agentId: agent.id, responseMode }],
+    name, seats: [{ accountId: account.id, responseMode }],
   });
   return { agent, account, space: madeSpace.json.space };
 }
@@ -77,7 +77,7 @@ export async function run(ctx) {
       const { agent, account, space } = await createScenario(request, {
         name: "Codex black-box", command: fake.binary, model: "fake-proposal",
       });
-      assertEqual(account.provider, "codex");
+      assertEqual(agent.runtimeProfile.provider, "codex");
       await gateway.stop();
       gateway = null;
       await verifyDigestTask(dataPath, agent.id, "fake-proposal");
@@ -111,10 +111,10 @@ export async function run(ctx) {
       assertEqual(memories.json.memories[0].sourceCount, 1);
 
       const recallSpace = await verifiedRequest("POST", "/api/spaces", {
-        name: "Codex cross-Space recall", seats: [{ agentId: agent.id }],
+        name: "Codex cross-Space recall", seats: [{ accountId: account.id }],
       });
       const recalled = await verifiedRequest("POST", `/api/spaces/${recallSpace.json.space.id}/messages`, {
-        author: { type: "user" }, target: { type: "agent", agentId: agent.id },
+        author: { type: "user" }, target: { type: "direct", accountIds: [account.id] },
         content: "What is the Vera test port?",
       });
       assertEqual(recalled.status, 201);
@@ -146,7 +146,7 @@ export async function run(ctx) {
         connection: { command: "/nonexistent/opencode", args: [], secretRef: null }, model: "navy/paused",
       });
       const openSpace = await verifiedRequest("POST", "/api/spaces", {
-        name: "Paused OpenCode", seats: [{ agentId: openCode.json.agent.id, responseMode: "silent" }],
+        name: "Paused OpenCode", seats: [{ accountId: openCode.json.account.id, responseMode: "silent" }],
       });
       const openMessage = await verifiedRequest("POST", `/api/spaces/${openSpace.json.space.id}/messages`, {
         author: { type: "user" }, target: { type: "broadcast" }, content: "Do not execute OpenCode digest.",

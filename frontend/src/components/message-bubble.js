@@ -1,7 +1,7 @@
 // Message 气泡：随 message.delta 流式增长、message.completed 以全文覆盖
 // （docs/api-contract.md 四、客户端义务）。样式一律走 CSS 变量（styles/tokens.css）。
-// agent 消息显示可进入该 Agent 使用管理页的头像与作者名；
-// 名字由调用方通过 ctx.agentName(agentId) 解析，缺席时回退 agentId。
+// Account 消息显示持久对外身份；头像进入 Account 详情，不把实际执行 Agent
+// 冒充联系人。名称优先使用消息冻结快照，再查当前 Account 投影。
 
 export function applyMessageBubble(el, item, ctx = {}) {
   const isUser = item.author?.type === "user";
@@ -30,15 +30,18 @@ export function applyMessageBubble(el, item, ctx = {}) {
     el.prepend(avatarEl);
   }
 
-  const agentId = item.author?.agentId;
-  const authorName = isUser ? "" : (ctx.agentName?.(agentId) ?? agentId ?? "");
-  const avatarVisible = !isUser && Boolean(agentId);
+  const accountId = item.author?.accountId;
+  const accountName = item.author?.accountNameSnapshot ?? ctx.accountName?.(accountId) ?? accountId ?? "";
+  const authorName = isUser
+    ? ""
+    : `${accountName}${item.author?.effectiveModel ? ` · ${item.author.effectiveModel}` : ""}`;
+  const avatarVisible = !isUser && Boolean(accountId);
   avatarEl.textContent = avatarVisible ? (authorName || "?").charAt(0).toUpperCase() : "";
   avatarEl.hidden = !avatarVisible;
   if (avatarVisible) {
-    avatarEl.href = `#/agents/${encodeURIComponent(agentId)}`;
-    avatarEl.setAttribute("aria-label", `打开 ${authorName || "Agent"} 设置`);
-    avatarEl.title = authorName || "Agent";
+    avatarEl.href = `#/settings/accounts/${encodeURIComponent(accountId)}`;
+    avatarEl.setAttribute("aria-label", `打开 ${accountName || "Account"} 设置`);
+    avatarEl.title = accountName || "Account";
   } else {
     avatarEl.removeAttribute("href");
     avatarEl.removeAttribute("aria-label");

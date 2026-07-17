@@ -9,7 +9,10 @@ function stripInternal({ _seq, ...rest }) {
   return rest;
 }
 
-export function createBubbleStream({ store, hub, config, spaceId, spaceSessionId, runId, agentId }) {
+export function createBubbleStream({
+  store, hub, config, spaceId, spaceSessionId, runId,
+  accountId, accountNameSnapshot, executingAgentId, effectiveModel, delegated,
+}) {
   const splitter = createBubbleSplitter(config.bubbles);
   const replyMessageIds = [];
   let current = null;
@@ -20,7 +23,11 @@ export function createBubbleStream({ store, hub, config, spaceId, spaceSessionId
       id: newMessageId(),
       spaceId,
       spaceSessionId,
-      author: { type: "agent", agentId },
+      author: { type: "account", accountId },
+      accountNameSnapshot,
+      executingAgentId,
+      effectiveModel,
+      delegated,
       target: { type: "broadcast" },
       content: initialContent,
       runId,

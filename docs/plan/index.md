@@ -17,7 +17,7 @@
 
 ## 当前依赖顺序
 
-1. [ ] [Account固定归属、凭证安全、Execution与Workspace迁移](federation-account.md)
+1. [~] [Account固定归属、凭证安全、Execution与Workspace迁移](federation-account.md)
 2. [ ] [联邦状态、presence与owner入口边界](federation-security.md)
 3. [ ] [Agent daemon 与跨进程运行链路](federation-runtime.md)
 4. [ ] [VPS 私网部署与旧链路清理](federation-deployment.md)
@@ -48,7 +48,7 @@
 
 | 文件 | 内容 |
 |---|---|
-| [`completed-foundation.md`](completed-foundation.md) | Phase 0–4 的基础、消息、配置与历史网络切片 |
+| [`completed-foundation.md`](completed-foundation.md) | Phase 0–4 基础，以及Phase 5.5已完成的Account/Agent身份迁移切片 |
 | [`completed-web.md`](completed-web.md) | F0–F5 Web共享核心、最终Shell语义与验收 |
 | [`completed-memory.md`](completed-memory.md) | 已冻结的完整Phase 5：Memory、上下文、Data UI、Files与X1验收 |
 

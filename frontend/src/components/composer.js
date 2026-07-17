@@ -11,12 +11,12 @@ function mentionMatchesAt(content, index, targets) {
 }
 
 export function resolveMessageTarget(content, targets = []) {
-  const agentIds = new Set();
+  const accountIds = new Set();
   for (let index = content.indexOf("@"); index !== -1; index = content.indexOf("@", index + 1)) {
-    for (const target of mentionMatchesAt(content, index, targets)) agentIds.add(target.id);
+    for (const target of mentionMatchesAt(content, index, targets)) accountIds.add(target.id);
   }
-  return agentIds.size > 0
-    ? { type: "direct", agentIds: [...agentIds] }
+  return accountIds.size > 0
+    ? { type: "direct", accountIds: [...accountIds] }
     : { type: "broadcast" };
 }
 
@@ -35,7 +35,7 @@ export function createComposer({ onSend, onPickAttachment, targets = [] } = {}) 
   const input = document.createElement("input");
   input.className = "vera-composer__input";
   input.type = "text";
-  input.placeholder = "跟 agent 说点什么…";
+  input.placeholder = "跟 Account 说点什么…";
   input.setAttribute("aria-label", "消息内容");
   input.autocomplete = "off";
 

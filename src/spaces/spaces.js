@@ -8,57 +8,54 @@ function stripInternal({ _seq, ...rest }) {
   return rest;
 }
 
-// seat 形（ground-truth.md 2.2 / 2.3）：{agentId, responseMode, respondTo?, blockAgentIds?}。
-// 4.4 起 Seat 不再携带 accountId（账户归属改为登录级联邦或默认 owning account，
-// 见 docs/ground-truth.md 2.2 修订 / api-contract Seat 段）。即使传入也丢弃。
-// respondTo / blockAgentIds 缺省不强制写入（保持 seat 形干净），有值才写。
+// Seat 固定Space中的Account身份；实际执行Agent由Account Session决定。
 const RESPONSE_MODES = ["default", "silent", "focused"];
 
 function normalizeSeats(store, seats) {
   if (!Array.isArray(seats)) throw new ApiError("invalid_request", "seats must be an array");
-  if (seats.length === 0) throw new ApiError("invalid_request", "seats must contain at least one Agent");
-  const knownAgentIds = new Set(store.list("agents").map((agent) => agent.id));
+  if (seats.length === 0) throw new ApiError("invalid_request", "seats must contain at least one Account");
+  const knownAccountIds = new Set(store.list("accounts").map((account) => account.id));
   const seen = new Set();
   return seats.map((seat) => {
-    if (!seat || typeof seat !== "object" || !knownAgentIds.has(seat.agentId)) {
-      throw new ApiError("invalid_request", `seat agentId ${seat?.agentId ?? "is required"} is not a known Agent`);
+    if (!seat || typeof seat !== "object" || !knownAccountIds.has(seat.accountId)) {
+      throw new ApiError("invalid_request", `seat accountId ${seat?.accountId ?? "is required"} is not a known Account`);
     }
-    if (seen.has(seat.agentId)) throw new ApiError("invalid_request", `duplicate seat for ${seat.agentId}`);
-    seen.add(seat.agentId);
+    if (seen.has(seat.accountId)) throw new ApiError("invalid_request", `duplicate seat for ${seat.accountId}`);
+    seen.add(seat.accountId);
     if (seat.responseMode !== undefined && !RESPONSE_MODES.includes(seat.responseMode)) {
-      throw new ApiError("invalid_request", `invalid responseMode for ${seat.agentId}`);
+      throw new ApiError("invalid_request", `invalid responseMode for ${seat.accountId}`);
     }
-    for (const field of ["respondTo", "blockAgentIds"]) {
+    for (const field of ["respondTo", "blockAccountIds"]) {
       if (seat[field] !== undefined && !Array.isArray(seat[field])) {
         throw new ApiError("invalid_request", `${field} must be an array`);
       }
     }
     const respondTo = seat.respondTo ?? [];
-    if (respondTo.some((id) => id !== "user" && !knownAgentIds.has(id))) {
-      throw new ApiError("invalid_request", `respondTo contains an unknown Agent`);
+    if (respondTo.some((id) => id !== "user" && !knownAccountIds.has(id))) {
+      throw new ApiError("invalid_request", `respondTo contains an unknown Account`);
     }
-    const blockAgentIds = seat.blockAgentIds ?? [];
-    if (blockAgentIds.some((id) => !knownAgentIds.has(id) || id === seat.agentId)) {
-      throw new ApiError("invalid_request", `blockAgentIds contains an invalid Agent`);
+    const blockAccountIds = seat.blockAccountIds ?? [];
+    if (blockAccountIds.some((id) => !knownAccountIds.has(id) || id === seat.accountId)) {
+      throw new ApiError("invalid_request", `blockAccountIds contains an invalid Account`);
     }
     const normalized = {
-      agentId: seat.agentId,
+      accountId: seat.accountId,
       responseMode: seat.responseMode ?? "default",
     };
     if (respondTo.length > 0) normalized.respondTo = [...new Set(respondTo)];
-    if (blockAgentIds.length > 0) normalized.blockAgentIds = [...new Set(blockAgentIds)];
+    if (blockAccountIds.length > 0) normalized.blockAccountIds = [...new Set(blockAccountIds)];
     return normalized;
   });
 }
 
 // notifications 默认（api-contract.md Space 形状 [P4.6]）。
-const DEFAULT_NOTIFICATIONS = { mode: "agentMessages", includeActivityErrors: true };
-const NOTIFICATION_MODES = ["all", "agentMessages", "off"];
+const DEFAULT_NOTIFICATIONS = { mode: "accountMessages", includeActivityErrors: true };
+const NOTIFICATION_MODES = ["all", "accountMessages", "off"];
 
 function normalizeNotifications(notifications) {
   if (notifications === undefined) return { ...DEFAULT_NOTIFICATIONS };
   if (!notifications || typeof notifications !== "object" || !NOTIFICATION_MODES.includes(notifications.mode)) {
-    throw new ApiError("invalid_request", "notifications.mode must be all, agentMessages, or off");
+    throw new ApiError("invalid_request", "notifications.mode must be all, accountMessages, or off");
   }
   if (notifications.includeActivityErrors !== undefined && typeof notifications.includeActivityErrors !== "boolean") {
     throw new ApiError("invalid_request", "notifications.includeActivityErrors must be boolean");
@@ -110,7 +107,10 @@ export function createSpace(store, body) {
   const stored = store.insert("spaces", space);
   const spaceSession = ensureActiveSpaceSession(store, stored.id);
   for (const seat of stored.seats) {
-    ensureAgentSession(store, { spaceSessionId: spaceSession.id, agentId: seat.agentId });
+    const account = store.find("accounts", seat.accountId);
+    if (account?.ownerAgentId) ensureAgentSession(store, {
+      spaceSessionId: spaceSession.id, accountId: account.id, agentId: account.ownerAgentId,
+    });
   }
   return normalizeSpace(store.find("spaces", stored.id));
 }
@@ -136,7 +136,10 @@ export function updateSpace(store, id, patch) {
   if (next.seats) {
     const spaceSession = ensureActiveSpaceSession(store, id);
     for (const seat of next.seats) {
-      ensureAgentSession(store, { spaceSessionId: spaceSession.id, agentId: seat.agentId });
+      const account = store.find("accounts", seat.accountId);
+      if (account?.ownerAgentId) ensureAgentSession(store, {
+        spaceSessionId: spaceSession.id, accountId: account.id, agentId: account.ownerAgentId,
+      });
     }
   }
   return normalizeSpace(updated);

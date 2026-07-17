@@ -1,6 +1,5 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createAgentsClient } from "../api/agents-client.js";
-import { createAccountsClient } from "../api/accounts-client.js";
 import { createNotice } from "../components/management-ui.js";
 
 function createPixelAvatar(agentName) {
@@ -67,7 +66,6 @@ export async function mountAgentDetailView({ root, platform, runtime, agentId, s
   root.dataset.routeScope = "management";
   const http = createHttpClient(platform);
   const agentsClient = createAgentsClient(http);
-  const accountsClient = createAccountsClient(http);
 
   let disposed = false;
   let agents = [...runtime.getBootstrap().agents];
@@ -154,14 +152,23 @@ export async function mountAgentDetailView({ root, platform, runtime, agentId, s
       ? runtime.getBootstrap().spaces.find((space) => space.id === latestState.spaceId)?.name ?? latestState.spaceId
       : "—";
 
-    const usageText = account
-      ? `${account.provider ?? "—"}${account.model ? ` / ${account.model}` : ""}${account.presence ? ` · ${account.presence}` : ""}`
-      : "—";
+    const profile = agent.runtimeProfile ?? {};
+    const runtimeText = profile.provider
+      ? `${profile.provider}${profile.model ? ` / ${profile.model}` : ""}`
+      : "未登记 runtime";
+    const accountLink = account
+      ? document.createElement("a")
+      : null;
+    if (accountLink) {
+      accountLink.href = `#/settings/accounts/${encodeURIComponent(account.id)}`;
+      accountLink.textContent = `${account.name}${account.presence ? ` · ${account.presence}` : ""}`;
+    }
 
     infoPanel.append(
       createInfoRow("状态", statusText),
       createInfoRow("位置", currentSpaceName),
-      createInfoRow("Usage", usageText),
+      createInfoRow("Runtime", runtimeText),
+      createInfoRow("所属 Account", accountLink ?? "—"),
     );
   }
 
@@ -245,9 +252,8 @@ export async function mountAgentDetailView({ root, platform, runtime, agentId, s
         mcps = [];
         return;
       }
-      const [statesRes, accountsRes, hooksRes, mcpsRes] = await Promise.all([
+      const [statesRes, hooksRes, mcpsRes] = await Promise.all([
         agentsClient.listStates(currentAgentId),
-        accountsClient.list(currentAgentId),
         agentsClient.listUnitBindings(currentAgentId, "hook").catch(() => ({ bindings: [] })),
         agentsClient.listUnitBindings(currentAgentId, "mcp").catch(() => ({ bindings: [] })),
       ]);
@@ -255,8 +261,7 @@ export async function mountAgentDetailView({ root, platform, runtime, agentId, s
       if (disposed) return;
 
       agentStates = statesRes.agentStates ?? [];
-      const accounts = accountsRes.accounts ?? [];
-      account = accounts[0] ?? null; // Home Account
+      account = runtime.getBootstrap().accounts.find((candidate) => candidate.ownerAgentId === currentAgentId) ?? null;
       hooks = hooksRes.bindings ?? [];
       mcps = mcpsRes.bindings ?? [];
     } catch (err) {

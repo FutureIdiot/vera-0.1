@@ -1,4 +1,4 @@
-# 已完成：基础与Phase 0–4
+# 已完成：基础、Phase 0–4与Phase 5.5身份迁移切片
 
 本文只保存完成事实和迁移证据，不定义当前产品语义。发生冲突时以Ground Truth和现行契约为准。
 
@@ -28,4 +28,13 @@
 - Speaker view只注入Message，不注入Activity；他人消息以署名声告进入volatile输入，不伪装成目标Agent的assistant历史。
 - seat已支持`responseMode/respondTo/blockAgentIds`。
 - `GET/PATCH /api/settings`、运行时override和配置consumer基础已完成。
-- Phase 4当时实现的`Agent 1:N Account`与可变连接Account现为待迁移历史形态；Phase 5.5将`owningAgentId`一次迁为严格1:1、不可普通改绑的`ownerAgentId`，迁移任务见 `federation-account.md`。
+- Phase 4当时实现的`Agent 1:N Account`与可变连接Account属于历史形态，已由下述Phase 5.5切片一次迁移，不再作为现行兼容层。
+
+## Phase 5.5：Account/Agent身份迁移切片
+
+- 2026-07-17完成严格`Account 1:1 owner Agent`迁移；预检发现1:N或冲突数据时在任何写入/备份前阻止启动，不复制Memory、不静默拆Agent。
+- Space Seat、定向目标、respondTo/block名单、消息展示身份和通知模式统一迁为Account；AgentSession使用`spaceSessionId + accountId + agentId`，Run冻结`accountId/agentId/runtimeRevision/effectiveModel/delegated`，为未来非owner代上线保留独立执行维度但当前不开放。
+- Agent的公开`runtimeProfile`固定为稳定纯JSON `{schemaVersion,kind,provider,model}`；本机connection独立保存在非公开runtime binding，Account、Workspace、凭证、secret/secretRef、绝对路径和daemon派生状态均不进入profile。
+- Account成为前端首层创建与Space联系人；消息持久化Account名称快照、实际执行Agent、实际模型与delegated标志。
+- Account Key创建/轮换/撤销基础已实现：明文只在创建或轮换响应出现一次且响应为`no-store`，持久化仅保存salted scrypt材料和单调版本；完整Agent Token、enroll/login与进程内Account Session仍由现行执行文件继续追踪。
+- 验收：`npm test`为287通过、3个显式opt-in跳过；`npm run build:web`通过；`node scripts/verify.mjs`为94通过、0失败。

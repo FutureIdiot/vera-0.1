@@ -13,7 +13,7 @@ import {
   compareAndSetApiHistory,
   getApiHistory,
   getProviderBinding,
-  providerFingerprintForAccount,
+  providerFingerprintForRuntime,
   rotateContextGeneration,
 } from "../../src/spaces/context-state.js";
 import { withAccountExecutionLock } from "../../src/spaces/execution-lock.js";
@@ -88,26 +88,27 @@ async function fixture(fn, { kind = "cli", suffix = "a" } = {}) {
   const agent = store.insert("agents", {
     id: `agt_${suffix}`,
     name: `Agent ${suffix}`,
+    runtimeProfile: { schemaVersion: 1, kind, provider: kind === "api" ? "ollama" : "codex", model: "test-model" },
+    runtimeBinding: { connection: {} },
+    runtimeRevision: "sha256:test-runtime",
     createdAt: "2026-07-15T00:00:00.000Z",
   });
   const account = store.insert("accounts", {
     id: `acc_${suffix}`,
-    owningAgentId: agent.id,
-    kind,
-    provider: kind === "api" ? "ollama" : "codex",
-    connection: {},
-    model: "test-model",
+    ownerAgentId: agent.id,
+    name: `Account ${suffix}`,
     createdAt: "2026-07-15T00:00:00.000Z",
   });
   const space = store.insert("spaces", {
     id: `spc_${suffix}`,
     name: `Space ${suffix}`,
     topic: "context test",
-    seats: [{ agentId: agent.id, responseMode: "default" }],
+    seats: [{ accountId: account.id, responseMode: "default" }],
     createdAt: "2026-07-15T00:00:00.000Z",
   });
   const { spaceSession, agentSession } = getActiveContext(store, {
     spaceId: space.id,
+    accountId: account.id,
     agentId: agent.id,
   });
 
@@ -365,7 +366,7 @@ test("CLI missing binding rotates generation and starts a fresh CAS/binding cont
 
 test("ordinary CLI provider failures never rotate context generation", async () => {
   await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
-    const fingerprint = providerFingerprintForAccount(account);
+    const fingerprint = providerFingerprintForRuntime({ ...agent.runtimeProfile, connection: agent.runtimeBinding.connection });
     const establishingRun = executeRun({
       store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
       triggerMessage: insertMessage({ content: "establish" }),

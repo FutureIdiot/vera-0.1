@@ -44,7 +44,7 @@ function makeCtx(baseUrl, overrides = {}) {
   return {
     ctx: {
       agent: { id: "agt_ollama", name: "Gemma" },
-      account: account(baseUrl),
+      runtime: account(baseUrl),
       prompt: {
         apiMessages: [
           { role: "system", content: "INDEX" },
@@ -65,7 +65,7 @@ function makeCtx(baseUrl, overrides = {}) {
 
 function digestInput(baseUrl, overrides = {}) {
   const input = {
-    account: account(baseUrl),
+    runtime: account(baseUrl),
     payload: {
       agent: { id: "agt_ollama", name: "Gemma" },
       chunks: [{ id: "dch_1", messages: [{ messageId: "msg_1", content: "Vera test port is 3210." }] }],
@@ -75,7 +75,7 @@ function digestInput(baseUrl, overrides = {}) {
     signal: new AbortController().signal,
     ...overrides,
   };
-  if (!Object.hasOwn(overrides, "taskModel")) input.taskModel = input.account.model;
+  if (!Object.hasOwn(overrides, "taskModel")) input.taskModel = input.runtime.model;
   return input;
 }
 
@@ -109,11 +109,11 @@ test("kind/provider, model, base URL and secret mismatch fail before HTTP", asyn
     account("http://127.0.0.1:9", { connection: { baseUrl: "http://127.0.0.1:9", secretRef: "key" } }),
   ];
   for (const bad of badAccounts) {
-    const { ctx } = makeCtx("http://127.0.0.1:9", { account: bad });
+    const { ctx } = makeCtx("http://127.0.0.1:9", { runtime: bad });
     await assert.rejects(() => adapter.run(ctx), (error) => error.code === "unavailable");
   }
   await assert.rejects(
-    () => adapter.digestMemory(digestInput("http://127.0.0.1:9", { account: badAccounts[0] })),
+    () => adapter.digestMemory(digestInput("http://127.0.0.1:9", { runtime: badAccounts[0] })),
     (error) => error.code === "executor_unavailable",
   );
 });
@@ -278,14 +278,14 @@ test("opt-in real native Ollama Gemma chat and digest smoke", {
   const adapter = createOllamaAdapter({ config: { watchdogMs: 180_000, digestTimeoutMs: 300_000, numCtx: 16384, maxInputBytes: 12000 } });
   try {
     const chat = makeCtx(baseUrl, {
-      account: account(baseUrl, { model }),
+      runtime: account(baseUrl, { model }),
       prompt: { text: "只回复：OLLAMA_NATIVE_OK", turnText: "只回复：OLLAMA_NATIVE_OK", historyUserText: "只回复：OLLAMA_NATIVE_OK", residentBlock: null },
       signal: AbortSignal.timeout(180_000),
     });
     const chatResult = await adapter.run(chat.ctx);
     assert.ok(chatResult.content.trim());
 
-    const input = digestInput(baseUrl, { account: account(baseUrl, { model }), signal: AbortSignal.timeout(300_000) });
+    const input = digestInput(baseUrl, { runtime: account(baseUrl, { model }), signal: AbortSignal.timeout(300_000) });
     const result = await adapter.digestMemory(input);
     assert.equal(result.execution.adapter, "ollama");
     validateDigestProposals({

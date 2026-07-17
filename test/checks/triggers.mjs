@@ -51,7 +51,7 @@ export async function run(ctx) {
   await check("h. '!!approve' trigger word raises approval.requested", async () => {
     const sp = await httpRequest("POST", "/api/spaces", {
       name: "h-approve-space",
-      seats: [{ agentId: ctx.agent.id, responseMode: "default" }],
+      seats: [{ accountId: ctx.owningAccount.id, responseMode: "default" }],
     });
     assertEqual(sp.status, 201);
     hApproveSpace = sp.json.space;
@@ -88,7 +88,7 @@ export async function run(ctx) {
     // 独立 space 避免 i-cancel 被 h-approve 历史"!!approve"污染触发链
     const sp = await httpRequest("POST", "/api/spaces", {
       name: "i-cancel-space",
-      seats: [{ agentId: ctx.agent.id, responseMode: "default" }],
+      seats: [{ accountId: ctx.owningAccount.id, responseMode: "default" }],
     });
     assertEqual(sp.status, 201);
     const cancelSpace = sp.json.space;

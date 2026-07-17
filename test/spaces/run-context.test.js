@@ -4,19 +4,24 @@ import { boundApiMessages, checkpointForAgent, checkpointTurnText, estimateToken
 
 test("Agent checkpoint excludes Messages from blocked Agents", () => {
   const records = {
+    accounts: [
+      { id: "acc_reader", ownerAgentId: "agt_reader" },
+      { id: "acc_visible", ownerAgentId: "agt_visible" },
+      { id: "acc_blocked", ownerAgentId: "agt_blocked" },
+    ],
     spaceSessions: [{ id: "sps_1", spaceId: "spc_1" }],
     spaces: [{
       id: "spc_1",
-      seats: [{ agentId: "agt_reader", blockAgentIds: ["agt_blocked"] }],
+      seats: [{ accountId: "acc_reader", blockAccountIds: ["acc_blocked"] }],
     }],
     messages: [
       {
         id: "msg_visible", spaceSessionId: "sps_1", status: "completed", _seq: 1,
-        author: { type: "agent", agentId: "agt_visible" }, content: "visible",
+        author: { type: "account", accountId: "acc_visible" }, executingAgentId: "agt_visible", content: "visible",
       },
       {
         id: "msg_blocked", spaceSessionId: "sps_1", status: "completed", _seq: 2,
-        author: { type: "agent", agentId: "agt_blocked" }, content: "private blocked text",
+        author: { type: "account", accountId: "acc_blocked" }, executingAgentId: "agt_blocked", content: "private blocked text",
       },
       {
         id: "msg_user", spaceSessionId: "sps_1", status: "completed", _seq: 3,
@@ -68,13 +73,14 @@ test("API history pressure removes a whole multi-bubble turn", () => {
 
 test("checkpoint carries recent completed Runs as complete structured turns", () => {
   const records = {
+    accounts: [{ id: "acc_a", ownerAgentId: "agt_a" }],
     spaceSessions: [{ id: "sps_1", spaceId: "spc_1" }],
-    spaces: [{ id: "spc_1", seats: [{ agentId: "agt_a" }] }],
+    spaces: [{ id: "spc_1", seats: [{ accountId: "acc_a" }] }],
     agentSessions: [{ id: "ags_1", spaceSessionId: "sps_1", agentId: "agt_a", status: "active", checkpoints: [] }],
     messages: [
       { id: "msg_in", spaceSessionId: "sps_1", status: "completed", _seq: 1, author: { type: "user" }, target: { type: "broadcast" }, content: "question" },
-      { id: "msg_out_1", spaceSessionId: "sps_1", status: "completed", _seq: 3, author: { type: "agent", agentId: "agt_a" }, content: "part one" },
-      { id: "msg_out_2", spaceSessionId: "sps_1", status: "completed", _seq: 4, author: { type: "agent", agentId: "agt_a" }, content: "part two" },
+      { id: "msg_out_1", spaceSessionId: "sps_1", status: "completed", _seq: 3, author: { type: "account", accountId: "acc_a" }, executingAgentId: "agt_a", content: "part one" },
+      { id: "msg_out_2", spaceSessionId: "sps_1", status: "completed", _seq: 4, author: { type: "account", accountId: "acc_a" }, executingAgentId: "agt_a", content: "part two" },
     ],
     runs: [{ id: "run_1", spaceSessionId: "sps_1", agentId: "agt_a", status: "completed", _seq: 2, triggerMessageId: "msg_in", replyMessageIds: ["msg_out_1", "msg_out_2"] }],
   };
@@ -91,12 +97,13 @@ test("checkpoint carries recent completed Runs as complete structured turns", ()
 test("checkpoint refuses a single complete turn that cannot fit its budget", () => {
   const huge = "x".repeat(200);
   const records = {
+    accounts: [{ id: "acc_a", ownerAgentId: "agt_a" }],
     spaceSessions: [{ id: "sps_1", spaceId: "spc_1" }],
-    spaces: [{ id: "spc_1", seats: [{ agentId: "agt_a" }] }],
+    spaces: [{ id: "spc_1", seats: [{ accountId: "acc_a" }] }],
     agentSessions: [{ id: "ags_1", spaceSessionId: "sps_1", agentId: "agt_a", status: "active", checkpoints: [] }],
     messages: [
       { id: "msg_in", spaceSessionId: "sps_1", status: "completed", _seq: 1, author: { type: "user" }, content: huge },
-      { id: "msg_out", spaceSessionId: "sps_1", status: "completed", _seq: 3, author: { type: "agent", agentId: "agt_a" }, content: huge },
+      { id: "msg_out", spaceSessionId: "sps_1", status: "completed", _seq: 3, author: { type: "account", accountId: "acc_a" }, executingAgentId: "agt_a", content: huge },
     ],
     runs: [{ id: "run_1", spaceSessionId: "sps_1", agentId: "agt_a", status: "completed", _seq: 2, triggerMessageId: "msg_in", replyMessageIds: ["msg_out"] }],
   };

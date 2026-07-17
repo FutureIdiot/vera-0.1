@@ -168,7 +168,7 @@ export function createAppRuntime({
     removeAgent(agentId) {
       if (!bootstrap) return;
       bootstrap.agents = bootstrap.agents.filter((agent) => agent.id !== agentId);
-      bootstrap.accounts = bootstrap.accounts.filter((account) => account.owningAgentId !== agentId);
+      bootstrap.accounts = bootstrap.accounts.filter((account) => account.ownerAgentId !== agentId);
     },
     removeAccount(accountId) {
       if (!bootstrap) return;

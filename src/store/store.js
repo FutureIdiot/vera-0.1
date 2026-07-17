@@ -44,6 +44,11 @@ import {
   migrateContextSessions,
   retireLegacySessionStatesFile,
 } from "./migrations/context-sessions.mjs";
+import {
+  needsFederationAccountMigration,
+  preflightFederationAccountMigration,
+  migrateFederationAccounts,
+} from "./migrations/federation-account.mjs";
 
 const COLLECTIONS = [
   "agents", "accounts", "spaces", "messages", "activities", "approvals", "runs", "themes",
@@ -60,7 +65,14 @@ const LEGACY_SESSION_STATES_FILE = "session-states.json";
 for (const name of COLLECTIONS) FILE_NAMES[name] = `${name}.json`;
 
 function emptyData() {
-  const data = { _seq: 0, eventSeqWatermark: 0, contextSessionsMigrationVersion: 0 };
+  const data = {
+    _seq: 0,
+    eventSeqWatermark: 0,
+    contextSessionsMigrationVersion: 0,
+    // A brand-new store is born on the current identity shape. Legacy readers
+    // explicitly overwrite this with 0 from missing metadata before migration.
+    federationAccountMigrationVersion: 1,
+  };
   for (const name of COLLECTIONS) data[name] = [];
   return data;
 }
@@ -81,6 +93,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
       _seq: data._seq,
       eventSeqWatermark: data.eventSeqWatermark,
       contextSessionsMigrationVersion: data.contextSessionsMigrationVersion,
+      federationAccountMigrationVersion: data.federationAccountMigrationVersion,
     };
     return data[key];
   }
@@ -106,6 +119,34 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     } finally {
       flushing = null;
     }
+  }
+
+  async function preflightFinalFederationShape(source = data) {
+    if (!needsFederationAccountMigration({ data: source })) return;
+    // Some very old stores still need the Phase 4.1 and P5-C1 transforms before
+    // their final ownership graph can be evaluated. Rehearse that exact order
+    // on a clone with inert persistence, then validate Phase 5.5. A rejected
+    // store therefore cannot leave a scheduled write from an earlier migration.
+    const preview = structuredClone(source);
+    if (needsMigration({ data: preview })) {
+      await migrateAgentAccountsAndSeats({ data: preview, flush: async () => {}, markDirty() {} });
+    }
+    if (needsContextSessionsMigration({ data: preview })) {
+      await migrateContextSessions({ data: preview, markDirty() {} });
+    }
+    preflightFederationAccountMigration({ data: preview });
+  }
+
+  async function preflightLegacyPayload(parsed) {
+    if (!parsed) return;
+    const preview = emptyData();
+    adoptLegacyIntoData(preview, parsed, COLLECTIONS);
+    preview.sessionStates = parsed.sessionStates && typeof parsed.sessionStates === "object"
+      ? parsed.sessionStates
+      : {};
+    preview.contextSessionsMigrationVersion = parsed.contextSessionsMigrationVersion ?? 0;
+    preview.federationAccountMigrationVersion = parsed.federationAccountMigrationVersion ?? 0;
+    await preflightFinalFederationShape(preview);
   }
 
   function scheduleSave() {
@@ -134,14 +175,21 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
   // 迁移 a/b 与崩溃回灌（detectLegacySingleFile 检测出的三类 mode）共用本函数。
   async function rebuildFromLegacy(parsed) {
     adoptLegacyIntoData(data, parsed, COLLECTIONS);
+    data.contextSessionsMigrationVersion = parsed.contextSessionsMigrationVersion ?? 0;
+    data.federationAccountMigrationVersion = parsed.federationAccountMigrationVersion ?? 0;
     data.sessionStates = parsed.sessionStates && typeof parsed.sessionStates === "object"
       ? parsed.sessionStates
       : {};
+    await preflightFinalFederationShape();
     if (needsMigration({ data })) {
       await migrateAgentAccountsAndSeats({ data, flush, markDirty });
     }
     if (needsContextSessionsMigration({ data })) {
       await migrateContextSessions({ data, markDirty });
+    }
+    if (needsFederationAccountMigration({ data })) {
+      const plan = preflightFederationAccountMigration({ data });
+      await migrateFederationAccounts({ data, markDirty, flush, plan });
     }
     markAllDirty();
     await flush();
@@ -150,6 +198,10 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
 
   // ---- 启动加载 + 协调迁移 ----
   const detected = await detectLegacySingleFile({ dataPath, fileFor, siblingLegacyPath, storeJsonPath });
+
+  // Validate legacy single-file truth before rename/mkdir/rebuild. This extends
+  // the Phase 5.5 zero-write failure guarantee to the oldest store layout too.
+  await preflightLegacyPayload(detected.parsed);
 
   if (detected.mode === "mixed-state-refuse") {
     throw new Error(
@@ -195,7 +247,14 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
       data._seq = meta._seq ?? 0;
       data.eventSeqWatermark = meta.eventSeqWatermark ?? 0;
       data.contextSessionsMigrationVersion = meta.contextSessionsMigrationVersion ?? 0;
+      data.federationAccountMigrationVersion = meta.federationAccountMigrationVersion ?? 0;
     }
+    // Existing Phase 4/5 split stores are already in the legacy Account
+    // shape expected by the federation planner. Validate that complete graph
+    // before even repairing meta watermarks or scheduling another migration,
+    // so an ownership ambiguity cannot trigger a delayed write after startup
+    // rejects the store.
+    await preflightFinalFederationShape();
     let collectionHighWatermark = 0;
     for (const name of COLLECTIONS) {
       for (const item of data[name]) {
@@ -228,6 +287,19 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
       });
       await migrateContextSessions({ data, markDirty });
       await flush();
+    }
+    if (needsFederationAccountMigration({ data })) {
+      // Plan before creating backups: ambiguous 1:N ownership must fail with
+      // zero filesystem writes, including no new .legacy anchors.
+      const plan = preflightFederationAccountMigration({ data });
+      await backupSplitFilesAsLegacy({
+        fileFor,
+        keys: [
+          "agents", "accounts", "spaces", "agentSessions", "runs", "messages",
+          "providerBindings", "apiHistories", "meta",
+        ],
+      });
+      await migrateFederationAccounts({ data, markDirty, flush, plan });
     }
     if (sessionStates) await retireLegacySessionStatesFile(legacySessionStatesPath);
     delete data.sessionStates;

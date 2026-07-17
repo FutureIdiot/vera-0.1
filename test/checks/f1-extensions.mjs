@@ -64,12 +64,12 @@ export async function run(ctx) {
   await check("o.4 createSpace 带 notifications 默认 + archivedAt null", async () => {
     const { status, json } = await httpRequest("POST", "/api/spaces", {
       name: "f1-archive-test",
-      seats: [{ agentId: ctx.agent.id }],
+      seats: [{ accountId: ctx.owningAccount.id }],
     });
     assertEqual(status, 201);
     archiveSpaceId = json.space.id;
     assertEqual(json.space.archivedAt, null);
-    assertEqual(json.space.notifications.mode, "agentMessages");
+    assertEqual(json.space.notifications.mode, "accountMessages");
     assertEqual(json.space.notifications.includeActivityErrors, true);
   });
 
@@ -114,7 +114,7 @@ export async function run(ctx) {
 
   // ---- Account 联邦字段 ----
 
-  await check("o.9 Account 形状含 presence/lastSeenAt/runtimeCapabilities/authorizedAgentIds", async () => {
+  await check("o.9 Account 形状含 owner/current Agent 与离线能力状态", async () => {
     const { status, json } = await httpRequest("GET", "/api/accounts");
     assertEqual(status, 200);
     assert(json.accounts.length > 0, "should have at least one account");
@@ -122,10 +122,11 @@ export async function run(ctx) {
     assert("presence" in a, "account should have presence");
     assert("lastSeenAt" in a, "account should have lastSeenAt");
     assert("runtimeCapabilities" in a, "account should have runtimeCapabilities");
-    assert("authorizedAgentIds" in a, "account should have authorizedAgentIds");
+    assert("ownerAgentId" in a, "account should have ownerAgentId");
+    assert("activeAgentId" in a, "account should have activeAgentId");
     assertEqual(a.presence, "offline");
     assertEqual(a.runtimeCapabilities, null);
-    assert(Array.isArray(a.authorizedAgentIds), "authorizedAgentIds should be an array");
+    assertEqual(a.activeAgentId, null);
   });
 
   // ---- Agent-states 过滤 ----

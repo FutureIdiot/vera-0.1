@@ -3,7 +3,7 @@
 
 import { newMessageId } from "../core/id.js";
 import { ApiError } from "../core/errors.js";
-import { getOwningAccount } from "../agents/accounts.js";
+import { getAccountOrThrow } from "../agents/accounts.js";
 import { getSpaceOrThrow } from "./spaces.js";
 import { executeRun } from "./run-controller.js";
 import { ensureActiveSpaceSession, ensureAgentSession } from "./context-sessions.js";
@@ -13,34 +13,34 @@ function stripInternal({ _seq, ...rest }) {
 }
 
 // responseMode（ground-truth.md 2.3 / api-contract.md Space 一节）：
-// - default：广播消息都响应；定向消息只有被点名的 agent 响应
+// - default：广播消息都响应；定向消息只有被点名的 Account 响应
 // - focused：只响应 @ 自己（即定向消息里包含自己），广播一律忽略
 // - silent：只响应指定来源的 @（respondTo 过滤）；广播也看 respondTo——来源在
 //   名单内才响应；respondTo 缺省（null）时等价"只响应定向 @"，与 Phase 2-3 现状
 //   一致。silent+respondTo=["user"] 即只接收用户的广播 + 所有人定向 @。
 //
-// 定向 @ 一律穿透 silent/focused/blockAgentIds（用户最终决策权，ground truth
-// 2.3）：`target.type==="direct" && target.agentIds.includes(seat.agentId)` 即
-// 响应，不看 respondTo/blockAgentIds/responseMode。
+// 定向 @ 一律穿透 silent/focused/blockAccountIds（用户最终决策权）：
+// `target.type==="direct" && target.accountIds.includes(seat.accountId)` 即响应，
+// 不看 respondTo/blockAccountIds/responseMode。
 //
-// 来源判定：message.author.type === "user" 视为 "user"；author.type === "agent"
-// 且 author.agentId 在 respondTo 名单内才放行；否则不放行。
-function isAddressedTo(message, agentId) {
-  return message.target.type === "direct" && Array.isArray(message.target.agentIds) && message.target.agentIds.includes(agentId);
+// 来源判定：message.author.type === "user" 视为 "user"；Account消息则按
+// author.accountId 是否在 respondTo 名单内判定。
+function isAddressedTo(message, accountId) {
+  return message.target.type === "direct" && Array.isArray(message.target.accountIds) && message.target.accountIds.includes(accountId);
 }
 
 function isAllowedByRespondTo(seat, message) {
   const respondTo = seat.respondTo ?? null;
   if (!respondTo || respondTo.length === 0) return false; // silent 缺省 = 只响应定向 @
   if (message.author?.type === "user") return respondTo.includes("user");
-  if (message.author?.type === "agent") return respondTo.includes(message.author.agentId);
+  if (message.author?.type === "account") return respondTo.includes(message.author.accountId);
   return false;
 }
 
 function shouldRespond(seat, message) {
   // 定向 @ 一律穿透——用户最终决策权
   if (message.target.type === "direct") {
-    return isAddressedTo(message, seat.agentId);
+    return isAddressedTo(message, seat.accountId);
   }
   // 广播
   const mode = seat.responseMode ?? "default";
@@ -89,20 +89,17 @@ export function postMessage({
 
   const runs = [];
   for (const seat of space.seats) {
-    if (body.author?.type === "agent" && body.author.agentId === seat.agentId) continue; // 不自问自答
+    if (body.author?.type === "account" && body.author.accountId === seat.accountId) continue; // 不自问自答
     if (!shouldRespond(seat, message)) continue;
-    const agent = store.find("agents", seat.agentId);
+    const account = getAccountOrThrow(store, seat.accountId);
+    const agent = account.ownerAgentId ? store.find("agents", account.ownerAgentId) : null;
     if (!agent) continue;
 
-    // 解析 account：4.4 起 Seat 不再携带 accountId（账户归属改登录级或默认 owning
-    // account，见 ground-truth 2.2 修订）。统一走 getOwningAccount。
-    const account = getOwningAccount(store, seat.agentId);
-    if (!account) continue;
-
-    const adapter = resolveAdapter(account);
+    const adapter = resolveAdapter(agent);
     if (!adapter) continue;
     const agentSession = ensureAgentSession(store, {
       spaceSessionId: spaceSession.id,
+      accountId: account.id,
       agentId: agent.id,
     });
     const run = executeRun({

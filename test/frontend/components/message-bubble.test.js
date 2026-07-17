@@ -53,7 +53,7 @@ class FakeElement {
   }
 }
 
-test("agent message avatar links to the shared Agent usage page", () => {
+test("Account message avatar keeps the Account identity and model snapshot", () => {
   const previousDocument = globalThis.document;
   globalThis.document = { createElement: (tagName) => new FakeElement(tagName) };
   try {
@@ -61,14 +61,23 @@ test("agent message avatar links to the shared Agent usage page", () => {
       id: "msg_1",
       itemType: "message",
       status: "completed",
-      author: { type: "agent", agentId: "agt one" },
+      author: {
+        type: "account",
+        accountId: "acc one",
+        accountNameSnapshot: "Gemma",
+        executingAgentId: "agt one",
+        effectiveModel: "gemma-test",
+        delegated: false,
+      },
       content: "hello",
-    }, { agentName: () => "Gemma" });
+    });
 
     const avatar = bubble.querySelector(".vera-bubble__avatar");
-    assert.equal(avatar.href, "#/agents/agt%20one");
+    const author = bubble.querySelector(".vera-bubble__author");
+    assert.equal(avatar.href, "#/settings/accounts/acc%20one");
     assert.equal(avatar.textContent, "G");
     assert.equal(avatar.attributes["aria-label"], "打开 Gemma 设置");
+    assert.equal(author.textContent, "Gemma · gemma-test");
   } finally {
     globalThis.document = previousDocument;
   }

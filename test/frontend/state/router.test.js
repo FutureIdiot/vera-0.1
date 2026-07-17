@@ -79,7 +79,7 @@ test("parseRoute recognizes the chat root and encoded Space ids", () => {
   assert.deepEqual(parseRoute("#/spaces"), { name: "spaces", spaceId: null });
   assert.deepEqual(parseRoute("#/settings"), { name: "settings" });
   assert.deepEqual(parseRoute("#/settings/accounts"), { name: "accounts" });
-  assert.deepEqual(parseRoute("#/settings/accounts/agt_one"), { name: "account-detail", agentId: "agt_one" });
+  assert.deepEqual(parseRoute("#/settings/accounts/acc_one"), { name: "account-detail", accountId: "acc_one" });
   assert.deepEqual(parseRoute("#/agents"), { name: "agent-detail", agentId: null });
   assert.deepEqual(parseRoute("#/agents/agt_one"), { name: "agent-detail", agentId: "agt_one" });
   assert.deepEqual(parseRoute("#/agents/agt_one/skills"), { name: "agent-skills", agentId: "agt_one" });

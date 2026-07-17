@@ -41,7 +41,9 @@ export async function run(ctx) {
     try {
       first = await startGateway({ repoRoot: ctx.repoRoot, env: { VERA_DATA_PATH: source, VERA_MEMORY_VAULT_PATH: vault } });
       const firstHttp = createHttpClient(first.port);
-      const created = await firstHttp("POST", "/api/agents", { name: "Data path survivor" });
+      const created = await firstHttp("POST", "/api/agents", {
+        name: "Data path survivor", kind: "cli", provider: "mock", model: "mock-v1", connection: {},
+      });
       assertEqual(created.status, 201);
       const agentId = created.json.agent.id;
       const migrate = await firstHttp("POST", "/api/paths/migrate", { key: "gateway.dataPath", target });
@@ -65,7 +67,9 @@ export async function run(ctx) {
       third = await startGateway({ repoRoot: ctx.repoRoot, env: { VERA_DATA_PATH: source, VERA_MEMORY_VAULT_PATH: vault } });
       const thirdHttp = createHttpClient(third.port);
       assertEqual((await thirdHttp("GET", "/api/paths")).json.paths.gateway.dataPath, target2);
-      await thirdHttp("POST", "/api/agents", { name: "Written after second restart" });
+      await thirdHttp("POST", "/api/agents", {
+        name: "Written after second restart", kind: "cli", provider: "mock", model: "mock-v1", connection: {},
+      });
       await third.stop();
       third = null;
       const targetAgents = JSON.parse(await readFile(join(target2, "agents.json"), "utf8"));

@@ -99,20 +99,23 @@ export function ensureActiveSpaceSession(store, spaceId, { now } = {}) {
   return stripInternal(session);
 }
 
-export function ensureAgentSession(store, { spaceSessionId, agentId, context } = {}, { now } = {}) {
+export function ensureAgentSession(store, { spaceSessionId, accountId, agentId, context } = {}, { now } = {}) {
   requireString(spaceSessionId, "spaceSessionId");
+  requireString(accountId, "accountId");
   requireString(agentId, "agentId");
   const spaceSession = findSpaceSession(store, spaceSessionId);
   if (spaceSession.status !== "active") throw conflict(`space session ${spaceSessionId} is archived`);
   if (!store.find("agents", agentId)) throw new ApiError("not_found", `agent ${agentId} does not exist`);
+  if (!store.find("accounts", accountId)) throw new ApiError("not_found", `account ${accountId} does not exist`);
   const matches = store.list("agentSessions").filter((item) =>
-    item.spaceSessionId === spaceSessionId && item.agentId === agentId);
+    item.spaceSessionId === spaceSessionId && item.accountId === accountId && item.agentId === agentId);
   if (matches.length > 1) throw conflict(`agent ${agentId} has multiple sessions in ${spaceSessionId}`);
   if (matches[0]) return publicAgentSession(matches[0]);
   const timestamp = nowIso(now);
   const session = store.insert("agentSessions", {
     id: newAgentSessionId(),
     spaceSessionId,
+    accountId,
     agentId,
     status: "active",
     generation: 1,
@@ -124,9 +127,9 @@ export function ensureAgentSession(store, { spaceSessionId, agentId, context } =
   return publicAgentSession(session);
 }
 
-export function getActiveContext(store, { spaceId, agentId } = {}) {
+export function getActiveContext(store, { spaceId, accountId, agentId } = {}) {
   const spaceSession = ensureActiveSpaceSession(store, spaceId);
-  const agentSession = ensureAgentSession(store, { spaceSessionId: spaceSession.id, agentId });
+  const agentSession = ensureAgentSession(store, { spaceSessionId: spaceSession.id, accountId, agentId });
   return { spaceSession, agentSession };
 }
 
@@ -156,8 +159,9 @@ export function startNewSpaceSession(store, { spaceId, requestId } = {}, { now }
     job.spaceSessionId === current.id && ACTIVE_JOB_STATUSES.has(job.status));
   if (busyRun || busyCompaction) throw new ApiError("session_busy", `space ${spaceId} has active context work`);
   for (const seat of space.seats ?? []) {
-    if (!store.find("agents", seat.agentId)) {
-      throw conflict(`space ${spaceId} references missing agent ${seat.agentId}`);
+    const account = store.find("accounts", seat.accountId);
+    if (!account?.ownerAgentId || !store.find("agents", account.ownerAgentId)) {
+      throw conflict(`space ${spaceId} references unavailable account ${seat.accountId}`);
     }
   }
 
@@ -177,7 +181,10 @@ export function startNewSpaceSession(store, { spaceId, requestId } = {}, { now }
   const next = createSpaceSessionRecord(store, spaceId, timestamp);
   store.update("spaces", spaceId, { activeSpaceSessionId: next.id });
   for (const seat of space.seats ?? []) {
-    ensureAgentSession(store, { spaceSessionId: next.id, agentId: seat.agentId }, { now: timestamp });
+    const account = store.find("accounts", seat.accountId);
+    ensureAgentSession(store, {
+      spaceSessionId: next.id, accountId: account.id, agentId: account.ownerAgentId,
+    }, { now: timestamp });
   }
   store.insert("contextControlRequests", {
     id: newContextControlRequestId(), type: "new", spaceId, requestId,

@@ -11,7 +11,9 @@ function truncate(text, maxLength) {
   return `${text.slice(0, maxLength)}\n…(输出截断)`;
 }
 
-export function createRunOutput({ store, hub, config, spaceId, spaceSessionId, runId, agentId }) {
+export function createRunOutput({
+  store, hub, config, spaceId, spaceSessionId, runId, agent, account, effectiveModel, delegated,
+}) {
   const bubbles = createBubbleStream({
     store,
     hub,
@@ -19,7 +21,11 @@ export function createRunOutput({ store, hub, config, spaceId, spaceSessionId, r
     spaceId,
     spaceSessionId,
     runId,
-    agentId,
+    accountId: account.id,
+    accountNameSnapshot: account.name,
+    executingAgentId: agent.id,
+    effectiveModel,
+    delegated,
   });
   const activityIndex = new Map();
 
@@ -42,7 +48,7 @@ export function createRunOutput({ store, hub, config, spaceId, spaceSessionId, r
       spaceId,
       spaceSessionId,
       runId,
-      agentId,
+      agentId: agent.id,
       phase: event?.phase,
       label: event?.label,
       detail,
@@ -63,7 +69,7 @@ export function createRunOutput({ store, hub, config, spaceId, spaceSessionId, r
       spaceId,
       spaceSessionId,
       runId,
-      agentId,
+      agentId: agent.id,
       req,
     }),
   };

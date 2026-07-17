@@ -91,14 +91,14 @@ export function createOpencodeAdapter({ config }) {
   let inFlight = 0;
   let idleTimer = null;
 
-  function assertAccount(account, code = "unavailable") {
-    if (account?.kind !== "cli" || account?.provider !== "opencode") {
-      throw new AdapterError(code, "OpenCode adapter Account kind/provider mismatch");
+  function assertRuntime(runtime, code = "unavailable") {
+    if (runtime?.kind !== "cli" || runtime?.provider !== "opencode") {
+      throw new AdapterError(code, "OpenCode adapter runtime kind/provider mismatch");
     }
   }
 
-  function resolveBinary(account) {
-    const command = account?.connection?.command;
+  function resolveBinary(runtime) {
+    const command = runtime?.connection?.command;
     if (command && (command.split("/").pop() || "") === "opencode") return command;
     return defaultBinary;
   }
@@ -452,10 +452,10 @@ export function createOpencodeAdapter({ config }) {
     }
   }
 
-  async function digestMemory({ account, payload, signal }) {
-    assertAccount(account, "executor_unavailable");
-    const primary = splitModelId(account?.model).model;
-    const binary = resolveBinary(account);
+  async function digestMemory({ runtime, payload, signal }) {
+    assertRuntime(runtime, "executor_unavailable");
+    const primary = splitModelId(runtime?.model).model;
+    const binary = resolveBinary(runtime);
     try {
       const result = await runDigestAttempt({ binary, model: primary, payload, signal });
       return {
@@ -473,11 +473,11 @@ export function createOpencodeAdapter({ config }) {
     }
   }
 
-  function buildRunnerArgs(handle, account, sessionId, promptText) {
+  function buildRunnerArgs(handle, runtime, sessionId, promptText) {
     const args = ["run", "--attach", handle.baseUrl, "-u", "opencode", "-p", handle.password];
-    const model = String(account?.model || "").trim();
+    const model = String(runtime?.model || "").trim();
     if (model) args.push("-m", model);
-    const connArgs = Array.isArray(account?.connection?.args) ? account.connection.args : [];
+    const connArgs = Array.isArray(runtime?.connection?.args) ? runtime.connection.args : [];
     const variantIdx = connArgs.indexOf("--variant");
     if (variantIdx >= 0 && connArgs[variantIdx + 1]) args.push("--variant", String(connArgs[variantIdx + 1]));
     // -s 必须显式传，否则 opencode 用"本项目最后一个会话"，并发会串线（salvage-notes）
@@ -488,9 +488,9 @@ export function createOpencodeAdapter({ config }) {
 
   async function run(ctx) {
     const {
-      account, workspacePath, onDelta, onActivity, signal,
+      runtime, workspacePath, onDelta, onActivity, signal,
     } = ctx;
-    assertAccount(account);
+    assertRuntime(runtime);
     if (signal?.aborted) throw new AdapterError("cancelled", "aborted before start");
 
     clearIdleTimer();
@@ -501,7 +501,7 @@ export function createOpencodeAdapter({ config }) {
     let sessionId = null;
 
     try {
-      const binary = resolveBinary(account);
+      const binary = resolveBinary(runtime);
       const handle = await ensureDaemon(binary);
       // 等 poller 连上再投递，避免漏事件；等不到也继续（子进程退出 + stdout 兜底）
       await Promise.race([handle.pollerConnected, sleep(POLLER_CONNECT_WAIT_MS)]);
@@ -595,7 +595,7 @@ export function createOpencodeAdapter({ config }) {
       });
 
       // 短命 runner 子进程驱动 LLM loop
-      const runnerArgs = buildRunnerArgs(handle, account, sessionId, runPrompt.text);
+      const runnerArgs = buildRunnerArgs(handle, runtime, sessionId, runPrompt.text);
       child = spawnProcess(handle.binary, runnerArgs, {
         cwd: workspacePath || process.cwd(),
         stdio: ["ignore", "pipe", "pipe"],

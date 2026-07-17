@@ -106,8 +106,8 @@ export async function run(ctx) {
         model: "gemma4:e4b",
       });
       assertEqual(created.status, 201);
-      const { agent } = created.json;
-      assertEqual(created.json.account.provider, "ollama");
+      const { agent, account } = created.json;
+      assertEqual(agent.runtimeProfile.provider, "ollama");
       await gateway.stop();
       gateway = null;
       await verifyDigestTask(dataPath, agent.id, "gemma4:e4b");
@@ -123,7 +123,7 @@ export async function run(ctx) {
       const verifiedRequest = createHttpClient(gateway.port);
       const madeSpace = await verifiedRequest("POST", "/api/spaces", {
         name: "Ollama black-box",
-        seats: [{ agentId: agent.id, responseMode: "default" }],
+        seats: [{ accountId: account.id, responseMode: "default" }],
       });
       const space = madeSpace.json.space;
       const posted = await verifiedRequest("POST", `/api/spaces/${space.id}/messages`, {
@@ -135,7 +135,7 @@ export async function run(ctx) {
       for (let attempt = 0; attempt < 100 && !reply; attempt += 1) {
         const timeline = await verifiedRequest("GET", `/api/spaces/${space.id}/timeline?limit=20`);
         reply = timeline.json.items.find((item) => item.itemType === "message"
-          && item.author?.type === "agent" && item.status === "completed");
+          && item.author?.type === "account" && item.status === "completed");
         if (!reply) await sleep(25);
       }
       assertEqual(reply?.content, "OLLAMA_GATEWAY_STUB_OK");

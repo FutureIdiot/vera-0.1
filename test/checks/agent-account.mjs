@@ -6,7 +6,7 @@
 export async function run(ctx) {
   const { check, httpRequest, assertEqual, assert } = ctx;
 
-  await check("b. POST /api/agents returns { agent, account } 并把连接字段从 agent 剥到 account", async () => {
+  await check("b. POST /api/agents bridge creates one portable Agent profile and strict owner Account", async () => {
     const { status, json } = await httpRequest("POST", "/api/agents", {
       name: "VerifyMock",
       kind: "cli",
@@ -17,15 +17,16 @@ export async function run(ctx) {
     assertEqual(status, 201);
     assert(json.agent?.id?.startsWith("agt_"), "agent id should have agt_ prefix");
     assert(
-      !("kind" in json.agent) && !("provider" in json.agent) && !("connection" in json.agent) && !("model" in json.agent),
-      "agent must not carry kind/provider/connection/model (4.1)",
+      !("runtimeBinding" in json.agent) && !("connection" in json.agent.runtimeProfile),
+      "public Agent must not expose its local runtime binding",
     );
+    assertEqual(JSON.stringify(json.agent.runtimeProfile), JSON.stringify({ schemaVersion: 1, kind: "cli", provider: "mock", model: "mock-v1" }));
     assertEqual(json.agent.name, "VerifyMock");
     assert(json.account?.id?.startsWith("acc_"), "account id should have acc_ prefix");
-    assertEqual(json.account.owningAgentId, json.agent.id);
-    assertEqual(json.account.kind, "cli");
-    assertEqual(json.account.provider, "mock");
-    assertEqual(json.account.model, "mock-v1");
+    assertEqual(json.account.ownerAgentId, json.agent.id);
+    for (const key of ["kind", "provider", "connection", "model", "authorizedAgentIds"]) {
+      assert(!(key in json.account), `Account must not expose legacy ${key}`);
+    }
     ctx.agent = json.agent;
     ctx.owningAccount = json.account;
   });
@@ -33,7 +34,6 @@ export async function run(ctx) {
   await check("b. PATCH /api/agents/:id 只改 name，连接字段不走此接口", async () => {
     const { status, json } = await httpRequest("PATCH", `/api/agents/${ctx.agent.id}`, {
       name: "VerifyMock2",
-      model: "ignored",
     });
     assertEqual(status, 200);
     assertEqual(json.agent.name, "VerifyMock2");
@@ -51,40 +51,28 @@ export async function run(ctx) {
     assert(json.accounts.some((a) => a.id === ctx.owningAccount.id), "owning account should be in the list");
   });
 
-  await check("b. GET /api/accounts?agentId=... 按拥有者过滤", async () => {
-    const { status, json } = await httpRequest("GET", `/api/accounts?agentId=${ctx.agent.id}`);
+  await check("b. GET /api/accounts?ownerAgentId=... 按永久owner过滤", async () => {
+    const { status, json } = await httpRequest("GET", `/api/accounts?ownerAgentId=${ctx.agent.id}`);
     assertEqual(status, 200);
     assertEqual(json.accounts.length, 1);
-    assertEqual(json.accounts[0].owningAgentId, ctx.agent.id);
+    assertEqual(json.accounts[0].ownerAgentId, ctx.agent.id);
   });
 
-  await check("b. PATCH /api/accounts/:id 改 model（换模型改 account 不改 agent 身份）", async () => {
-    const { status, json } = await httpRequest("PATCH", `/api/accounts/${ctx.owningAccount.id}`, { model: "mock-v2" });
+  await check("b. PATCH /api/accounts/:id 只改身份名称，不接受runtime字段", async () => {
+    const { status, json } = await httpRequest("PATCH", `/api/accounts/${ctx.owningAccount.id}`, { name: "Verify Account" });
     assertEqual(status, 200);
-    assertEqual(json.account.model, "mock-v2");
+    assertEqual(json.account.name, "Verify Account");
     assertEqual(json.account.id, ctx.owningAccount.id);
     ctx.owningAccount = json.account;
   });
 
-  let secondAccount;
-  await check("b. POST /api/agents/:id/accounts 为同一 agent 增加第二条 account", async () => {
-    const { status, json } = await httpRequest("POST", `/api/agents/${ctx.agent.id}/accounts`, {
-      name: "VerifyMock 第二账户",
-      kind: "cli",
-      provider: "mock",
-      connection: {},
-      model: "",
-    });
-    assertEqual(status, 201);
-    assert(json.account?.id?.startsWith("acc_"));
-    assert(json.account.id !== ctx.owningAccount.id, "second account must be a different id");
-    assertEqual(json.account.owningAgentId, ctx.agent.id);
-    secondAccount = json.account;
+  await check("b. 同一 Agent 创建第二个 owner Account 固定返回409", async () => {
+    const { status, json } = await httpRequest("POST", `/api/agents/${ctx.agent.id}/accounts`, { name: "Second" });
+    assertEqual(status, 409);
+    assertEqual(json.error.code, "conflict");
   });
 
-  await check("b. DELETE /api/accounts/:id 不可删唯一 owning account（409），删多余 account 成功（204）", async () => {
-    const delSecond = await httpRequest("DELETE", `/api/accounts/${secondAccount.id}`);
-    assertEqual(delSecond.status, 204);
+  await check("b. DELETE /api/accounts/:id 不可删仍绑定owner的Account", async () => {
     const sole = await httpRequest("DELETE", `/api/accounts/${ctx.owningAccount.id}`);
     assertEqual(sole.status, 409);
     assertEqual(sole.json.error.code, "conflict");
@@ -103,18 +91,18 @@ export async function run(ctx) {
     });
     assertEqual(agent2Resp.status, 201);
     const agent2 = agent2Resp.json.agent;
+    const account2 = agent2Resp.json.account;
 
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "driving-space",
       seats: [
-        { agentId: ctx.agent.id, responseMode: "default" },
-        { agentId: agent2.id, responseMode: "default" },
+        { accountId: ctx.owningAccount.id, responseMode: "default" },
+        { accountId: account2.id, responseMode: "default" },
       ],
     });
     assertEqual(spaceResp.status, 201);
-    // Seat 不再带 accountId（4.4 反迁移）
-    assert(!("accountId" in spaceResp.json.space.seats[0]), "seat must not carry accountId (4.4)");
-    assert(!("accountId" in spaceResp.json.space.seats[1]), "seat must not carry accountId (4.4)");
+    assertEqual(spaceResp.json.space.seats[0].accountId, ctx.owningAccount.id);
+    assertEqual(spaceResp.json.space.seats[1].accountId, account2.id);
     const driveSpace = spaceResp.json.space;
 
     const post = await httpRequest("POST", `/api/spaces/${driveSpace.id}/messages`, {

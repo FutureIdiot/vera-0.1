@@ -230,7 +230,7 @@ function makeCtx({ text = "hi", providerBinding = null, rotateProviderBinding } 
         id: "agt_test",
         name: "T",
       },
-      account: {
+      runtime: {
         id: "acc_test",
         kind: "cli",
         provider: "opencode",
@@ -279,7 +279,7 @@ function waitFor(predicate, timeoutMs = 3000) {
 
 function makeDigestCtx({ model = "navy/deepseek-v4-pro", signal } = {}) {
   return {
-    account: {
+    runtime: {
       id: "acc_test",
       kind: "cli",
       provider: "opencode",
@@ -510,10 +510,10 @@ test("missing binary fails fast with unavailable", async () => {
 
 test("kind/provider mismatch fails before starting OpenCode", async () => {
   const { ctx } = makeCtx();
-  ctx.account = { ...ctx.account, kind: "api", provider: "ollama" };
+  ctx.runtime = { ...ctx.runtime, kind: "api", provider: "ollama" };
   await assert.rejects(() => adapter.run(ctx), (error) => error.code === "unavailable");
   await assert.rejects(
-    () => adapter.digestMemory({ ...makeDigestCtx(), account: ctx.account }),
+    () => adapter.digestMemory({ ...makeDigestCtx(), runtime: ctx.runtime }),
     (error) => error.code === "executor_unavailable",
   );
 });
@@ -728,7 +728,7 @@ test("opt-in real OpenCode digestMemory smoke", {
   });
   try {
     const result = await realAdapter.digestMemory({
-      account: {
+      runtime: {
         id: "acc_smoke", kind: "cli", provider: "opencode",
         model: primaryModel, connection: { command: binary, args: [] },
       },

@@ -7,27 +7,31 @@ import {
 } from "./navigator-dialogs.js";
 
 function memberKey(space) {
-  const ids = [...new Set((space.seats ?? []).map((seat) => seat.agentId))].sort();
-  return ids.length > 1 ? `group:${ids.join(",")}` : `agent:${ids[0] ?? "none"}`;
+  const ids = [...new Set((space.seats ?? []).map((seat) => seat.accountId))].filter(Boolean).sort();
+  return ids.length > 1 ? `group:${ids.join(",")}` : `account:${ids[0] ?? "none"}`;
 }
 
-function memberProjection(agents, spaces) {
-  const byId = new Map(agents.map((agent) => [agent.id, agent]));
-  const entries = agents.map((agent) => ({ key: `agent:${agent.id}`, label: agent.name, agentIds: [agent.id] }));
+function memberProjection(accounts, spaces) {
+  const byId = new Map(accounts.map((account) => [account.id, account]));
+  const entries = accounts.map((account) => ({
+    key: `account:${account.id}`,
+    label: account.name,
+    accountIds: [account.id],
+  }));
   const seen = new Set(entries.map((entry) => entry.key));
   for (const space of spaces) {
     const key = memberKey(space);
     if (seen.has(key) || !key.startsWith("group:")) continue;
-    const agentIds = key.slice(6).split(",");
-    entries.push({ key, agentIds, label: agentIds.map((id) => byId.get(id)?.name ?? id).join("、") });
+    const accountIds = key.slice(6).split(",");
+    entries.push({ key, accountIds, label: accountIds.map((id) => byId.get(id)?.name ?? id).join("、") });
     seen.add(key);
   }
   return entries;
 }
 
-export function resolveSpaceCreationSeats(agents, spaces, selectedKey) {
-  const entry = memberProjection(agents, spaces).find((candidate) => candidate.key === selectedKey);
-  return (entry?.agentIds ?? []).map((agentId) => ({ agentId, responseMode: "default" }));
+export function resolveSpaceCreationSeats(accounts, spaces, selectedKey) {
+  const entry = memberProjection(accounts, spaces).find((candidate) => candidate.key === selectedKey);
+  return (entry?.accountIds ?? []).map((accountId) => ({ accountId, responseMode: "default" }));
 }
 
 export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {}) {
@@ -59,7 +63,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
   }
 
   function selectedSeats() {
-    return resolveSpaceCreationSeats(runtime.getBootstrap().agents, spaces, selectedKey);
+    return resolveSpaceCreationSeats(runtime.getBootstrap().accounts, spaces, selectedKey);
   }
 
   async function createSpace() {
@@ -164,8 +168,8 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
 
   function renderContacts() {
     contacts.replaceChildren();
-    for (const entry of memberProjection(runtime.getBootstrap().agents, spaces)) {
-      const item = button(entry.agentIds.length > 1 ? "群" : entry.label.slice(0, 1), "vera-contact", () => {
+    for (const entry of memberProjection(runtime.getBootstrap().accounts, spaces)) {
+      const item = button(entry.accountIds.length > 1 ? "群" : entry.label.slice(0, 1), "vera-contact", () => {
         selectedKey = entry.key;
         render();
       });
@@ -174,12 +178,12 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       item.setAttribute("aria-label", entry.label);
       contacts.appendChild(item);
     }
-    const manageAgents = button("人", "vera-contact vera-contact--manage", () => {
-      window.location.hash = "#/agents";
+    const manageAccounts = button("人", "vera-contact vera-contact--manage", () => {
+      window.location.hash = "#/settings/accounts";
     });
-    manageAgents.title = "管理 Agent";
-    manageAgents.setAttribute("aria-label", "管理 Agent");
-    contacts.appendChild(manageAgents);
+    manageAccounts.title = "管理 Account";
+    manageAccounts.setAttribute("aria-label", "管理 Account");
+    contacts.appendChild(manageAccounts);
   }
 
   function renderSpaceRow(space, { archived: isArchived = false } = {}) {
@@ -216,7 +220,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     if (!visible.length) {
       const empty = document.createElement("p");
       empty.className = "vera-empty";
-      empty.textContent = selectedKey === "agent:none" ? "选一个联系人或群组" : "还没有 Space";
+      empty.textContent = selectedKey === "account:none" ? "选一个联系人或群组" : "还没有 Space";
       spacesPanel.appendChild(empty);
     }
     for (const space of visible) spacesPanel.appendChild(renderSpaceRow(space));
