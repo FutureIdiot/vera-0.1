@@ -11,7 +11,9 @@
 - [ ] 删除Account上的`kind/provider/connection/model/authorizedAgentIds`旧字段与所有双读双写。
 - [ ] Account改为首层持久身份：`name/ownerAgentId/presence/lastSeenAt/activeAgentId/accessKeyState/accessKeyVersion`。
 - [ ] Account与owner Agent严格1:1；首次enroll原子建立唯一owner，普通API不得改绑，同一Agent不得拥有第二个Account。
-- [ ] Agent持有私有Memory与runtime profile；普通前端不得创建空Agent。
+- [ ] 每个Agent固定拥有一个owner Account；未来临时代表其他Account只写Account Session、`activeAgentId`与Execution，不改`ownerAgentId`、不复制或混用Memory/profile/provider binding。
+- [ ] Agent持有私有Memory与版本化纯JSON `runtimeProfile`；当前严格为`{schemaVersion:1,kind,provider,model}`，不得含Account/Workspace/host/session/presence/lease/token/Key/secret/secretRef/绝对路径。普通前端不得创建空Agent。
+- [ ] daemon派生的revision/capabilities/fingerprint/在线状态只进runtime snapshot，不写回profile；profile归一化后可直接稳定JSON导出，本步不新增导入/导出endpoint。
 - [ ] Space Seat从`agentId`一次迁移为`accountId`；旧`blockAgentIds`迁为`blockAccountIds`，`respondTo`同步改用Account id。
 - [ ] Space通知模式`agentMessages`一次迁为`accountMessages`并删除旧token。
 - [ ] AgentSession唯一键迁为`spaceSessionId + accountId + agentId`；当前`agentId`只允许owner，且任一Agent不得继承另一Agent的provider binding/history。
@@ -35,7 +37,7 @@
 - [ ] 两端每次启动生成不落盘的boot id；Key模式成功后签发高熵opaque Account Session Token，绑定`agentId/accountId/Agent Token fingerprint/accessKeyVersion/daemonBootId/gatewayBootId`。只在login成功响应返回一次，gateway仅存进程内Token hash、daemon仅存进程内明文并经header发送，禁止持久化、日志、query、请求body或SSE data泄露。
 - [ ] gateway或daemon进程重启、显式登出、Key轮换/撤销及安全撤销令Session失效并返回`account_reauthentication_required`；普通断线、presence暂时offline及runtime刷新继续使用同一Session，无周期性Key重验。
 - [ ] 无人值守daemon可从本机`~/.vera/secrets.json`读取Account Key完成崩溃/重启后的自动重新授权；文件权限必须为`0600`，Key不得进入runtime profile、Run或gateway store。
-- [ ] Phase 5.5重新授权仍强制`agentId === ownerAgentId`；非owner即使同时持有合法Agent Token与Account Key也固定`delegation_unavailable`。未来代上线只复用该建Session路径，不在本任务开放。
+- [ ] Phase 5.5重新授权仍强制`agentId === ownerAgentId`；非owner即使同时持有合法Agent Token与Account Key也固定`delegation_unavailable`。未来代上线只复用该建Session路径，`vera.workspace` MCP只提供受Execution租约约束的Workspace工具平面，不做身份替换；二者均不在本任务开放。
 - [ ] 当前任务实现并黑盒验证`/api/agent/enroll`、`/api/agent/login`的Key/Session双模式与`DELETE /api/agent/sessions/:accountId`；后续daemon任务只消费此凭证层，不重新实现认证。
 
 ## Memory任务关系
@@ -65,3 +67,4 @@
 - [ ] 非owner即使持有Account Key也不能读取Space/Files/Workspace或建立AgentSession；不同Agent的Memory与provider binding严格隔离。
 - [ ] 不同owner Agent的Account可并行；同一Account只有自己的owner Agent可驾驶一个会话。
 - [ ] Workspace路径和secret不进入普通API摘要。
+- [ ] `runtimeProfile`稳定JSON序列化验收通过；导出数据不含Account/Workspace/宿主状态、会话/租约、任一凭证、secret/`secretRef`、绝对路径或daemon派生snapshot字段。

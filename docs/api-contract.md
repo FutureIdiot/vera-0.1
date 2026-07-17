@@ -25,17 +25,17 @@
 
 ### Agent（ground truth 2.2）
 
-Agent = 实际执行者。稳定身份、私有Memory及Skills / Hooks / MCP / Data配置按`agentId`归属；provider/runtime/model由该Agent daemon登记。每个Agent固定拥有一个Account，但Space、Workspace与项目数据仍以该`accountId`建模，不并入Agent对象；Agent不得读取另一Agent的Memory。
+Agent = 实际执行者。稳定身份、私有Memory及Skills / Hooks / MCP / Data配置按`agentId`归属；provider/runtime/model由该Agent daemon登记。每个Agent固定拥有一个owner Account；未来可以临时代表其他Account，但代表关系只存在于Account Session、`activeAgentId`与Execution，不写回Agent对象或`ownerAgentId`。Space、Workspace与项目数据仍以相应`accountId`建模，不并入Agent对象；Agent不得读取另一Agent的Memory。
 
 ```json
 {
   "id": "agt_x1y2",
   "name": "Codex",
   "runtimeProfile": {
+    "schemaVersion": 1,
     "kind": "cli",
     "provider": "codex",
-    "model": "gpt-5.6-sol",
-    "revision": "sha256:…"
+    "model": "gpt-5.6-sol"
   },
   "createdAt": "…",
   "updatedAt": "…"
@@ -43,7 +43,8 @@ Agent = 实际执行者。稳定身份、私有Memory及Skills / Hooks / MCP / D
 ```
 
 - Agent由daemon首次接入时登记；普通前端不提供“新建空Agent”动作。
-- `runtimeProfile`是安全摘要，不含secret、CLI绝对路径或provider原始配置；真实执行时还须匹配daemon本次报告的runtime revision。
+- `runtimeProfile`是版本化、纯JSON、可稳定序列化的便携配置；当前形状严格为`{schemaVersion:1,kind,provider,model}`。它不含Account/owner归属、Workspace、`hostId`、session、presence、lease、token、Key、secret、`secretRef`或绝对路径，也不包容provider原始配置。同一归一化profile必须产生稳定JSON，以便直接导出；本步不新增导入/导出endpoint。
+- `revision/runtimeCapabilities/connectionFingerprint`、`hostId`和在线状态属于daemon派生的runtime snapshot，不属于导出profile；真实执行时仍须匹配本次报告的runtime revision。
 - Agent token唯一绑定`agentId`，用于证明实际执行者并绑定Memory；它不授予任一Account访问权。
 - 改provider/model改的是Agent runtime；不得迁移或复制Memory。
 

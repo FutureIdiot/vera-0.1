@@ -130,7 +130,12 @@ Vera是单用户、自部署的多agent协作空间。
 | accessKeyState / accessKeyVersion / accessKeyHash | 公开状态为`active/revoked`，version单调递增；Key只用于建立/重新建立Account授权，hash仅active时存在，明文不落gateway store |
 | 会话归属 | Vera持有SpaceSession及`(spaceSessionId,accountId,agentId)`AgentSession；不同Agent代表同一Account时不共享provider binding/history |
 | workspace | gateway持久化该Account唯一Workspace的宿主标识、绑定、策略、状态与校验时间；实际文件只在daemon宿主 |
-| Agent runtime | `kind/provider/model/connectionFingerprint/runtimeCapabilities`由实际Agent daemon登记；secret与CLI路径留在daemon宿主 |
+| Agent runtimeProfile | 版本化、纯JSON且可稳定序列化的便携配置；当前严格为`{schemaVersion:1,kind,provider,model}` |
+| Agent runtime snapshot | `hostId/revision/connectionFingerprint/runtimeCapabilities`和在线状态由实际Agent daemon派生登记，不属于导出profile |
+
+Account与owner Agent严格1:1表示永久归属：每个Agent固定拥有一个owner Account。未来Agent可以临时代表其他Account，但只改变`activeAgentId`、AgentSession与Execution绑定，不改`ownerAgentId`，也不复制或混用任一Agent的Memory、runtimeProfile或provider binding/history。
+
+`runtimeProfile`不得包含Account/owner归属、Workspace、`hostId`、session、presence、lease、token、Key、secret、`secretRef`或绝对路径。`revision`、`runtimeCapabilities`、`connectionFingerprint`和在线状态均是daemon派生的runtime snapshot，不写回可导出profile。Phase 5.5只要求该profile可直接做稳定JSON导出，不因此新增导入/导出endpoint。
 
 **Execution租约**（联邦形态必需）：
 
@@ -274,7 +279,7 @@ Account的项目与执行数据边界。
 - 每个Account恰有一个Workspace；Workspace绑定以`accountId`隔离。provider/runtime属于Agent；AgentSession同时引用Account与实际Agent
 - 实际项目文件位于`workspace.hostId`宿主，gateway只保存绑定、策略、状态和校验信息；gateway宿主不因承担控制面而自动复制或索引Workspace正文
 - Phase 5.5当前要求`workspace.hostId === owner Agent runtime.hostId`，Execution只访问自己的Account Workspace；宿主不匹配明确`workspace_unavailable`
-- 未来开发目标是第一方`vera.workspace` MCP：由Workspace宿主执行受Execution租约约束的文件、Git与进程工具，使非owner Agent可在不复制项目、不SSH遥控的前提下跨宿主代上线。该MCP、远程工具隔离与非owner登录当前均不实现，也不阻塞owner-only闭环
+- 未来开发目标是第一方`vera.workspace` MCP：由Workspace宿主执行受Execution租约约束的文件、Git与进程工具，使非owner Agent可在不复制项目、不SSH遥控的前提下跨宿主代上线。该MCP只是受租约约束的Workspace工具平面，不是Agent身份替换、Account授权旁路或owner改绑机制。该MCP、远程工具隔离与非owner登录当前均不实现，也不阻塞owner-only闭环
 
 **说明：**
 - Memory / Files / Agent State的隔离边界可按各自契约配置；Workspace的Account边界是安全约束，不作为可放宽的普通隔离选项
