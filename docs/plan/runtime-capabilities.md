@@ -30,7 +30,8 @@
 - [ ] 设计第一方`vera.workspace` MCP，由Workspace宿主执行受Execution租约、Account权限与Workspace policy约束的文件、Git和进程工具。
 - [ ] 工具调用绑定可信`agentId + accountId + runId + workspaceRevision`，tool schema不允许调用方自选宿主路径或扩大Account范围。
 - [ ] 完成远程工具隔离、取消、审批、审计、并发租约与宿主离线失败语义；不得通过SSH旁路或复制Workspace冒充远程执行。
-- [ ] 上述契约与黑盒验收完成后，另行冻结非owner登录、`delegated:true`与临时代上线授权；在此之前`vera.workspace`不注册、非owner固定`delegation_unavailable`。
+- [ ] 上述契约与黑盒验收完成后，另行冻结非owner登录、`delegated:true`与临时代上线授权；其他Agent必须以自己的Agent Token + 目标Account Key建立进程内Account Session，普通续连沿用Session Token，不切换Memory身份。
+- [ ] 在此之前`vera.workspace`不注册、非owner固定`delegation_unavailable`。
 
 ## Data
 

@@ -17,8 +17,8 @@
 
 ## 当前依赖顺序
 
-1. [ ] [Account固定归属、Execution与Workspace迁移](federation-account.md)
-2. [ ] [联邦状态、身份与权限](federation-security.md)
+1. [ ] [Account固定归属、凭证安全、Execution与Workspace迁移](federation-account.md)
+2. [ ] [联邦状态、presence与owner入口边界](federation-security.md)
 3. [ ] [Agent daemon 与跨进程运行链路](federation-runtime.md)
 4. [ ] [VPS 私网部署与旧链路清理](federation-deployment.md)
 5. [ ] [原生客户端](native-clients.md)
@@ -35,8 +35,8 @@
 | [`memory-ui.md`](memory-ui.md) | Data → Memory完成记录入口；当前无未完成事项 |
 | [`files.md`](files.md) | Files完成记录入口；当前无未完成事项 |
 | [`phase-5-closeout.md`](phase-5-closeout.md) | Phase 5冻结记录入口；当前无未完成事项 |
-| [`federation-account.md`](federation-account.md) | Account固定owner、Space Seat、Execution、Workspace与消息展示迁移 |
-| [`federation-security.md`](federation-security.md) | AgentState、Account presence、Agent token、Account Key与owner identity |
+| [`federation-account.md`](federation-account.md) | Account固定owner、Agent Token/Account Key/进程内Session、Space Seat、Execution与Workspace迁移 |
+| [`federation-security.md`](federation-security.md) | AgentState、Account presence、owner Tailscale identity与入口边界 |
 | [`federation-runtime.md`](federation-runtime.md) | `/api/agent/*`、调度器、daemon、mock daemon |
 | [`federation-deployment.md`](federation-deployment.md) | gateway/daemon/Workspace/Memory跨宿主部署、Tailscale Serve、备份与真实模型复验 |
 | [`native-clients.md`](native-clients.md) | Capacitor共享平台、Android壳与iOS壳 |

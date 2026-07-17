@@ -127,14 +127,14 @@ Vera是单用户、自部署的多agent协作空间。
 | presence | `online` / `offline`，当前是否有Agent代表该Account在线 |
 | lastSeenAt | 上次心跳或 SSE 收到时刻 |
 | activeAgentId | 当前Account登录会话派生值；Phase 5.5当前只允许等于`ownerAgentId`，离线为null；保留未来代上线扩展 |
-| accessKeyState / accessKeyVersion / accessKeyHash | 公开状态为`active/revoked`，version单调递增；hash仅active时存在，明文不落store |
+| accessKeyState / accessKeyVersion / accessKeyHash | 公开状态为`active/revoked`，version单调递增；Key只用于建立/重新建立Account授权，hash仅active时存在，明文不落gateway store |
 | 会话归属 | Vera持有SpaceSession及`(spaceSessionId,accountId,agentId)`AgentSession；不同Agent代表同一Account时不共享provider binding/history |
 | workspace | gateway持久化该Account唯一Workspace的宿主标识、绑定、策略、状态与校验时间；实际文件只在daemon宿主 |
 | Agent runtime | `kind/provider/model/connectionFingerprint/runtimeCapabilities`由实际Agent daemon登记；secret与CLI路径留在daemon宿主 |
 
 **Execution租约**（联邦形态必需）：
 
-- daemon登录和`run.requested`必须携带明确的`agentId`、`accountId`与Execution标识；gateway同时校验agent token和Account access key/session，再原子取得目标Account租约
+- daemon首次登录或重新授权以agent token + Account access key建立Account Session；普通断线重连及`run.requested`只校验agent token + 当前Account Session Token，再原子取得目标Account租约
 - Account的`presence/activeAgentId`表示当前由谁代表上线；Execution租约仍是具体Run控制权的唯一事实
 - Execution结束、取消、超时或daemon失联时释放租约；释放前其他Execution不得并发驾驶该Account当前CLI provider binding或Workspace
 - Phase 5.5非owner登录固定拒绝`delegation_unavailable`；owner重复登录遇到旧会话时返回`account_busy`，不得用“接管”绕过在飞Execution与Workspace租约
@@ -144,19 +144,22 @@ Vera是单用户、自部署的多agent协作空间。
 - **gateway → agent**：每 15s（可配 `agentDaemon.heartbeatIntervalMs`）在 agent SSE 通道发 `agent.heartbeat` 事件。复用 SSE keepalive 之外的额外帧。
 - **agent 失联判定**：daemon 连续 3 次未收到心跳（~45s）→ 立即停所有在飞 run、不再消耗 token、`exit(0)`。launchd/systemd 设 `SuccessfulExit=false` 不自动拉起。
 - **gateway 挂了**：所有 agent 各自在心跳缺失后被自杀，**不存在 agent 反复撞 gateway 烧 token 场景**；唯一可能烧的是"心跳缺失瞬间正在跑的那一条 run"，损失被框死在毫秒到几毛钱。
-- **daemon 主动下线**：`DELETE /api/agent/sessions/:accountId`显式退出指定Account，gateway释放该Account租约、把presence置offline并保留lastSeenAt；不得因退出一个Account连带退出同一Agent的其他Account会话。
+- **daemon 主动下线**：`DELETE /api/agent/sessions/:accountId`显式退出自己的Account，gateway释放租约、把presence置offline、保留lastSeenAt并立即销毁Account Session Token；再次上线必须重新验证Account Key。
 - **未来 `missionMode` 扩展位**：gateway 给 agent 发特殊 prompt "你被授权做 X 直到 gateway 恢复" → daemon 进入 mission 模式，心跳缺失不自杀，按任务自己跑完为止。MVP 不做，接口留位（`daemon.missionMode = false`）。
 
 **认证与密钥边界**：
 
 - **网络门禁**：Tailscale 身份 + tailnet ACL 是全部 Vera 请求的外层网络门禁，不再使用 Cloudflare Access。
-- **Agent 身份**：Vera agent token（长随机串，VPS 上`~/.vera/agent-tokens.json`，gateway启动加载校验），per-Agent一条，回答“实际是谁在执行”，并绑定该Agent的Memory。加入tailnet不等于获得Agent身份。
-- **Account访问权**：Account access key由User在Account页生成/轮换/撤销。Phase 5.5当前仅与owner Agent token组合登录自己的Account；明文只显示一次。持有其他Account Key不产生代上线权，非owner固定拒绝`delegation_unavailable`。
+- **Agent 身份**：Vera agent token（长随机串，gateway在`~/.vera/agent-tokens.json`加载校验，daemon在本机secret store持有），per-Agent一条，回答“实际是谁在执行”，并绑定该Agent的Memory。加入tailnet不等于获得Agent身份。
+- **Account访问权**：Account access key由User在Account页生成/轮换/撤销，是低频重新授权凭证，不是每次HTTP/SSE连接都发送的会话凭证。Phase 5.5当前仅与owner Agent token组合建立自己的Account Session；持有其他Account Key仍固定拒绝`delegation_unavailable`。未来开放代上线时，其他Agent也必须以自己的Agent Token + 目标Account Key建立临时Session，Key不改变其Agent身份或Memory。
+- **Account Session Token**：首次登录或需要重新授权时，gateway验证Agent Token + Account Key并签发高熵opaque Session Token；两端每次启动生成不落盘的`daemonBootId/gatewayBootId`，Token绑定`agentId + accountId + agentTokenFingerprint + accessKeyVersion + daemonBootId + gatewayBootId`。gateway只在内存保存Token hash，daemon只在当前进程持有明文，不落store、不进日志。此后同一daemon进程的SSE/HTTP重连及Account范围请求使用Agent Token + Session Token，不再重复验证Account Key。daemon重启后重验依赖受信daemon遵守Session Token不落盘；宿主失陷不属于该机制能掩盖的边界。
+- **重新授权条件**：gateway任一进程重启、daemon任一进程重启、显式登出、Account Key轮换/撤销或安全撤销都会令Session Token无效；下一次登录必须重新验证Account Key。普通网络抖动、SSE断线、presence因心跳暂时转offline、runtime配置刷新都不触发Key重验，也不设置周期性Key重验。
+- **无人值守重启**：Account Key可以只在daemon宿主的`~/.vera/secrets.json`中以`0600`权限保存，用于上述重新授权；它仍不得进入runtime profile、provider请求、Run、日志或gateway普通响应。若User选择不落盘，则daemon重启后需要重新输入Key。
 - **Owner 身份**：普通客户端请求只接受 Tailscale Serve 从回环代理注入且已去伪造的身份头；login 必须命中部署级 `config.security.ownerTailscaleLogins`。该列表默认空，生产启动时为空则拒绝普通业务 API 并报配置错误，不能因“单用户”退化成 tailnet 内任意设备均可管理。
-- **客户端撤销**：撤销手机/Mac访问通过 tailnet 管理台移除设备或 ACL；Vera 当前不再自建 owner 配对码、device session 或第二套设备目录。
+- **客户端撤销**：撤销手机/Mac访问通过tailnet管理台移除设备或ACL；Vera当前不再自建owner配对码、device session或第二套设备目录。daemon的进程内Account Session Token不属于owner客户端device session，也不授予普通管理API权限。
 
 `config.security.ownerTailscaleLogins` 与原生客户端 `config.security.cors.allowedOrigins` 是部署级字段，不进入普通 Settings UI；实现时支持对应 env override，但不得在路由中硬编码 owner 邮箱或 Origin。
-- **双凭证授权闸门**（Phase 5.5）：登录先以agent token固定`agentId`，再以Account access key固定`accountId`；二者都通过且`agentId === ownerAgentId`后才可建立Account会话。每条Execution还必须匹配当前owner会话并取得唯一租约。不存在`authorizedAgentIds`、共享Key或takeover旁路。
+- **双凭证授权闸门**（Phase 5.5）：Account Session的建立/重新建立先以Agent Token固定`agentId`，再以Account Key固定`accountId`；二者都通过且`agentId === ownerAgentId`后才签发Session Token。普通续连只接受与两端boot id、当前Key version和Agent Token fingerprint匹配的Session Token。每条Execution还必须匹配当前owner Session并取得唯一租约。不存在`authorizedAgentIds`、共享Key或takeover旁路。
 
 **AgentState 改为 per-Agent + Account + Space**（联邦形态必需的精化）：
 
