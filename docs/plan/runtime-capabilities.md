@@ -25,6 +25,13 @@
 
 - [ ] 普通第三方MCP按自身契约显示字段，不自动成为Memory Provider。
 
+## 后续：跨宿主Workspace MCP（不阻塞Phase 5.5）
+
+- [ ] 设计第一方`vera.workspace` MCP，由Workspace宿主执行受Execution租约、Account权限与Workspace policy约束的文件、Git和进程工具。
+- [ ] 工具调用绑定可信`agentId + accountId + runId + workspaceRevision`，tool schema不允许调用方自选宿主路径或扩大Account范围。
+- [ ] 完成远程工具隔离、取消、审批、审计、并发租约与宿主离线失败语义；不得通过SSH旁路或复制Workspace冒充远程执行。
+- [ ] 上述契约与黑盒验收完成后，另行冻结非owner登录、`delegated:true`与临时代上线授权；在此之前`vera.workspace`不注册、非owner固定`delegation_unavailable`。
+
 ## Data
 
 - [ ] Digest/Dream的executor、task model、trigger/schedule与Provider能力只由Data → Memory保存。

@@ -38,9 +38,9 @@
 | [`federation-account.md`](federation-account.md) | Account固定owner、Space Seat、Execution、Workspace与消息展示迁移 |
 | [`federation-security.md`](federation-security.md) | AgentState、Account presence、Agent token、Account Key与owner identity |
 | [`federation-runtime.md`](federation-runtime.md) | `/api/agent/*`、调度器、daemon、mock daemon |
-| [`federation-deployment.md`](federation-deployment.md) | VPS、Tailscale Serve、数据迁移、本机清理与真实模型复验 |
+| [`federation-deployment.md`](federation-deployment.md) | gateway/daemon/Workspace/Memory跨宿主部署、Tailscale Serve、备份与真实模型复验 |
 | [`native-clients.md`](native-clients.md) | Capacitor共享平台、Android壳与iOS壳 |
-| [`runtime-capabilities.md`](runtime-capabilities.md) | Agent使用管理双入口与分页、Skills / Hooks / MCP / Data前端目录、内置binding接线与后续运行时闭环 |
+| [`runtime-capabilities.md`](runtime-capabilities.md) | Skills / Hooks / MCP / Data运行时闭环，以及未来`vera.workspace` MCP与代上线开发路径 |
 | [`extensions.md`](extensions.md) | Extension Package、Agent Plugin、Space Module与Memory Provider扩展 |
 | [`native-release.md`](native-release.md) | Android release、iOS archive与三端最终回归 |
 

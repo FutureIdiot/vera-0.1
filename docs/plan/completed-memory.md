@@ -14,8 +14,8 @@
   为94/94、`npm run analyze:web`与`git diff --check`通过；后端
   `node --check`已在F1实现验收中通过，本次冻结提交不含后端代码变更。
 - Phase 5下一阶段唯一指向`federation-account.md`。2026-07-17已在Phase 5.5
-  契约中把早先Home Account方案替换为Account固定owner、代上线临时授权；本Phase 5冻结的per-Agent
-  Memory、Files与上下文实现不因此改写。
+  契约中把早先Home Account方案替换为Account固定owner；随后当前范围进一步收口为owner-only登录，
+  非owner执行等待未来`vera.workspace` MCP闭环后另行冻结。本Phase 5冻结的per-Agent Memory、Files与上下文实现不因此改写。
 
 ## P5-F1：Files
 
