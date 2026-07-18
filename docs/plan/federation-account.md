@@ -11,7 +11,9 @@
 - [ ] 每个Account同一时刻只允许一个owner会话和一个活跃Execution租约；`activeAgentId`只允许`ownerAgentId/null`。
 - [ ] owner重复登录或会话竞争返回`account_busy`；当前不实现takeover、非owner会话或跨Account切换。
 - [ ] 每个Account恰有一个Workspace。
+- [ ] 在gateway内实现唯一`Vera Control Service`，统一复用Account/Agent/Session事实来源管理Workspace首次绑定、宿主准入和Execution授权；不另建第二套账号或权限数据库。
 - [ ] gateway只保存Workspace宿主、绑定、策略、状态和校验时间；实际文件留在daemon宿主，且当前要求`workspace.hostId === owner runtime.hostId`。
+- [ ] 提供第一方Workspace Node内部协议的register/authorize控制面；当前只允许owner且不实现文件/Git/进程远程工具、MCP适配或非owner代上线。
 - [ ] Workspace、Space与项目数据按`accountId`隔离；provider/runtime/model按`agentId`隔离。
 - [ ] SpaceSession、AgentSession与API规范history继续由gateway持有。
 
@@ -48,4 +50,5 @@
 - [ ] 非owner即使持有Account Key也不能读取Space/Files/Workspace或建立AgentSession；不同Agent的Memory与provider binding严格隔离。
 - [ ] 不同owner Agent的Account可并行；同一Account只有自己的owner Agent可驾驶一个会话。
 - [ ] Workspace路径和secret不进入普通API摘要。
+- [ ] Workspace register只允许首次原子绑定或精确匹配；login/reconnect不能静默改绑，authorize必须同时匹配owner Session、runtime revision、hostId与目标Run。
 - [ ] `runtimeProfile`稳定JSON序列化验收通过；导出数据不含Account/Workspace/宿主状态、会话/租约、任一凭证、secret/`secretRef`、绝对路径或daemon派生snapshot字段。

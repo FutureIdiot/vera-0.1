@@ -72,6 +72,8 @@ Vera是单用户、自部署的多agent协作空间。
 - MCP或第三方Hook是否需要额外执行者由该unit自己的契约声明，不把`executorAgentId`设为所有Hook的强制公共字段。gateway内置的确定性Hook直接由gateway程序执行，不展示执行Agent或模型选择。需要模型的领域任务在自身Data配置中指定任务模型，不把模型选择扩张成所有MCP/Hook单元的通用字段
 - Gateway、Agent daemon、Workspace与Memory Provider可部署在不同机器；每台执行宿主以稳定`hostId`登记，gateway只保存路由、绑定、策略、状态与校验信息，不把任一宿主绝对路径当成跨设备可用数据。
 - Phase 5.5当前Workspace必须与owner Agent daemon位于同一`hostId`；实际文件留在该宿主，gateway不复制项目内容。跨宿主挂载与远程Workspace执行均不在当前闭环，宿主不匹配明确`workspace_unavailable`。
+- Phase 5.5现在建立gateway内的唯一`Vera Control Service`：统一负责Agent/Account重新授权、进程内Account Session、Workspace宿主准入与Execution权限判定。它与gateway共用事实来源和HTTP入口，不另建第二套账号、Key或权限数据库。
+- Workspace宿主后续以稳定`hostId`接入Control Service并执行实际文件/Git/进程操作；Control Service只决定“谁可在何次Execution访问哪个Workspace”，不读取、代理保存或备份宿主正文。第一方Workspace Node协议是权威内部协议，未来`vera.workspace` MCP只能作为该协议的适配入口，不能成为身份或授权事实来源。
 - 换Account Key不改变owner；换provider/model改的是Agent runtime；改变Memory Provider placement或Workspace宿主必须走各自显式迁移，不能随登录静默移动数据。
 - CLI供应商示例：Claude Code、Codex、OpenCode等；调用路径示例：build路径、`opencode go`
 - API/CLI provider连接都由Agent runtime承载。当前Phase 5进程内实现仍暂借Account字段承载Ollama/Codex连接，这是Phase 5.5必须一次迁移并删除的旧形态，不是目标契约。
@@ -279,6 +281,8 @@ Account的项目与执行数据边界。
 - 每个Account恰有一个Workspace；Workspace绑定以`accountId`隔离。provider/runtime属于Agent；AgentSession同时引用Account与实际Agent
 - 实际项目文件位于`workspace.hostId`宿主，gateway只保存绑定、策略、状态和校验信息；gateway宿主不因承担控制面而自动复制或索引Workspace正文
 - Phase 5.5当前要求`workspace.hostId === owner Agent runtime.hostId`，Execution只访问自己的Account Workspace；宿主不匹配明确`workspace_unavailable`
+- gateway内的`Vera Control Service`是Workspace绑定、节点准入和Execution授权的唯一权威。Workspace Node只能在有效Agent Token与Account Session对应的owner Execution下接入；当前`executingAgentId`必须等于`ownerAgentId`，因此服务边界落地不等于开放代上线
+- Control Service和Workspace Node使用第一方内部协议；协议必须能被同机函数调用或私网HTTP承载，不依赖MCP。未来MCP适配层只能把获准工具调用翻译到同一Execution授权，不能绕过Session、租约或Workspace策略
 - 未来开发目标是第一方`vera.workspace` MCP：由Workspace宿主执行受Execution租约约束的文件、Git与进程工具，使非owner Agent可在不复制项目、不SSH遥控的前提下跨宿主代上线。该MCP只是受租约约束的Workspace工具平面，不是Agent身份替换、Account授权旁路或owner改绑机制。该MCP、远程工具隔离与非owner登录当前均不实现，也不阻塞owner-only闭环
 
 **说明：**
