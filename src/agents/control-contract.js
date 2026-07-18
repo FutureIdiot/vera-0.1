@@ -152,6 +152,7 @@ export function accountResponse(store, account, agent, config, session = null) {
     agent: projectAgent(agent),
     account: projectAccount(account),
     accountSession: {
+      id: session?.record?.id ?? session?.id ?? null,
       ...(session?.token ? { token: session.token } : {}),
       gatewayBootId: session?.record?.gatewayBootId ?? session?.gatewayBootId ?? config.gatewayBootId,
     },

@@ -85,6 +85,7 @@ const controlService = createControlService({
   config,
   agentStates,
   memoryConfigService: memoryConfig,
+  hub,
 });
 const memory = createMemoryVault({
   vaultPath: config.memory.vaultPath,

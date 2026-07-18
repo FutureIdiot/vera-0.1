@@ -16,7 +16,10 @@ import {
   projectWorkspace,
   refreshWorkspaceBinding,
 } from "../spaces/workspace-control.js";
-import { releaseAccountExecutions } from "../spaces/execution-control.js";
+import {
+  authorizeDaemonExecution,
+  releaseAccountExecutions,
+} from "../spaces/execution-control.js";
 import {
   accountResponse,
   invalid,
@@ -49,7 +52,7 @@ function requireAgent(store, agentId) {
 }
 
 
-export function createControlService({ store, config, memoryConfigService = null, agentStates = null }) {
+export function createControlService({ store, config, memoryConfigService = null, agentStates = null, hub = null }) {
   const credentials = createAgentCredentialStore({ tokensPath: config.agentDaemon.tokensPath });
   const sessions = createAccountSessionService();
   let mutationTail = Promise.resolve();
@@ -223,7 +226,7 @@ export function createControlService({ store, config, memoryConfigService = null
     });
   }
 
-  async function authenticateSession(body, headers) {
+  async function authenticateAccountSession(body, headers) {
     if (headerValue(headers, "x-vera-account-key")) {
       invalid("Account Key is not accepted on a Session-authenticated endpoint");
     }
@@ -232,7 +235,7 @@ export function createControlService({ store, config, memoryConfigService = null
     const daemonBootId = body.daemonBootId === undefined ? undefined : requiredText(body.daemonBootId, "daemonBootId");
     const account = requireAccount(store, accountId);
     accountOwnerOrDelegation(account, agent.id);
-    const session = sessions.authenticate({
+    const sessionRecord = sessions.authenticate({
       token: headerValue(headers, "x-vera-account-session"),
       agentId: agent.id,
       accountId,
@@ -240,13 +243,14 @@ export function createControlService({ store, config, memoryConfigService = null
       accessKeyVersion: account.accessKeyVersion,
       daemonBootId,
     });
+    const { tokenHash, ...session } = sessionRecord;
     return { account, agent, session };
   }
 
   async function registerWorkspace(body, headers) {
     const input = validateRegisterBody(body);
     return serialized(async () => {
-      const { account, agent, session } = await authenticateSession(input, headers);
+      const { account, agent, session } = await authenticateAccountSession(input, headers);
       if (input.runtimeRevision !== agent.runtimeRevision || input.runtimeRevision !== session.runtimeRevision) {
         throw new ApiError("workspace_unavailable", "runtimeRevision does not match the active Agent runtime");
       }
@@ -262,33 +266,27 @@ export function createControlService({ store, config, memoryConfigService = null
 
   async function authorizeWorkspace(body, headers) {
     const input = validateAuthorizeBody(body);
-    const { account, agent, session } = await authenticateSession(input, headers);
-    if (input.runtimeRevision !== agent.runtimeRevision || input.runtimeRevision !== session.runtimeRevision) {
-      throw new ApiError("workspace_unavailable", "runtimeRevision does not match the active Agent runtime");
-    }
-    if (account.workspace?.hostId !== input.workspaceHostId || session.runtimeHostId !== input.workspaceHostId) {
-      throw new ApiError("workspace_unavailable", "Workspace host is not admitted for this Account");
-    }
-    assertWorkspaceAvailable(account.workspace);
-    const run = store.find("runs", input.runId);
-    if (!run || !["pending", "running"].includes(run.status)) {
-      throw new ApiError("conflict", "Execution is not pending or running");
-    }
-    if (run.accountId !== account.id || run.agentId !== agent.id || run.runtimeRevision !== input.runtimeRevision || run.delegated === true) {
-      throw new ApiError("forbidden", "Execution does not match the owner Account Session");
-    }
-    const otherActiveRun = store.list("runs").some((candidate) =>
-      candidate.accountId === account.id && candidate.id !== run.id && ["pending", "running"].includes(candidate.status));
-    if (otherActiveRun) throw new ApiError("account_busy", "Account has another active Execution");
-    return {
-      execution: {
-        runId: run.id,
-        accountId: run.accountId,
-        agentId: run.agentId,
+    return serialized(async () => {
+      const { account, agent, session } = await authenticateAccountSession(input, headers);
+      if (input.runtimeRevision !== agent.runtimeRevision || input.runtimeRevision !== session.runtimeRevision) {
+        throw new ApiError("workspace_unavailable", "runtimeRevision does not match the active Agent runtime");
+      }
+      if (account.workspace?.hostId !== input.workspaceHostId || session.runtimeHostId !== input.workspaceHostId) {
+        throw new ApiError("workspace_unavailable", "Workspace host is not admitted for this Account");
+      }
+      assertWorkspaceAvailable(account.workspace);
+      const result = authorizeDaemonExecution({
+        store,
+        hub,
+        runId: input.runId,
+        account,
+        agent,
+        session,
         workspaceHostId: input.workspaceHostId,
-        runtimeRevision: run.runtimeRevision,
-      },
-    };
+        runtimeRevision: input.runtimeRevision,
+      });
+      return { execution: result.execution };
+    });
   }
 
   async function logout(accountId, headers) {
@@ -325,6 +323,7 @@ export function createControlService({ store, config, memoryConfigService = null
     gatewayBootId: sessions.bootId,
     enroll,
     login,
+    authenticateAccountSession,
     registerWorkspace,
     authorizeWorkspace,
     logout,

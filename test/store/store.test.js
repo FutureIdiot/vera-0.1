@@ -64,6 +64,37 @@ test("persists split files to the data dir and reloads on next createStore call"
   });
 });
 
+test("loading an old Run backfills gateway-local execution fields idempotently", async () => {
+  await withTempDataDir(async (dataPath) => {
+    const store = await createStore({ dataPath, debounceMs: 1 });
+    store.insert("runs", { id: "run_legacy", status: "completed", createdAt: "2026-07-01T00:00:00.000Z" });
+    await store.close();
+
+    const reloaded = await createStore({ dataPath, debounceMs: 1 });
+    assert.deepEqual(
+      (({ _seq, ...run }) => run)(reloaded.find("runs", "run_legacy")),
+      {
+        id: "run_legacy",
+        status: "completed",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        executionTransport: "gateway-local",
+        accountSessionId: null,
+        executionLeaseId: null,
+        workspaceHostId: null,
+        leaseAcquiredAt: null,
+      },
+    );
+    await reloaded.close();
+
+    const replayed = await createStore({ dataPath, debounceMs: 1 });
+    assert.deepEqual(
+      (({ _seq, ...run }) => run)(replayed.find("runs", "run_legacy")),
+      (({ _seq, ...run }) => run)(reloaded.find("runs", "run_legacy")),
+    );
+    await replayed.close();
+  });
+});
+
 test("legacy sessionState accessors are removed after P5-C1", async () => {
   await withTempDataDir(async (dataPath) => {
     const store = await createStore({ dataPath, debounceMs: 10 });

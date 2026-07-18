@@ -101,6 +101,11 @@ export function executeRun({
     triggerMessageId: triggerMessage.id,
     replyMessageIds: [],
     status: "pending",
+    executionTransport: "gateway-local",
+    accountSessionId: null,
+    executionLeaseId: null,
+    workspaceHostId: null,
+    leaseAcquiredAt: null,
     createdAt: new Date().toISOString(),
     endedAt: null,
   };
@@ -229,6 +234,11 @@ export function executeRun({
       throw error;
     }
 
+    const competingRun = store.list("runs").find((candidate) =>
+      candidate.accountId === account.id && candidate.id !== storedRun.id && candidate.status === "running");
+    if (competingRun) {
+      throw new ApiError("account_busy", "Account has another active Execution");
+    }
     const running = store.update("runs", storedRun.id, {
       status: "running",
       contextGeneration: activeAgentSession.generation,

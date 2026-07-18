@@ -161,6 +161,10 @@ test("Run pending -> running freezes space, session, agent, and account identifi
 
     assert.equal(run.status, "pending");
     assert.deepEqual(
+      [run.executionTransport, run.accountSessionId, run.executionLeaseId, run.workspaceHostId, run.leaseAcquiredAt],
+      ["gateway-local", null, null, null, null],
+    );
+    assert.deepEqual(
       [run.spaceSessionId, run.agentSessionId, run.contextGeneration, run.agentId, run.accountId],
       [spaceSession.id, agentSession.id, 1, agent.id, account.id],
     );
@@ -572,5 +576,34 @@ test("prompt compilation failure ends the pending Run without entering Agent wor
     assert.doesNotMatch(JSON.stringify(ended.data.run.error), /private|secret|path/u);
     assert.equal(adapterCalled, false);
     assert.deepEqual(states, []);
+  });
+});
+
+test("gateway-local Run cannot overlap an active daemon lease", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
+    store.insert("runs", {
+      id: "run_daemon_active",
+      accountId: account.id,
+      agentId: agent.id,
+      runtimeRevision: agent.runtimeRevision,
+      delegated: false,
+      executionTransport: "daemon",
+      accountSessionId: "acs_active",
+      executionLeaseId: "exl_active",
+      workspaceHostId: "host_active",
+      leaseAcquiredAt: new Date().toISOString(),
+      status: "running",
+    });
+    let adapterCalled = false;
+    const run = executeRun({
+      store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+      triggerMessage: insertMessage(),
+      adapter: { async run() { adapterCalled = true; return { content: "unexpected" }; } },
+    });
+    const ended = await waitFor(hub, (event) => event.type === "run.ended" && event.data.run.id === run.id);
+    assert.equal(ended.data.run.status, "failed");
+    assert.equal(ended.data.run.error.code, "account_busy");
+    assert.equal(adapterCalled, false);
+    assert.equal(store.find("runs", "run_daemon_active").status, "running");
   });
 });

@@ -77,6 +77,31 @@ function emptyData() {
   return data;
 }
 
+function normalizeRunExecutionFields(data, markDirty) {
+  let changed = false;
+  for (const run of data.runs) {
+    const historical = run.executionTransport === undefined || run.executionTransport === null;
+    const patch = {};
+    if (historical) {
+      patch.executionTransport = "gateway-local";
+      patch.accountSessionId = null;
+      patch.executionLeaseId = null;
+      patch.workspaceHostId = null;
+      patch.leaseAcquiredAt = null;
+    } else {
+      if (!("accountSessionId" in run)) patch.accountSessionId = null;
+      if (!("executionLeaseId" in run)) patch.executionLeaseId = null;
+      if (!("workspaceHostId" in run)) patch.workspaceHostId = null;
+      if (!("leaseAcquiredAt" in run)) patch.leaseAcquiredAt = null;
+    }
+    if (Object.keys(patch).length === 0) continue;
+    Object.assign(run, patch);
+    changed = true;
+  }
+  if (changed) markDirty("runs");
+  return changed;
+}
+
 export async function createStore({ dataPath, debounceMs = 200 } = {}) {
   if (!dataPath) throw new Error("createStore requires dataPath");
 
@@ -191,6 +216,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
       const plan = preflightFederationAccountMigration({ data });
       await migrateFederationAccounts({ data, markDirty, flush, plan });
     }
+    normalizeRunExecutionFields(data, markDirty);
     markAllDirty();
     await flush();
     delete data.sessionStates;
@@ -310,8 +336,10 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
       });
       await migrateFederationAccounts({ data, markDirty, flush, plan });
     }
+    const runsNormalized = normalizeRunExecutionFields(data, markDirty);
     if (sessionStates) await retireLegacySessionStatesFile(legacySessionStatesPath);
     delete data.sessionStates;
+    if (runsNormalized) await flush();
   }
 
   function assertCollection(name) {
