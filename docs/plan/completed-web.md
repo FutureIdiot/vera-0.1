@@ -24,7 +24,7 @@
 - System、Appearance、Paths、Control Center和Account/Memory管理已拆分。
 - Appearance支持预览、保存、按组恢复默认与Theme/Profile交换。
 - Path迁移使用校验→迁移→验证→回滚。
-- 旧Account组合页仍展示历史`1:N`形态，等待 `federation-account.md` 一次迁移。
+- F4当时的Account组合页展示历史`1:N`形态；底层身份与数据已在后续Phase 5.5基础切片一次迁移，当前Account详情/审计UI收口见 `federation-account.md`。
 
 ## F5：发布与性能冻结
 

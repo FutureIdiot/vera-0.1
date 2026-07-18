@@ -30,7 +30,7 @@
 - `GET/PATCH /api/settings`、运行时override和配置consumer基础已完成。
 - Phase 4当时实现的`Agent 1:N Account`与可变连接Account属于历史形态，已由下述Phase 5.5切片一次迁移，不再作为现行兼容层。
 
-## Phase 5.5：Account/Agent身份迁移切片
+## Phase 5.5：Account/Agent联邦基础切片
 
 - 2026-07-17完成严格`Account 1:1 owner Agent`迁移；预检发现1:N或冲突数据时在任何写入/备份前阻止启动，不复制Memory、不静默拆Agent。
 - Space Seat、定向目标、respondTo/block名单、消息展示身份和通知模式统一迁为Account；AgentSession使用`spaceSessionId + accountId + agentId`，Run冻结`accountId/agentId/runtimeRevision/effectiveModel/delegated`，为未来非owner代上线保留独立执行维度但当前不开放。
@@ -44,4 +44,5 @@
 - Control Service公开后续SSE/Run端点可复用的Account Session鉴权能力，但只返回去除Token hash的内部安全上下文；`accountSessionId/executionLeaseId`均不能替代Agent Token + Session Token认证。
 - 2026-07-18完成daemon本机凭证存储基础：`config.agentDaemon.secretsPath`默认`~/.vera/secrets.json`，`agentCredentials[agentId]`只持久化Agent Token与User选择保存的per-Account Key；严格拒绝符号链接、非`0600`文件及任意AccountSession字段，原子更新时保留其他顶层secretRef数据。AccountSession继续只存在于daemon/gateway当前进程；登录、心跳与授权控制面不调用模型。
 - 2026-07-18完成Memory Provider placement持久形状与存量登记：provider严格保存`providerId + placement + config`，独立v2迁移把Phase 5现存`vera.markdown`幂等登记为`gateway`且不触碰Memory正文；binding version包含placement，普通PATCH不能偷换宿主。非gateway placement在daemon driver接线前明确unavailable，HTTP Memory读写与新整理任务均在触碰gateway vault前拒绝，状态投影不返回绝对路径。新CLI的daemon默认绑定留给后续真实daemon首次login，既有gateway数据不静默改挂。
+- gateway-local Digest/Dream已按Memory owner与executor分离：任务从执行Agent的`runtimeProfile/runtimeBinding`冻结runtime revision和对应任务已验证模型，不读取Account兼容字段；Recall/Write仍是无executor的gateway确定性Hook。执行Agent、runtime、模型或资格失效时固定`memory_task_unavailable`且不fallback。
 - 本切片最新验收：`npm test`为307通过、3个显式opt-in跳过；固定`PORT=3210`临时gateway启动成功，`GET /api/health`返回200。

@@ -17,7 +17,7 @@
 
 ## 当前依赖顺序
 
-1. [~] [Account固定归属、凭证安全、Execution与Workspace迁移](federation-account.md)
+1. [~] [Account详情、Memory配置与Session安全收口](federation-account.md)
 2. [ ] [联邦状态、presence与owner入口边界](federation-security.md)
 3. [ ] [Agent daemon 与跨进程运行链路](federation-runtime.md)
 4. [ ] [VPS 私网部署与旧链路清理](federation-deployment.md)
@@ -35,7 +35,7 @@
 | [`memory-ui.md`](memory-ui.md) | Data → Memory完成记录入口；当前无未完成事项 |
 | [`files.md`](files.md) | Files完成记录入口；当前无未完成事项 |
 | [`phase-5-closeout.md`](phase-5-closeout.md) | Phase 5冻结记录入口；当前无未完成事项 |
-| [`federation-account.md`](federation-account.md) | Account固定owner、Agent Token/Account Key/进程内Session、Space Seat、Execution与Workspace迁移 |
+| [`federation-account.md`](federation-account.md) | Account详情/登录审计、Data → Memory配置与手动Digest、Session撤销终态及现有控制面安全收口 |
 | [`federation-security.md`](federation-security.md) | AgentState、Account presence、owner Tailscale identity与入口边界 |
 | [`federation-runtime.md`](federation-runtime.md) | `/api/agent/*`、调度器、daemon、mock daemon |
 | [`federation-deployment.md`](federation-deployment.md) | gateway/daemon/Workspace/Memory跨宿主部署、Tailscale Serve、备份与真实模型复验 |
@@ -48,7 +48,7 @@
 
 | 文件 | 内容 |
 |---|---|
-| [`completed-foundation.md`](completed-foundation.md) | Phase 0–4 基础，以及Phase 5.5已完成的Account/Agent身份迁移切片 |
+| [`completed-foundation.md`](completed-foundation.md) | Phase 0–4 基础，以及Phase 5.5已完成的身份、凭证、Workspace、Execution租约与Memory placement切片 |
 | [`completed-web.md`](completed-web.md) | F0–F5 Web共享核心、最终Shell语义与验收 |
 | [`completed-memory.md`](completed-memory.md) | 已冻结的完整Phase 5：Memory、上下文、Data UI、Files与X1验收 |
 

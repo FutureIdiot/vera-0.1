@@ -13,8 +13,7 @@
 
 ## Presence与离线消息
 
-- [ ] Account公开`presence/lastSeenAt/activeAgentId`；activeAgentId来自会话，不是所有权。
-- [ ] daemon登录/离线发布`account.presence.updated`；`activeAgentId`只允许owner或null。
+- [ ] daemon登录/离线发布`account.presence.updated`，并保持已落地的`presence/lastSeenAt/activeAgentId`形状；`activeAgentId`只允许owner或null。
 - [ ] @离线Account时不创建Run；时间线写入`account-offline`错误Activity。
 - [ ] Account重新上线后不补发离线期间错过的@。
 

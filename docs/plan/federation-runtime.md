@@ -6,7 +6,7 @@
 
 ## Gateway路由与调度
 
-- [ ] 复用`federation-account.md`已完成的`enroll/login/Account Session`凭证层；本任务不复制认证逻辑。
+- [ ] `/api/agent/events`及全部Run/AgentSession范围端点直接复用`federation-account.md`已完成的`authenticateAccountSession`；只接受Agent Token + Account Session Token，不复制认证逻辑、不重新校验Account Key。
 - [ ] daemon启动生成`daemonBootId`并以Account Key重新授权；同一进程普通HTTP/SSE重连只发送Account Session Token，不在login时取得具体Execution租约。
 - [ ] Space主Run从seat Account解析当前activeAgentId，冻结模型后创建pending Execution。
 - [ ] CLI input只含`promptText + providerBinding?`；API input只含`messages + historyVersion?`。
@@ -27,10 +27,8 @@
 
 ## Memory任务通道
 
-- [ ] 在 `docs/adapter-interface.md` 先冻结Digest/Dream专用request/result通道。
-- [ ] 通道包含取消、超时、安全摘要、无Account的`memoryTaskSnapshot`和无fallback语义。
-- [ ] 不复用聊天Run、Message、Activity、AgentSession或provider binding。
-- [ ] payload不携带executor的Memory、system prompt、Workspace、Tools、connection或secret。
+- [ ] 按`docs/adapter-interface.md`已冻结的边界实现Digest/Dream专用request/result通道：包含取消、超时、安全摘要、无Account的`memoryTaskSnapshot`和无fallback语义，不复用聊天Run、Message、Activity、AgentSession或provider binding。
+- [ ] Memory task payload不携带executor的Memory、system prompt、Workspace、Tools、connection或secret；daemon只按冻结runtime指纹和taskModel执行，不自行选择Account、Agent或模型。
 - [ ] 迁移验收完成前不退役进程内Memory task adapter。
 
 ## Mock与验证
@@ -39,4 +37,5 @@
 - [ ] 覆盖同一boot普通重连不发送Account Key，以及gateway/daemon boot变化后`account_reauthentication_required`→Key重新授权。
 - [ ] 覆盖API bounded messages→api-result CAS→completed，并证明完整history只在gateway。
 - [ ] 覆盖compact、history conflict、isolated subagent、owner Account logout、Key轮换和租约释放。
+- [ ] 覆盖所有新增SSE/Run端点的三凭证隔离、非owner拒绝与日志/SSE/持久化/错误响应无明文凭证；Account Key不得出现在普通重连或任何Run请求。
 - [ ] gateway内部一致性测试保留现有mock adapter。

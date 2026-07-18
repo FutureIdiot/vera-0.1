@@ -236,6 +236,7 @@ Account摘要。请求不接受`takeover/reason`。
 gateway或daemon进程重启、显式登出、Key轮换/撤销或安全撤销后必须用Key模式重新授权。新daemon boot以Key
 重建同一owner Session时，旧Session已离线且无在飞Execution才可替换；旧Session仍在线或持有Execution则返回
 409 `account_busy`。这不是跨Agent takeover。
+User显式轮换/撤销Key或触发安全撤销时，旧Session立即失效，gateway按API契约把关联pending/running Run终态化为`failed/account_session_revoked`并释放租约；daemon随后对旧Run的任何消息、delta、Activity、Approval、binding、api-result或终态上报都按失效Session拒绝。普通重复登录不能调用这条撤销路径实施takeover。
 
 `runtime`描述实际Agent而不是Account。gateway验证其与Agent已登记runtime profile兼容，
 更新安全revision摘要；这些登录字段是daemon派生的runtime snapshot，不写回或混入可导出`runtimeProfile`。`runtime.hostId`是该执行宿主稳定标识，provider secret、CLI路径及原始配置不得上送。
@@ -277,6 +278,7 @@ Key模式成功后gateway生成高熵Account Session Token与非秘密`accountSe
 
 gateway把Account置`online`、写`activeAgentId=ownerAgentId`和`lastSeenAt`，广播
 `account.presence.updated`。同一daemon只登录该Agent自己的owner Account；每次登录只对应一个Workspace与租约。
+`enroll/login`及同Session续连的成功或拒绝都由Control Service写入Account有界登录审计；只记录API契约冻结的安全字段，不记录请求header、Key/Token/hash/fingerprint、两端boot id、Workspace路径或provider连接。daemon不上传或持有第二份审计。
 
 ### 2.2 SSE 订阅
 
@@ -338,6 +340,7 @@ Authorization: Bearer <vera-agent-token>
 gateway把指定Account的presence置`offline`、释放Execution租约并保留AgentSessions与CLI provider bindings。daemon再上线时只取回该`agentId + accountId` pair可恢复的CLI bindings；API history始终留在gateway。
 
 登出请求必须携带Agent Token + Account Session Token。登出按owner Account会话进行并销毁该Session Token；同一daemon同一时刻只允许这一Account会话。再次上线必须以Account Key重新授权。登出不改变Agent身份、Memory Provider placement或runtime。
+显式登出、Key轮换/撤销或安全撤销使Session失效时，gateway按API契约把该Account全部在飞Run及其Message/Activity/Approval安全终态化为`account_session_revoked`并释放租约；daemon不得继续上报旧Run，也不得用新Session认领它们。
 
 ### 2.5 失联与自杀（防 token 烧穿）
 
