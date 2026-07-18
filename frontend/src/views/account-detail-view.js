@@ -88,6 +88,14 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
   workspaceFacts.className = "vera-agent-info-panel";
   workspace.append(workspaceTitle, workspaceFacts);
 
+  const spaces = document.createElement("section");
+  spaces.className = "vera-management-section";
+  const spacesTitle = document.createElement("h2");
+  spacesTitle.textContent = "参与的 Space";
+  const spacesList = document.createElement("div");
+  spacesList.className = "vera-account-grid";
+  spaces.append(spacesTitle, spacesList);
+
   const audit = document.createElement("section");
   audit.className = "vera-management-section";
   const auditTitle = document.createElement("h2");
@@ -96,7 +104,7 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
   auditList.className = "vera-account-grid";
   audit.append(auditTitle, auditList);
 
-  content.append(feedback, identity, access, workspace, audit);
+  content.append(feedback, identity, access, workspace, spaces, audit);
   root.appendChild(content);
 
   function findAgent(id) {
@@ -126,6 +134,35 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
       infoRow("宿主", workspaceValue?.hostId ?? "—"),
       infoRow("最近校验", formatTime(workspaceValue?.lastValidatedAt)),
     );
+    const activeSpaces = (runtime.getBootstrap().spaces ?? []).filter((space) =>
+      space.archivedAt == null
+      && Array.isArray(space.seats)
+      && space.seats.some((seat) => seat.accountId === account.id));
+    spacesList.replaceChildren();
+    if (!activeSpaces.length) spacesList.appendChild(createNotice("当前没有参与 active Space。"));
+    for (const space of activeSpaces) {
+      const seat = space.seats.find((candidate) => candidate.accountId === account.id);
+      const card = document.createElement("article");
+      card.className = "vera-management-card";
+      const actions = document.createElement("div");
+      actions.className = "vera-form-actions";
+      const open = document.createElement("a");
+      open.className = "vera-text-button";
+      open.href = `#/spaces/${encodeURIComponent(space.id)}`;
+      open.textContent = "进入 Space";
+      const settings = document.createElement("a");
+      settings.className = "vera-text-button";
+      settings.href = `#/spaces/${encodeURIComponent(space.id)}/settings`;
+      settings.textContent = "Space 设置";
+      actions.append(open, settings);
+      card.append(
+        infoRow("名称", space.name ?? "未命名 Space"),
+        infoRow("主题", space.topic || "—"),
+        infoRow("响应模式", seat?.responseMode ?? "default"),
+        actions,
+      );
+      spacesList.appendChild(card);
+    }
     const entries = Array.isArray(detail?.recentLogins) ? detail.recentLogins : [];
     auditList.replaceChildren();
     if (!entries.length) auditList.appendChild(createNotice("还没有登录记录。"));

@@ -7,6 +7,7 @@ import { createStore } from "../../src/store/store.js";
 import { createEventHub } from "../../src/api/sse.js";
 import { AdapterError } from "../../src/core/errors.js";
 import { executeRun, recoverInterruptedRuns } from "../../src/spaces/run-controller.js";
+import { releaseAccountExecutions } from "../../src/spaces/execution-control.js";
 import { getActiveContext } from "../../src/spaces/context-sessions.js";
 import { getTimeline } from "../../src/spaces/timeline.js";
 import {
@@ -194,6 +195,53 @@ test("Run pending -> running freezes space, session, agent, and account identifi
     assert.equal(ended.data.run.status, "completed");
     assert.equal(ended.data.run.spaceSessionId, spaceSession.id);
     assert.equal(ended.data.run.agentSessionId, agentSession.id);
+  });
+});
+
+test("Account Session revocation wins the adapter abort race and publishes one failed terminal Run", async () => {
+  await fixture(async ({ store, hub, agent, account, space, spaceSession, agentSession, insertMessage }) => {
+    const triggerMessage = insertMessage();
+    const captured = captureEvents(hub);
+    const adapter = {
+      async run(ctx) {
+        ctx.onDelta("partial");
+        await new Promise((resolve) => ctx.signal.addEventListener("abort", resolve, { once: true }));
+        ctx.onDelta("late");
+        ctx.onActivity({ callId: "late", phase: "tool", toolStatus: "running" });
+        assert.equal(await ctx.requestApproval({ prompt: "late approval" }), "deny");
+        throw new AdapterError("cancelled", "adapter observed revocation abort");
+      },
+    };
+    try {
+      const created = waitFor(hub, (event) => event.type === "message.created");
+      const run = executeRun({
+        store, hub, config: CONFIG, agent, account, space, spaceSession, agentSession,
+        triggerMessage, adapter,
+      });
+      await created;
+      releaseAccountExecutions(store, account.id, {
+        hub,
+        now: () => "2026-07-18T12:00:00.000Z",
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const terminal = store.find("runs", run.id);
+      assert.equal(terminal.status, "failed");
+      assert.equal(terminal.endedAt, "2026-07-18T12:00:00.000Z");
+      assert.deepEqual(terminal.error, {
+        code: "account_session_revoked",
+        message: "Account Session was revoked",
+      });
+      assert.equal(store.list("messages").find((message) => message.runId === run.id).status, "failed");
+      assert.equal(store.list("messages").find((message) => message.runId === run.id).content, "partial");
+      assert.equal(store.list("activities").some((activity) => activity.runId === run.id), false);
+      assert.equal(store.list("approvals").some((approval) => approval.runId === run.id), false);
+      const ended = captured.events.filter((event) => event.type === "run.ended" && event.data.run.id === run.id);
+      assert.equal(ended.length, 1);
+      assert.equal(ended[0].data.run.error.code, "account_session_revoked");
+    } finally {
+      captured.unsubscribe();
+    }
   });
 });
 

@@ -2,6 +2,8 @@
 
 import { ApiError } from "../core/errors.js";
 import { newExecutionLeaseId } from "../core/id.js";
+import { expirePendingApprovalsForRun } from "./approvals.js";
+import { cancelRun } from "./run-controller.js";
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
@@ -83,24 +85,36 @@ export function authorizeDaemonExecution({
   return { execution: executionSummary(claimed), claimed: true };
 }
 
-export function releaseAccountExecutions(store, accountId) {
-  const endedAt = new Date().toISOString();
+export function releaseAccountExecutions(store, accountId, { hub = null, now = () => new Date().toISOString() } = {}) {
+  const endedAt = now();
   for (const run of store.list("runs")) {
     if (run.accountId !== accountId || !["pending", "running"].includes(run.status)) continue;
-    store.update("runs", run.id, {
-      status: "failed",
-      endedAt,
-      error: { code: "internal", message: "Account Session was revoked" },
-    });
+    cancelRun(run.id);
+    const replyMessages = store.list("messages").filter((message) => message.runId === run.id);
     for (const message of store.list("messages")) {
       if (message.runId === run.id && message.status === "streaming") {
-        store.update("messages", message.id, { status: "failed" });
+        const updated = store.update("messages", message.id, { status: "failed" });
+        hub?.publish("message.completed", { message: stripInternal(updated) });
       }
     }
-    for (const approval of store.list("approvals")) {
-      if (approval.runId === run.id && approval.status === "pending") {
-        store.update("approvals", approval.id, { status: "expired", answer: "deny" });
+    for (const activity of store.list("activities")) {
+      if (activity.runId === run.id && ["pending", "running"].includes(activity.toolStatus)) {
+        const updated = store.update("activities", activity.id, {
+          phase: "error",
+          toolStatus: "failed",
+          detail: "Account Session was revoked",
+          updatedAt: endedAt,
+        });
+        hub?.publish("activity.updated", { activity: stripInternal(updated) });
       }
     }
+    expirePendingApprovalsForRun(store, hub, run.id);
+    const failed = store.update("runs", run.id, {
+      status: "failed",
+      endedAt,
+      replyMessageIds: [...new Set([...(run.replyMessageIds ?? []), ...replyMessages.map((message) => message.id)])],
+      error: { code: "account_session_revoked", message: "Account Session was revoked" },
+    });
+    hub?.publish("run.ended", { run: stripInternal(failed) });
   }
 }

@@ -394,6 +394,11 @@ export function executeRun({
 
   async function finishRunning({ status, error, bubbles }) {
     abortControllers.delete(storedRun.id);
+    const current = store.find("runs", storedRun.id);
+    if (!current || !["pending", "running"].includes(current.status)) {
+      agentStates?.setIdle(agent.id);
+      return;
+    }
     expirePendingApprovalsForRun(store, hub, storedRun.id);
     agentStates?.setIdle(agent.id);
     const code = controller.signal.aborted ? "cancelled" : error?.code;

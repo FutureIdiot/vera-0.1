@@ -7,6 +7,8 @@ import { projectAgent } from "./agents.js";
 import { ensureUnitBindings } from "./unit-bindings.js";
 import {
   projectAccount,
+  revokeAccountAccessKey,
+  rotateAccountAccessKey,
   verifyAccountAccessKey,
 } from "./accounts.js";
 import { createAgentCredentialStore, bearerToken, headerValue } from "./credentials.js";
@@ -56,12 +58,38 @@ function requireAgent(store, agentId) {
 export function createControlService({ store, config, memoryConfigService = null, agentStates = null, hub = null }) {
   const credentials = createAgentCredentialStore({ tokensPath: config.agentDaemon.tokensPath });
   const sessions = createAccountSessionService();
-  let mutationTail = Promise.resolve();
+  const mutationTails = new Map();
 
-  function serialized(task) {
-    const next = mutationTail.catch(() => {}).then(task);
-    mutationTail = next;
+  function serialized(accountId, task) {
+    const previous = mutationTails.get(accountId) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(task);
+    const tail = next.catch(() => {});
+    mutationTails.set(accountId, tail);
+    void tail.finally(() => {
+      if (mutationTails.get(accountId) === tail) mutationTails.delete(accountId);
+    });
     return next;
+  }
+
+  function revokeAccountSessionState(accountId) {
+    sessions.invalidateAccountSessions(accountId);
+    releaseAccountExecutions(store, accountId, { hub });
+    const timestamp = new Date().toISOString();
+    const account = requireAccount(store, accountId);
+    const updated = store.update("accounts", accountId, {
+      presence: "offline",
+      activeAgentId: null,
+      runtimeCapabilities: null,
+      lastSeenAt: timestamp,
+      updatedAt: timestamp,
+    });
+    hub?.publish("account.presence.updated", {
+      accountId,
+      presence: "offline",
+      lastSeenAt: updated.lastSeenAt,
+      activeAgentId: null,
+    });
+    return updated;
   }
 
   function attributableAccountId(bodyOrAccountId) {
@@ -154,7 +182,7 @@ export function createControlService({ store, config, memoryConfigService = null
       attempt.accountId = attributableAccountId(input.accountId);
       const accessKey = bearerToken(headers);
       if (!accessKey) throw new ApiError("unauthorized", "Account Key is required");
-      return serialized(async () => {
+      return serialized(input.accountId, async () => {
         const account = requireAccount(store, input.accountId);
         if (!verifyAccountAccessKey(account, accessKey)) {
           throw new ApiError("unauthorized", "Account Key is not valid");
@@ -215,7 +243,7 @@ export function createControlService({ store, config, memoryConfigService = null
       if (!hasKey && !hasSession) reauth();
       const { identity, agent } = await authenticateAgent(headers);
       attempt.agentId = agent.id;
-      return serialized(async () => {
+      return serialized(input.accountId, async () => {
         const account = requireAccount(store, input.accountId);
         accountOwnerOrDelegation(account, agent.id);
         if (hasKey) {
@@ -304,7 +332,7 @@ export function createControlService({ store, config, memoryConfigService = null
 
   async function registerWorkspace(body, headers) {
     const input = validateRegisterBody(body);
-    return serialized(async () => {
+    return serialized(input.accountId, async () => {
       const { account, agent, session } = await authenticateAccountSession(input, headers);
       if (input.runtimeRevision !== agent.runtimeRevision || input.runtimeRevision !== session.runtimeRevision) {
         throw new ApiError("workspace_unavailable", "runtimeRevision does not match the active Agent runtime");
@@ -324,7 +352,7 @@ export function createControlService({ store, config, memoryConfigService = null
 
   async function authorizeWorkspace(body, headers) {
     const input = validateAuthorizeBody(body);
-    return serialized(async () => {
+    return serialized(input.accountId, async () => {
       const { account, agent, session } = await authenticateAccountSession(input, headers);
       if (input.runtimeRevision !== agent.runtimeRevision || input.runtimeRevision !== session.runtimeRevision) {
         throw new ApiError("workspace_unavailable", "runtimeRevision does not match the active Agent runtime");
@@ -357,7 +385,7 @@ export function createControlService({ store, config, memoryConfigService = null
         invalid("Account Key is not accepted on a Session-authenticated endpoint");
       }
       if (!sessionToken) reauth();
-      return serialized(async () => {
+      return serialized(accountId, async () => {
         const account = requireAccount(store, accountId);
         accountOwnerOrDelegation(account, agent.id);
         sessions.authenticate({
@@ -368,16 +396,40 @@ export function createControlService({ store, config, memoryConfigService = null
           accessKeyVersion: account.accessKeyVersion,
           daemonBootId: headerValue(headers, "x-vera-daemon-boot-id") || account.daemonBootId,
         });
-        sessions.invalidateAccountSessions(accountId);
-        releaseAccountExecutions(store, accountId);
-        store.update("accounts", accountId, {
-          presence: "offline",
-          activeAgentId: null,
-          runtimeCapabilities: null,
-          lastSeenAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
+        revokeAccountSessionState(accountId);
       });
+    });
+  }
+
+  function rotateAccessKey(accountId) {
+    return serialized(accountId, () => {
+      const result = rotateAccountAccessKey(store, accountId);
+      const agentId = result.account.activeAgentId;
+      const updated = revokeAccountSessionState(accountId);
+      recordAccountLoginAudit(store, {
+        accountId,
+        agentId,
+        event: "session_revoked",
+        result: "succeeded",
+        reasonCode: "access_key_rotated",
+      });
+      return { ...result, account: projectAccount(updated) };
+    });
+  }
+
+  function revokeAccessKey(accountId) {
+    return serialized(accountId, () => {
+      const account = revokeAccountAccessKey(store, accountId);
+      const agentId = account.activeAgentId;
+      const updated = revokeAccountSessionState(accountId);
+      recordAccountLoginAudit(store, {
+        accountId,
+        agentId,
+        event: "session_revoked",
+        result: "succeeded",
+        reasonCode: "access_key_revoked",
+      });
+      return { account: projectAccount(updated) };
     });
   }
 
@@ -389,9 +441,26 @@ export function createControlService({ store, config, memoryConfigService = null
     registerWorkspace,
     authorizeWorkspace,
     logout,
-    invalidateAccountSessions(accountId) {
-      sessions.invalidateAccountSessions(accountId);
-      releaseAccountExecutions(store, accountId);
+    rotateAccessKey,
+    revokeAccessKey,
+    invalidateAccountSessions(accountId, { reasonCode = null } = {}) {
+      if (reasonCode !== null && reasonCode !== "security_revoked") {
+        throw new TypeError("internal Account Session revocation reason is invalid");
+      }
+      return serialized(accountId, () => {
+        const agentId = store.find("accounts", accountId)?.activeAgentId ?? null;
+        const updated = revokeAccountSessionState(accountId);
+        if (reasonCode) {
+          recordAccountLoginAudit(store, {
+            accountId,
+            agentId,
+            event: "session_revoked",
+            result: "succeeded",
+            reasonCode,
+          });
+        }
+        return updated;
+      });
     },
     getSession(accountId) {
       return sessions.getAccountSession(accountId);

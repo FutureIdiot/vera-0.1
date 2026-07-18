@@ -17,7 +17,12 @@ export function createBubbleStream({
   const replyMessageIds = [];
   let current = null;
 
+  function acceptsOutput() {
+    return store.find("runs", runId)?.status === "running";
+  }
+
   function open(initialContent = "") {
+    if (!acceptsOutput()) return false;
     const now = new Date().toISOString();
     const message = {
       id: newMessageId(),
@@ -41,27 +46,33 @@ export function createBubbleStream({
     if (initialContent) {
       hub.publish("message.delta", { messageId: stored.id, spaceId, spaceSessionId, delta: initialContent });
     }
+    return true;
   }
 
   function close(finalText) {
     if (!current) return;
+    const authoritative = store.find("messages", current.id);
+    if (!acceptsOutput() || authoritative?.status !== "streaming") {
+      current = null;
+      return;
+    }
     const updated = store.update("messages", current.id, { content: finalText, status: "completed" });
     hub.publish("message.completed", { message: stripInternal(updated) });
     current = null;
   }
 
   function delta(text) {
-    if (!text) return;
+    if (!text || !acceptsOutput()) return;
     const completed = splitter.feed(text);
 
     if (completed.length === 0) {
-      if (!current) open();
+      if (!current && !open()) return;
       current = store.update("messages", current.id, { content: current.content + text });
       hub.publish("message.delta", { messageId: current.id, spaceId, spaceSessionId, delta: text });
       return;
     }
 
-    if (!current) open();
+    if (!current && !open()) return;
     close(completed[0]);
     for (let i = 1; i < completed.length; i += 1) {
       open();
@@ -76,6 +87,10 @@ export function createBubbleStream({
   // fallbackContent：adapter 允许不调 onDelta 只在返回值里给全文
   // （adapter-interface.md「run() 返回」），零 delta 时用它兜底产气泡。
   function finish(fallbackContent) {
+    if (!acceptsOutput()) {
+      current = null;
+      return;
+    }
     if (replyMessageIds.length === 0 && !splitter.peek() && fallbackContent) {
       delta(fallbackContent);
     }

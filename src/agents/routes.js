@@ -162,24 +162,21 @@ export function registerAgentRoutes(router, {
   router.post(
     "/api/accounts/:id/access-key/rotate",
     asHandler(async ({ res, params }) => {
-      const result = rotateAccountAccessKey(store, params.id);
-      const revokedAgentId = result.account.activeAgentId;
-      controlService?.invalidateAccountSessions(params.id);
-      store.update("accounts", params.id, {
-        presence: "offline",
-        activeAgentId: null,
-        runtimeCapabilities: null,
-        lastSeenAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-      recordAccountLoginAudit(store, {
-        accountId: params.id,
-        agentId: revokedAgentId,
-        event: "session_revoked",
-        result: "succeeded",
-        reasonCode: "access_key_rotated",
-      });
-      result.account = projectAccount(store.find("accounts", params.id));
+      let result;
+      if (controlService) result = await controlService.rotateAccessKey(params.id);
+      else {
+        result = rotateAccountAccessKey(store, params.id);
+        const revokedAgentId = result.account.activeAgentId;
+        store.update("accounts", params.id, {
+          presence: "offline", activeAgentId: null, runtimeCapabilities: null,
+          lastSeenAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        });
+        recordAccountLoginAudit(store, {
+          accountId: params.id, agentId: revokedAgentId, event: "session_revoked",
+          result: "succeeded", reasonCode: "access_key_rotated",
+        });
+        result.account = projectAccount(store.find("accounts", params.id));
+      }
       res.setHeader("Cache-Control", "no-store");
       sendJson(res, 200, result);
     }),
@@ -188,25 +185,20 @@ export function registerAgentRoutes(router, {
   router.delete(
     "/api/accounts/:id/access-key",
     asHandler(async ({ res, params }) => {
-      const account = revokeAccountAccessKey(store, params.id);
-      const revokedAgentId = account.activeAgentId;
-      controlService?.invalidateAccountSessions(params.id);
-      store.update("accounts", params.id, {
-        presence: "offline",
-        activeAgentId: null,
-        runtimeCapabilities: null,
-        lastSeenAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-      recordAccountLoginAudit(store, {
-        accountId: params.id,
-        agentId: revokedAgentId,
-        event: "session_revoked",
-        result: "succeeded",
-        reasonCode: "access_key_revoked",
-      });
-      const projected = projectAccount(store.find("accounts", params.id));
-      sendJson(res, 200, { account: projected });
+      if (controlService) sendJson(res, 200, await controlService.revokeAccessKey(params.id));
+      else {
+        const account = revokeAccountAccessKey(store, params.id);
+        const revokedAgentId = account.activeAgentId;
+        store.update("accounts", params.id, {
+          presence: "offline", activeAgentId: null, runtimeCapabilities: null,
+          lastSeenAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        });
+        recordAccountLoginAudit(store, {
+          accountId: params.id, agentId: revokedAgentId, event: "session_revoked",
+          result: "succeeded", reasonCode: "access_key_revoked",
+        });
+        sendJson(res, 200, { account: projectAccount(store.find("accounts", params.id)) });
+      }
     }),
   );
 

@@ -58,7 +58,7 @@ function infoRows(section) {
     .map((row) => [row.children[0].textContent, row.children[1].textContent]);
 }
 
-function fixture(detail, { fetchImpl } = {}) {
+function fixture(detail, { fetchImpl, spaces = [] } = {}) {
   const root = new FakeElement("main");
   const bootstrap = {
     accounts: [{
@@ -72,6 +72,7 @@ function fixture(detail, { fetchImpl } = {}) {
       workspace: { accountId: "acc_a", hostId: "stale-host", status: "degraded" },
     }],
     agents: [{ id: "agt_a", name: "Agent A" }],
+    spaces,
   };
   let subscriber = null;
   const runtime = {
@@ -98,6 +99,119 @@ function fixture(detail, { fetchImpl } = {}) {
   };
   return { root, runtime, platform };
 }
+
+test("Account detail derives active Space membership from bootstrap without another request", async () => {
+  const previousDocument = globalThis.document;
+  const previousNode = globalThis.Node;
+  globalThis.document = { createElement: (tagName) => new FakeElement(tagName) };
+  globalThis.Node = FakeElement;
+  try {
+    const detail = {
+      account: {
+        id: "acc_a",
+        name: "Account A",
+        ownerAgentId: "agt_a",
+        activeAgentId: null,
+        presence: "offline",
+        accessKeyState: "active",
+        accessKeyVersion: 1,
+        workspace: null,
+      },
+      ownerAgent: { id: "agt_a", name: "Agent A" },
+      activeAgent: null,
+      recentLogins: [],
+    };
+    const requested = [];
+    const fetchImpl = async (url, init) => {
+      requested.push([url, init.method]);
+      return new Response(JSON.stringify(detail), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const spaces = [
+      {
+        id: "spc_active",
+        name: "Active Space",
+        topic: "current work",
+        archivedAt: null,
+        seats: [{ accountId: "acc_a", responseMode: "focused" }, { accountId: "acc_b", responseMode: "default" }],
+      },
+      {
+        id: "spc_archived",
+        name: "Archived Space",
+        archivedAt: "2026-07-18T01:02:03.000Z",
+        seats: [{ accountId: "acc_a", responseMode: "default" }],
+      },
+      {
+        id: "spc_other",
+        name: "Other Account Space",
+        archivedAt: null,
+        seats: [{ accountId: "acc_b", responseMode: "default" }],
+      },
+      { id: "spc_legacy", name: "Missing Seats", archivedAt: null },
+    ];
+    const { root, runtime, platform } = fixture(detail, { fetchImpl, spaces });
+    const dispose = await mountAccountDetailView({ root, runtime, platform, accountId: "acc_a" });
+
+    assert.deepEqual(requested, [["http://vera.test/api/accounts/acc_a", "GET"]]);
+    const membership = findSection(root, "参与的 Space");
+    assert.equal(membership.textContent.includes("Active Space"), true);
+    assert.equal(membership.textContent.includes("current work"), true);
+    assert.equal(membership.textContent.includes("focused"), true);
+    assert.equal(membership.textContent.includes("Archived Space"), false);
+    assert.equal(membership.textContent.includes("Other Account Space"), false);
+    assert.equal(membership.textContent.includes("Missing Seats"), false);
+    const links = descendants(membership).filter((node) => node.tagName === "A");
+    assert.deepEqual(links.map((link) => [link.textContent, link.href]), [
+      ["进入 Space", "#/spaces/spc_active"],
+      ["Space 设置", "#/spaces/spc_active/settings"],
+    ]);
+    dispose();
+  } finally {
+    globalThis.document = previousDocument;
+    globalThis.Node = previousNode;
+  }
+});
+
+test("Account detail shows an honest empty state when bootstrap has no active membership", async () => {
+  const previousDocument = globalThis.document;
+  const previousNode = globalThis.Node;
+  globalThis.document = { createElement: (tagName) => new FakeElement(tagName) };
+  globalThis.Node = FakeElement;
+  try {
+    const detail = {
+      account: {
+        id: "acc_a",
+        name: "Account A",
+        ownerAgentId: "agt_a",
+        activeAgentId: null,
+        presence: "offline",
+        accessKeyState: "active",
+        accessKeyVersion: 1,
+        workspace: null,
+      },
+      recentLogins: [],
+    };
+    const { root, runtime, platform } = fixture(detail, {
+      spaces: [{
+        id: "spc_archived",
+        name: "Archived Space",
+        archivedAt: "2026-07-18T01:02:03.000Z",
+        seats: [{ accountId: "acc_a", responseMode: "default" }],
+      }],
+    });
+    const dispose = await mountAccountDetailView({ root, runtime, platform, accountId: "acc_a" });
+
+    const membership = findSection(root, "参与的 Space");
+    assert.equal(membership.textContent.includes("当前没有参与 active Space。"), true);
+    assert.equal(descendants(membership).some((node) => node.className === "vera-management-card"), false);
+    dispose();
+  } finally {
+    globalThis.document = previousDocument;
+    globalThis.Node = previousNode;
+  }
+});
 
 test("Account detail renders only the frozen recentLogins fields and nested Workspace summary", async () => {
   const previousDocument = globalThis.document;

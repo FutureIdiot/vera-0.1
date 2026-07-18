@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -84,7 +84,7 @@ async function daemonFixture(fn) {
       authorization: `Bearer ${enrolled.json.agentToken}`,
       "x-vera-account-key": created.accessKey,
     });
-    await fn({ created, enrolled, login, store, hub, controlService, router });
+    await fn({ created, enrolled, login, store, hub, controlService, router, dataPath });
   } finally {
     await store.close();
     await rm(dataPath, { recursive: true, force: true });
@@ -314,6 +314,7 @@ test("Control Service closes the owner credential, Workspace, Session, and Execu
     assert.equal(rotated.status, 200);
     assert.equal(rotated.headers["cache-control"], "no-store");
     assert.equal(store.find("runs", "run_rotation_pending").status, "failed");
+    assert.equal(store.find("runs", "run_rotation_pending").error.code, "account_session_revoked");
     const invalidatedByRotation = await request(router, "POST", "/api/agent/login", loginBody(accountId), {
       authorization: `Bearer ${agentToken}`,
       "x-vera-account-session": preRotationSession,
@@ -347,6 +348,16 @@ test("Control Service closes the owner credential, Workspace, Session, and Execu
     );
     assert.equal(invalidatedByGatewayBoot.status, 401);
     assert.equal(invalidatedByGatewayBoot.json.error.code, "account_reauthentication_required");
+
+    store.insert("runs", {
+      id: "run_revocation_pending",
+      accountId,
+      agentId: enrolled.json.agent.id,
+      status: "pending",
+    });
+    const revoked = await request(router, "DELETE", `/api/accounts/${accountId}/access-key`);
+    assert.equal(revoked.status, 200);
+    assert.equal(store.find("runs", "run_revocation_pending").error.code, "account_session_revoked");
 
     const persistedTokens = await readFile(tokensPath, "utf8");
     assert.equal(persistedTokens.includes(sessionToken), false);
@@ -397,6 +408,70 @@ test("Control Service keeps non-owner access closed and refuses duplicate owner 
     await store.close();
     await rm(dataPath, { recursive: true, force: true });
   }
+});
+
+test("control endpoints reject every incomplete or expired credential combination without secret persistence", async () => {
+  await daemonFixture(async ({ created, enrolled, login, store, router, dataPath }) => {
+    const agentToken = enrolled.json.agentToken;
+    const accountKey = created.accessKey;
+    const sessionToken = login.json.accountSession.token;
+    const validHeaders = {
+      authorization: `Bearer ${agentToken}`,
+      "x-vera-account-session": sessionToken,
+    };
+    assert.equal((await request(
+      router, "DELETE", `/api/agent/sessions/${created.account.id}`, undefined, validHeaders,
+    )).status, 204);
+    const staleRun = daemonRun(store, {
+      id: "run_security_matrix",
+      accountId: created.account.id,
+      agentId: enrolled.json.agent.id,
+      accountSessionId: login.json.accountSession.id,
+    });
+    const endpoints = [
+      ["POST", "/api/agent/login", loginBody(created.account.id)],
+      ["POST", "/api/agent/workspace/register", {
+        accountId: created.account.id,
+        daemonBootId: "daemon-a",
+        runtimeRevision: "sha256:runtime-a",
+        workspace: {
+          hostId: "host-a", path: "/srv/vera/project-a", status: "ready", policy: {},
+        },
+      }],
+      ["POST", "/api/agent/workspace/authorize", {
+        accountId: created.account.id,
+        runId: staleRun.id,
+        workspaceHostId: "host-a",
+        runtimeRevision: "sha256:runtime-a",
+      }],
+      ["DELETE", `/api/agent/sessions/${created.account.id}`, undefined],
+    ];
+    const credentialSets = [
+      { authorization: `Bearer ${agentToken}` },
+      { "x-vera-account-key": accountKey },
+      { "x-vera-account-session": sessionToken },
+      { authorization: `Bearer ${agentToken}`, "x-vera-account-session": sessionToken },
+    ];
+    const responses = [];
+    for (const [method, path, body] of endpoints) {
+      for (const headers of credentialSets) {
+        const response = await request(router, method, path, body, headers);
+        responses.push(response);
+        assert.ok(response.status >= 400, `${method} ${path} must reject incomplete credentials`);
+        assert.equal("account" in (response.json ?? {}), false);
+      }
+    }
+    assert.equal(store.find("runs", staleRun.id).status, "pending");
+    const responseText = JSON.stringify(responses);
+    for (const secret of [agentToken, accountKey, sessionToken, "/srv/vera/project-a"]) {
+      assert.equal(responseText.includes(secret), false);
+    }
+
+    await store.flush();
+    const persisted = (await Promise.all((await readdir(dataPath)).map(async (name) =>
+      readFile(join(dataPath, name), "utf8").catch(() => "")))).join("\n");
+    for (const secret of [agentToken, accountKey, sessionToken]) assert.equal(persisted.includes(secret), false);
+  });
 });
 
 test("daemon authorize claims one lease idempotently and rejects unsafe transports or Sessions", async () => {
@@ -511,7 +586,53 @@ test("daemon authorize claims one lease idempotently and rejects unsafe transpor
       assert.equal("tokenHash" in authenticated.session, false);
       assert.equal("identity" in authenticated, false);
 
-      await request(router, "DELETE", `/api/agent/sessions/${created.account.id}`, undefined, headers);
+      store.insert("messages", {
+        id: "msg_revoked_stream", runId: queued.id, spaceId: "spc_revoked",
+        spaceSessionId: "sps_revoked", status: "streaming", content: "partial",
+      });
+      store.insert("activities", {
+        id: "act_revoked_tool", runId: queued.id, spaceId: "spc_revoked",
+        spaceSessionId: "sps_revoked", phase: "tool", toolStatus: "running",
+      });
+      store.insert("approvals", {
+        id: "apr_revoked_pending", runId: queued.id, spaceId: "spc_revoked",
+        spaceSessionId: "sps_revoked", status: "pending", answer: null,
+      });
+      events.splice(0);
+      const logout = await request(router, "DELETE", `/api/agent/sessions/${created.account.id}`, undefined, headers);
+      assert.equal(logout.status, 204);
+      assert.deepEqual(store.find("runs", queued.id).error, {
+        code: "account_session_revoked",
+        message: "Account Session was revoked",
+      });
+      assert.equal(store.find("messages", "msg_revoked_stream").status, "failed");
+      assert.deepEqual(
+        (({ phase, toolStatus }) => ({ phase, toolStatus }))(store.find("activities", "act_revoked_tool")),
+        { phase: "error", toolStatus: "failed" },
+      );
+      assert.deepEqual(
+        (({ status, answer }) => ({ status, answer }))(store.find("approvals", "apr_revoked_pending")),
+        { status: "expired", answer: "deny" },
+      );
+      const revokedEventTypes = events.filter((event) =>
+        event.data?.message?.id === "msg_revoked_stream" ||
+        event.data?.activity?.id === "act_revoked_tool" ||
+        event.data?.approval?.id === "apr_revoked_pending" ||
+        event.data?.run?.id === queued.id ||
+        event.type === "account.presence.updated").map((event) => event.type);
+      assert.deepEqual(revokedEventTypes, [
+        "message.completed",
+        "activity.updated",
+        "approval.answered",
+        "run.ended",
+        "account.presence.updated",
+      ]);
+      assert.deepEqual(events.at(-1).data, {
+        accountId: created.account.id,
+        presence: "offline",
+        lastSeenAt: store.find("accounts", created.account.id).lastSeenAt,
+        activeAgentId: null,
+      });
       const relogin = await request(router, "POST", "/api/agent/login", loginBody(created.account.id), {
         authorization: `Bearer ${enrolled.json.agentToken}`,
         "x-vera-account-key": created.accessKey,
@@ -582,5 +703,69 @@ test("concurrent daemon authorize requests serialize to one lease", async () => 
     assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
     assert.equal(store.list("runs").filter((run) => run.status === "running").length, 1);
     assert.equal(hub.currentSeq(), 1);
+  });
+});
+
+test("different owner Accounts can hold independent Sessions and running Executions", async () => {
+  await daemonFixture(async ({ created, enrolled, login, store, router, controlService }) => {
+    const second = createUnownedAccount(store, { name: "Second Daemon Account" });
+    const secondEnroll = await request(router, "POST", "/api/agent/enroll", {
+      accountId: second.account.id,
+      agent: { name: "Second Daemon Agent" },
+      runtimeProfile: profile,
+    }, { authorization: `Bearer ${second.accessKey}` });
+    const secondLogin = await request(router, "POST", "/api/agent/login", loginBody(second.account.id, "daemon-b", "host-b"), {
+      authorization: `Bearer ${secondEnroll.json.agentToken}`,
+      "x-vera-account-key": second.accessKey,
+    });
+    assert.equal(secondLogin.status, 200);
+
+    const firstRun = daemonRun(store, {
+      id: "run_parallel_first",
+      accountId: created.account.id,
+      agentId: enrolled.json.agent.id,
+      accountSessionId: login.json.accountSession.id,
+    });
+    const secondRun = daemonRun(store, {
+      id: "run_parallel_second",
+      accountId: second.account.id,
+      agentId: secondEnroll.json.agent.id,
+      accountSessionId: secondLogin.json.accountSession.id,
+    });
+    const [firstResult, secondResult] = await Promise.all([
+      request(router, "POST", "/api/agent/workspace/authorize", {
+        accountId: created.account.id,
+        runId: firstRun.id,
+        workspaceHostId: "host-a",
+        runtimeRevision: "sha256:runtime-a",
+      }, {
+        authorization: `Bearer ${enrolled.json.agentToken}`,
+        "x-vera-account-session": login.json.accountSession.token,
+      }),
+      request(router, "POST", "/api/agent/workspace/authorize", {
+        accountId: second.account.id,
+        runId: secondRun.id,
+        workspaceHostId: "host-b",
+        runtimeRevision: "sha256:runtime-a",
+      }, {
+        authorization: `Bearer ${secondEnroll.json.agentToken}`,
+        "x-vera-account-session": secondLogin.json.accountSession.token,
+      }),
+    ]);
+    assert.deepEqual([firstResult.status, secondResult.status], [200, 200]);
+    assert.notEqual(firstResult.json.execution.executionLeaseId, secondResult.json.execution.executionLeaseId);
+    assert.deepEqual(
+      [store.find("runs", firstRun.id).status, store.find("runs", secondRun.id).status],
+      ["running", "running"],
+    );
+    await controlService.invalidateAccountSessions(created.account.id, { reasonCode: "security_revoked" });
+    assert.equal(store.find("runs", firstRun.id).error.code, "account_session_revoked");
+    assert.equal(store.find("runs", secondRun.id).status, "running");
+    assert.deepEqual(
+      (({ event, result, reasonCode }) => ({ event, result, reasonCode }))(
+        listAccountLoginAudits(store, created.account.id)[0],
+      ),
+      { event: "session_revoked", result: "succeeded", reasonCode: "security_revoked" },
+    );
   });
 });

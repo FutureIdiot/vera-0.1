@@ -59,7 +59,7 @@ export function expirePendingApprovalsForRun(store, hub, runId) {
   const pending = store.list("approvals").filter((a) => a.runId === runId && a.status === "pending");
   for (const approval of pending) {
     const updated = store.update("approvals", approval.id, { status: "expired", answer: "deny" });
-    hub.publish("approval.answered", { approval: stripInternal(updated) });
+    hub?.publish("approval.answered", { approval: stripInternal(updated) });
     const resolve = resolvers.get(approval.id);
     if (resolve) {
       resolve("deny");

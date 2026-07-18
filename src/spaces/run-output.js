@@ -28,8 +28,10 @@ export function createRunOutput({
     delegated,
   });
   const activityIndex = new Map();
+  const acceptsOutput = () => store.find("runs", runId)?.status === "running";
 
   function onActivity(event) {
+    if (!acceptsOutput()) return;
     const detail = truncate(event?.detail, config.activity.detailMaxLength);
     if (event?.callId && activityIndex.has(event.callId)) {
       const updated = store.update("activities", activityIndex.get(event.callId), {
@@ -63,14 +65,16 @@ export function createRunOutput({
   return {
     bubbles,
     onActivity,
-    requestApproval: (req) => requestApproval({
-      store,
-      hub,
-      spaceId,
-      spaceSessionId,
-      runId,
-      agentId: agent.id,
-      req,
-    }),
+    requestApproval: (req) => acceptsOutput()
+      ? requestApproval({
+        store,
+        hub,
+        spaceId,
+        spaceSessionId,
+        runId,
+        agentId: agent.id,
+        req,
+      })
+      : Promise.resolve("deny"),
   };
 }
