@@ -100,7 +100,7 @@ export async function run(ctx) {
       assertEqual(reply?.content, "CODEX_CHAT_OK");
 
       const queued = await verifiedRequest("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, spaceSessionId: posted.json.message.spaceSessionId, mode: "range",
+        accountId: account.id, spaceId: space.id, spaceSessionId: posted.json.message.spaceSessionId, mode: "range",
         fromMessageId: posted.json.message.id, toMessageId: posted.json.message.id,
       });
       assertEqual(queued.status, 202, JSON.stringify(queued.json));
@@ -152,7 +152,7 @@ export async function run(ctx) {
         author: { type: "user" }, target: { type: "broadcast" }, content: "Do not execute OpenCode digest.",
       });
       const openQueued = await verifiedRequest("POST", `/api/agents/${openCode.json.agent.id}/memory/_digest`, {
-        spaceId: openSpace.json.space.id, spaceSessionId: openMessage.json.message.spaceSessionId, mode: "range",
+        accountId: openCode.json.account.id, spaceId: openSpace.json.space.id, spaceSessionId: openMessage.json.message.spaceSessionId, mode: "range",
         fromMessageId: openMessage.json.message.id, toMessageId: openMessage.json.message.id,
       });
       assertEqual(openQueued.status, 202, JSON.stringify(openQueued.json));
@@ -202,7 +202,7 @@ export async function runReal(ctx) {
       assert(reply?.content?.includes("CODEX_GATEWAY_CHAT_OK"), "real Codex chat must complete");
 
       const queued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, spaceSessionId: posted.json.message.spaceSessionId, mode: "range",
+        accountId: account.id, spaceId: space.id, spaceSessionId: posted.json.message.spaceSessionId, mode: "range",
         fromMessageId: posted.json.message.id, toMessageId: posted.json.message.id,
       });
       assertEqual(queued.status, 202, JSON.stringify(queued.json));

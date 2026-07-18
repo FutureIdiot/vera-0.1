@@ -30,6 +30,7 @@ function safeError(code) {
 function safeJob(job) {
   const { _seq, proposals, catalogVersions, memoryTaskSnapshot, memoryProviderSnapshot, freezeError, ...rest } = job;
   const safe = structuredClone(rest);
+  if (!Object.hasOwn(safe, "sourceAccountId")) safe.sourceAccountId = null;
   if (safe.range) {
     delete safe.range.fromSeq;
     delete safe.range.toSeq;
@@ -58,6 +59,20 @@ export function createMemoryDigestService({
   let accepting = true;
 
   const jobs = () => store.list(COLLECTION);
+  function inferLegacySourceAccountId(job) {
+    if (typeof job.sourceAccountId === "string" && job.sourceAccountId) return job.sourceAccountId;
+    const space = store.find("spaces", job.spaceId);
+    if (!space) return null;
+    const seated = new Set((space.seats ?? []).map((seat) => seat.accountId));
+    const candidates = store.list("accounts").filter((account) =>
+      account.ownerAgentId === job.agentId && seated.has(account.id));
+    return candidates.length === 1 ? candidates[0].id : null;
+  }
+  for (const job of jobs()) {
+    if (job.sourceAccountId) continue;
+    const inferred = inferLegacySourceAccountId(job);
+    if (inferred) store.update(COLLECTION, job.id, { sourceAccountId: inferred });
+  }
   const notify = (job) => {
     const safe = safeJob(job);
     try { onJobUpdated(safe); } catch {}
@@ -65,8 +80,8 @@ export function createMemoryDigestService({
   };
   const patchJob = (id, patch) => notify(store.update(COLLECTION, id, patch));
 
-  function idempotencyKey({ agentId, spaceSessionId, fromMessageId, toMessageId, mode, taskFingerprint = "legacy" }) {
-    return `sha256:${digest(`${agentId}|${spaceSessionId}|${fromMessageId}|${toMessageId}|${mode}|${pipelineVersion}|${taskFingerprint}`)}`;
+  function idempotencyKey({ agentId, accountId, spaceSessionId, fromMessageId, toMessageId, mode, taskFingerprint = "legacy" }) {
+    return `sha256:${digest(`${agentId}|${accountId}|${spaceSessionId}|${fromMessageId}|${toMessageId}|${mode}|${pipelineVersion}|${taskFingerprint}`)}`;
   }
 
   function findJob(agentId, jobId) {
@@ -84,18 +99,21 @@ export function createMemoryDigestService({
     return safeJob(job);
   }
 
-  function getIncrementalWindow({ agentId, spaceId, spaceSessionId, toMessageId }) {
-    return resolveIncrementalDigestRange({ store, jobs: jobs(), agentId, spaceId, spaceSessionId, toMessageId });
+  function getIncrementalWindow({ agentId, accountId, spaceId, spaceSessionId, toMessageId }) {
+    return resolveIncrementalDigestRange({
+      store, jobs: jobs(), agentId, accountId, spaceId, spaceSessionId, toMessageId,
+    });
   }
 
-  function enqueue({ agentId, spaceId, spaceSessionId, mode, trigger, fromMessageId, toMessageId }) {
+  function enqueue({ agentId, accountId, spaceId, spaceSessionId, mode, trigger, fromMessageId, toMessageId }) {
     if (!accepting) throw new ApiError("conflict", "memory digest service is closing");
     if (!["incremental", "range"].includes(mode)) throw new ApiError("invalid_request", "digest mode must be incremental or range");
     if (!["manual", "scheduled", "realtime"].includes(trigger)) throw new ApiError("invalid_request", "digest trigger is invalid");
+    if (typeof accountId !== "string" || !accountId) throw new ApiError("invalid_request", "accountId is required");
     if (typeof spaceSessionId !== "string" || !spaceSessionId) throw new ApiError("invalid_request", "spaceSessionId is required");
     const resolved = mode === "incremental" && !fromMessageId
-      ? getIncrementalWindow({ agentId, spaceId, spaceSessionId, toMessageId })
-      : resolveDigestRange({ store, agentId, spaceId, spaceSessionId, fromMessageId, toMessageId });
+      ? getIncrementalWindow({ agentId, accountId, spaceId, spaceSessionId, toMessageId })
+      : resolveDigestRange({ store, agentId, accountId, spaceId, spaceSessionId, fromMessageId, toMessageId });
     if (!resolved) {
       if (trigger === "manual") throw new ApiError("invalid_request", "digest range contains no new visible Messages");
       return null;
@@ -109,15 +127,21 @@ export function createMemoryDigestService({
     const taskFingerprint = task
       ? digest(JSON.stringify([task.memoryTaskSnapshot, task.memoryProviderSnapshot]))
       : freezeError?.code ?? "legacy";
-    const key = idempotencyKey({ agentId, spaceSessionId, fromMessageId: resolved.range.fromMessageId, toMessageId: resolved.range.toMessageId, mode, taskFingerprint });
+    const key = idempotencyKey({ agentId, accountId, spaceSessionId, fromMessageId: resolved.range.fromMessageId, toMessageId: resolved.range.toMessageId, mode, taskFingerprint });
     const duplicate = jobs().find((job) => job.idempotencyKey === key);
     if (duplicate) return safeJob(duplicate);
-    const active = jobs().find((job) => job.agentId === agentId && job.spaceSessionId === spaceSessionId && ACTIVE.has(job.status));
+    const ambiguousActive = jobs().find((job) => job.agentId === agentId &&
+      job.spaceSessionId === spaceSessionId && !job.sourceAccountId && ACTIVE.has(job.status));
+    if (ambiguousActive) {
+      throw new ApiError("conflict", `agent ${agentId} has an active legacy digest job with ambiguous Account scope`);
+    }
+    const active = jobs().find((job) => job.agentId === agentId && job.sourceAccountId === accountId &&
+      job.spaceSessionId === spaceSessionId && ACTIVE.has(job.status));
     if (active) throw new ApiError("conflict", `agent ${agentId} already has an active digest job in SpaceSession ${spaceSessionId}`);
     const createdAt = now();
     const job = store.insert(COLLECTION, {
       id: `mdj_${digest(key).slice(0, 12)}`,
-      agentId, spaceId, spaceSessionId, mode, trigger,
+      agentId, sourceAccountId: accountId, spaceId, spaceSessionId, mode, trigger,
       range: resolved.range,
       pipelineVersion,
       idempotencyKey: key,
@@ -133,14 +157,14 @@ export function createMemoryDigestService({
     return safeJob(job);
   }
 
-  function enqueueIncremental({ agentId, spaceId, spaceSessionId, trigger, toMessageId }) {
-    return enqueue({ agentId, spaceId, spaceSessionId, mode: "incremental", trigger, toMessageId });
+  function enqueueIncremental({ agentId, accountId, spaceId, spaceSessionId, trigger, toMessageId }) {
+    return enqueue({ agentId, accountId, spaceId, spaceSessionId, mode: "incremental", trigger, toMessageId });
   }
 
   function schedule(jobId) {
     const job = store.find(COLLECTION, jobId);
     if (!job || job.status !== "queued") return;
-    const tailKey = `${job.agentId}\0${job.spaceSessionId}`;
+    const tailKey = `${job.agentId}\0${job.sourceAccountId}\0${job.spaceSessionId}`;
     const previous = tails.get(tailKey) ?? Promise.resolve();
     const task = previous.catch(() => {}).then(() => run(jobId));
     const tail = task.catch(() => {});
@@ -358,7 +382,8 @@ export function createMemoryDigestService({
         await validateTaskSnapshot({ memoryTaskSnapshot: job.memoryTaskSnapshot, memoryProviderSnapshot: job.memoryProviderSnapshot });
       }
       const resolved = resolveDigestRange({
-        store, agentId: job.agentId, spaceId: job.spaceId, spaceSessionId: job.spaceSessionId, ...job.range,
+        store, agentId: job.agentId, accountId: job.sourceAccountId,
+        spaceId: job.spaceId, spaceSessionId: job.spaceSessionId, ...job.range,
       });
       const chunks = chunkDigestMessages(resolved.messages, { maxChars: chunkMaxChars });
       const existingMemories = await memory.listMemories(job.agentId);

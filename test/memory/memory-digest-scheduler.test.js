@@ -7,7 +7,7 @@ import {
 } from "../../src/memory/memory-digest-scheduler.js";
 
 function fixture({ trigger = "manual", schedule = "* * * * *", threshold = 4, now = "2026-07-13T03:00:30" } = {}) {
-  const data = { spaces: [], spaceSessions: [], agentSessions: [], messages: [], memoryDigestJobs: [] };
+  const data = { accounts: [], spaces: [], spaceSessions: [], agentSessions: [], messages: [], memoryDigestJobs: [] };
   const calls = [];
   const timers = [];
   let current = new Date(now);
@@ -44,7 +44,17 @@ function addSpace(f, id = "spc_one", agentIds = ["agt_one"], spaceSessionId = `s
   f.data.spaces.push({ id, seats: agentIds.map((agentId) => ({ agentId })) });
   f.data.spaceSessions.push({ id: spaceSessionId, spaceId: id, status: "active" });
   for (const agentId of new Set(agentIds)) {
-    f.data.agentSessions.push({ id: `ags_${spaceSessionId}_${agentId}`, spaceSessionId, agentId, generation: 1 });
+    const accountId = `acc_${agentId.slice(4)}`;
+    if (!f.data.accounts.some((account) => account.id === accountId)) {
+      f.data.accounts.push({ id: accountId, ownerAgentId: agentId });
+    }
+    f.data.agentSessions.push({
+      id: `ags_${spaceSessionId}_${agentId}`,
+      spaceSessionId,
+      accountId,
+      agentId,
+      generation: 1,
+    });
   }
 }
 
@@ -73,8 +83,8 @@ test("scheduled start catches up pending windows once and schedules the next min
   await f.settle();
 
   assert.deepEqual(f.calls, [
-    { agentId: "agt_one", spaceId: "spc_one", spaceSessionId: "sps_one", trigger: "scheduled", toMessageId: "msg_one" },
-    { agentId: "agt_two", spaceId: "spc_one", spaceSessionId: "sps_one", trigger: "scheduled", toMessageId: "msg_one" },
+    { agentId: "agt_one", accountId: "acc_one", spaceId: "spc_one", spaceSessionId: "sps_one", trigger: "scheduled", toMessageId: "msg_one" },
+    { agentId: "agt_two", accountId: "acc_two", spaceId: "spc_one", spaceSessionId: "sps_one", trigger: "scheduled", toMessageId: "msg_one" },
   ]);
   assert.equal(f.timers.length, 1);
   assert.equal(f.timers[0].delay, 30_000);
@@ -105,14 +115,16 @@ test("scheduled catch-up preserves archived SpaceSession backlog after new windo
   addSpace(f, "spc_one", ["agt_one"], "sps_old");
   f.data.spaceSessions[0].status = "archived";
   f.data.spaceSessions.push({ id: "sps_new", spaceId: "spc_one", status: "active" });
-  f.data.agentSessions.push({ id: "ags_new", spaceSessionId: "sps_new", agentId: "agt_one", generation: 1 });
+  f.data.agentSessions.push({
+    id: "ags_new", spaceSessionId: "sps_new", accountId: "acc_one", agentId: "agt_one", generation: 1,
+  });
   addMessage(f, { id: "msg_old", spaceSessionId: "sps_old", content: "old backlog", seq: 1 });
   addMessage(f, { id: "msg_new", spaceSessionId: "sps_new", content: "new backlog", seq: 2 });
   f.scheduler.start();
   await f.settle();
   assert.deepEqual(f.calls, [
-    { agentId: "agt_one", spaceId: "spc_one", spaceSessionId: "sps_old", trigger: "scheduled", toMessageId: "msg_old" },
-    { agentId: "agt_one", spaceId: "spc_one", spaceSessionId: "sps_new", trigger: "scheduled", toMessageId: "msg_new" },
+    { agentId: "agt_one", accountId: "acc_one", spaceId: "spc_one", spaceSessionId: "sps_old", trigger: "scheduled", toMessageId: "msg_old" },
+    { agentId: "agt_one", accountId: "acc_one", spaceId: "spc_one", spaceSessionId: "sps_new", trigger: "scheduled", toMessageId: "msg_new" },
   ]);
 });
 
@@ -134,7 +146,7 @@ test("realtime threshold counts Unicode code points after the successful waterma
   f.scheduler.onMessageCommitted(last);
   await f.settle();
   assert.deepEqual(f.calls, [{
-    agentId: "agt_one", spaceId: "spc_one", spaceSessionId: "sps_one", trigger: "realtime", toMessageId: "msg_last",
+    agentId: "agt_one", accountId: "acc_one", spaceId: "spc_one", spaceSessionId: "sps_one", trigger: "realtime", toMessageId: "msg_last",
   }]);
 });
 
@@ -193,9 +205,10 @@ test("an unrelated Settings refresh does not bypass cron with an immediate catch
 
 test("onMessageCommitted never waits for or surfaces digest failures", async () => {
   const data = {
+    accounts: [{ id: "acc_one", ownerAgentId: "agt_one" }],
     spaces: [{ id: "spc_one", seats: [{ agentId: "agt_one" }] }],
     spaceSessions: [{ id: "sps_one", spaceId: "spc_one", status: "active" }],
-    agentSessions: [{ id: "ags_one", spaceSessionId: "sps_one", agentId: "agt_one", generation: 1 }],
+    agentSessions: [{ id: "ags_one", spaceSessionId: "sps_one", accountId: "acc_one", agentId: "agt_one", generation: 1 }],
     messages: [{ id: "msg_one", spaceId: "spc_one", spaceSessionId: "sps_one", content: "x", status: "completed", _seq: 1 }],
     memoryDigestJobs: [],
   };

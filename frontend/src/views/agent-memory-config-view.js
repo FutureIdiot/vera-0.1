@@ -1,168 +1,192 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createMemoryClient } from "../api/memory-client.js";
-import { createAgentsClient } from "../api/agents-client.js";
-import { createNotice, setBusy } from "../components/management-ui.js";
+import {
+  isMemoryTaskAvailable,
+  memorySectionTitle,
+  renderMemoryProviderSection,
+  renderMemoryStatusSection,
+  renderMemoryTaskSection,
+} from "../components/memory-config-ui.js";
+import { createNotice, field, select, setBusy } from "../components/management-ui.js";
+
+const ACTIVE_JOB_STATUSES = new Set(["queued", "running", "applying"]);
+
+function pendingKey(item) {
+  return JSON.stringify([item.accountId, item.spaceId, item.spaceSessionId]);
+}
 
 export async function mountAgentMemoryConfigView({ root, platform, runtime, agentId, shell } = {}) {
   root.dataset.routeScope = "management";
   const agent = runtime.getBootstrap().agents.find((item) => item.id === agentId);
   const back = `#/agents/${encodeURIComponent(agentId)}/data`;
   shell?.setManagementHeader({ title: `${agent?.name ?? "Agent"} Memory`, backHref: back, backLabel: "返回" });
-
   if (!agent) {
     root.appendChild(createNotice("Agent 不存在", "danger"));
     return () => root.replaceChildren();
   }
 
-  const http = createHttpClient(platform);
-  const memoryClient = createMemoryClient(http);
-  const agentsClient = createAgentsClient(http);
-
+  const memoryClient = createMemoryClient(createHttpClient(platform));
   let disposed = false;
   let loading = true;
-  let error = null;
+  let loadError = null;
   let config = null;
-  let status = null;
+  let version = null;
   let options = null;
+  let status = null;
+  let digestDraft = null;
+  let dreamDraft = null;
+  let selectedPendingKey = null;
 
   const content = document.createElement("div");
   content.className = "vera-management-content";
-
   const feedback = createNotice("");
   feedback.hidden = true;
-
-  // Provider section
   const providerSection = document.createElement("section");
   providerSection.className = "vera-management-section";
-  const providerTitle = document.createElement("h2");
-  providerTitle.textContent = "Memory 结构";
-  providerSection.appendChild(providerTitle);
-
-  // Status section
   const statusSection = document.createElement("section");
   statusSection.className = "vera-management-section";
-  const statusTitle = document.createElement("h2");
-  statusTitle.textContent = "状态";
-  statusSection.appendChild(statusTitle);
-
-  // Digest section
   const digestSection = document.createElement("section");
   digestSection.className = "vera-management-section";
-  const digestTitle = document.createElement("h2");
-  digestTitle.textContent = "Digest";
-  digestSection.appendChild(digestTitle);
-
-  // Dream section
   const dreamSection = document.createElement("section");
   dreamSection.className = "vera-management-section";
-  const dreamTitle = document.createElement("h2");
-  dreamTitle.textContent = "Dream";
-  dreamSection.appendChild(dreamTitle);
-
-  // Actions
-  const actionsSection = document.createElement("div");
-  actionsSection.className = "vera-form-actions";
-  const digestBtn = document.createElement("button");
-  digestBtn.type = "button";
-  digestBtn.className = "vera-secondary-button";
-  digestBtn.textContent = "手动 Digest";
-  const dreamBtn = document.createElement("button");
-  dreamBtn.type = "button";
-  dreamBtn.className = "vera-secondary-button";
-  dreamBtn.textContent = "立即 Dream";
+  const actionsSection = document.createElement("section");
+  actionsSection.className = "vera-management-section";
   const libraryLink = document.createElement("a");
   libraryLink.className = "vera-secondary-button vera-button-link";
   libraryLink.href = `#/agents/${encodeURIComponent(agentId)}/data/memory/library`;
   libraryLink.textContent = "长期记忆管理";
-  actionsSection.append(digestBtn, dreamBtn, libraryLink);
-
-  content.append(feedback, providerSection, statusSection, digestSection, dreamSection, actionsSection);
   root.appendChild(content);
 
-  function renderProvider() {
-    providerSection.replaceChildren(providerTitle);
-    const provider = config?.provider ?? { providerId: "vera.markdown" };
-    const name = provider.providerId === "vera.markdown" ? "Vera（兼容 Obsidian）" : provider.providerId;
-    const p = document.createElement("p");
-    p.className = "vera-management-notice";
-    p.textContent = `当前 Provider：${name}`;
-    providerSection.appendChild(p);
+  function showFeedback(message, tone = "muted") {
+    feedback.textContent = message;
+    feedback.dataset.tone = tone;
+    feedback.hidden = false;
   }
 
-  function renderStatus() {
-    statusSection.replaceChildren(statusTitle);
-    if (!status) {
-      statusSection.appendChild(createNotice("状态不可用"));
-      return;
-    }
-
-    const longTerm = status.longTerm;
-    if (longTerm) {
-      const p = document.createElement("p");
-      p.className = "vera-management-notice";
-      p.textContent = `长期记忆：${longTerm.activeCount ?? 0} 条活跃${longTerm.archivedCount ? `、${longTerm.archivedCount} 条已归档` : ""}`;
-      statusSection.appendChild(p);
-    }
-
-    const pending = status.pendingContext;
-    if (pending) {
-      const p = document.createElement("p");
-      p.className = "vera-management-notice";
-      p.textContent = `待整理：${pending.messageCount ?? 0} 条消息 · ${pending.charCount ?? 0} 字符`;
-      statusSection.appendChild(p);
-    }
+  function taskExecutors(kind) {
+    return options?.tasks?.[kind]?.executors ?? [];
   }
 
-  function renderDigest() {
-    digestSection.replaceChildren(digestTitle);
-    const digest = config?.digest;
-    if (!digest) {
-      digestSection.appendChild(createNotice("未配置"));
-      return;
-    }
+  function taskAvailable(kind, draft) {
+    return isMemoryTaskAvailable(draft, taskExecutors(kind), agentId);
+  }
 
-    const modeText = digest.trigger?.mode === "manual" ? "手动" : digest.trigger?.mode === "realtime" ? "实时" : digest.trigger?.mode === "scheduled" ? "定时" : "—";
-    const executor = digest.executorAgentId ?? "自身";
-    const model = digest.modelMode === "inherit" ? "继承聊天模型" : digest.model ?? "—";
+  function providerAvailable() {
+    return status?.provider?.state === "available";
+  }
 
-    const p = document.createElement("p");
-    p.className = "vera-management-notice";
-    p.textContent = `策略：${modeText} · 执行者：${executor} · 模型：${model}`;
-    digestSection.appendChild(p);
+  function pendingSpaces() {
+    return Array.isArray(status?.pendingContext?.spaces) ? status.pendingContext.spaces : [];
+  }
 
-    const digestStatus = status?.digest;
-    if (digestStatus?.lastJob) {
-      const s = document.createElement("p");
-      s.className = "vera-management-notice";
-      s.textContent = `上次：${digestStatus.lastJob.status ?? "—"}`;
-      digestSection.appendChild(s);
+  function syncPendingSelection() {
+    const spaces = pendingSpaces();
+    if (spaces.length === 1) selectedPendingKey = pendingKey(spaces[0]);
+    else if (!spaces.some((item) => pendingKey(item) === selectedPendingKey)) selectedPendingKey = null;
+  }
+
+  async function saveTask(kind, button) {
+    if (!version) return;
+    const draft = kind === "digest" ? digestDraft : dreamDraft;
+    setBusy(button, true, "保存中…");
+    try {
+      const response = await memoryClient.patchConfig(agentId, { [kind]: structuredClone(draft), ifMatch: version });
+      config = response.config;
+      version = response.version;
+      digestDraft = structuredClone(config.digest);
+      dreamDraft = structuredClone(config.dream);
+      showFeedback(`${kind === "digest" ? "Digest" : "Dream"} 配置已保存`, "success");
+      render();
+    } catch (err) {
+      showFeedback(`配置保存失败：${err.message}`, "danger");
+      setBusy(button, false);
     }
   }
 
-  function renderDream() {
-    dreamSection.replaceChildren(dreamTitle);
-    const dream = config?.dream;
-    if (!dream) {
-      dreamSection.appendChild(createNotice("未配置"));
-      return;
+  function renderTask(kind) {
+    renderMemoryTaskSection(kind === "digest" ? digestSection : dreamSection, {
+      kind,
+      draft: kind === "digest" ? digestDraft : dreamDraft,
+      ownerAgentId: agentId,
+      executors: taskExecutors(kind),
+      taskStatus: status?.[kind],
+      onDraftChange: () => { renderTask(kind); renderActions(); },
+      onSave: (button) => saveTask(kind, button),
+    });
+  }
+
+  function dreamActive() {
+    return Boolean(status?.dream?.currentJobId) || ACTIVE_JOB_STATUSES.has(status?.dream?.status);
+  }
+
+  async function refreshStatus() {
+    try {
+      status = await memoryClient.getStatus(agentId);
+      if (disposed) return;
+      syncPendingSelection();
+      render();
+    } catch (err) {
+      if (!disposed) showFeedback(`状态刷新失败：${err.message}`, "danger");
     }
+  }
 
-    const modeText = dream.schedule?.mode === "manual" ? "手动" : dream.schedule?.mode === "daily" ? "每天" : dream.schedule?.mode === "weekly" ? "每周" : dream.schedule?.mode === "custom" ? "自定义" : "—";
-    const executor = dream.executorAgentId ?? "自身";
-    const model = dream.modelMode === "inherit" ? "继承聊天模型" : dream.model ?? "—";
+  function renderActions() {
+    actionsSection.replaceChildren(memorySectionTitle("手动任务"));
+    const spaces = pendingSpaces();
+    const choices = spaces.map((item) => [pendingKey(item), `${item.spaceId} · ${item.spaceSessionId} · ${item.messageCount ?? 0} 条消息`]);
+    if (spaces.length !== 1) choices.unshift(["", spaces.length ? "请选择一个待整理窗口" : "没有待整理窗口"]);
+    const pending = select(selectedPendingKey ?? "", choices);
+    pending.dataset.control = "digest-pending-space";
+    pending.disabled = spaces.length === 0;
+    pending.addEventListener("change", () => { selectedPendingKey = pending.value || null; renderActions(); });
 
-    const p = document.createElement("p");
-    p.className = "vera-management-notice";
-    p.textContent = `调度：${modeText} · 执行者：${executor} · 模型：${model}`;
-    dreamSection.appendChild(p);
+    const digestButton = document.createElement("button");
+    digestButton.type = "button";
+    digestButton.className = "vera-secondary-button";
+    digestButton.dataset.control = "digest-run";
+    digestButton.textContent = "手动 Digest";
+    digestButton.disabled = !selectedPendingKey || !taskAvailable("digest", digestDraft) || !providerAvailable();
+    digestButton.addEventListener("click", async () => {
+      const range = spaces.find((item) => pendingKey(item) === selectedPendingKey);
+      if (!range || !taskAvailable("digest", digestDraft) || !providerAvailable()) return;
+      setBusy(digestButton, true, "触发中…");
+      try {
+        await memoryClient.enqueueDigest(agentId, {
+          accountId: range.accountId,
+          spaceId: range.spaceId,
+          spaceSessionId: range.spaceSessionId,
+          mode: "incremental",
+        });
+        showFeedback("Digest 任务已加入队列", "success");
+        await refreshStatus();
+      } catch (err) {
+        showFeedback(`Digest 启动失败：${err.message}`, "danger");
+        setBusy(digestButton, false);
+      }
+    });
 
-    const dreamStatus = status?.dream;
-    if (dreamStatus?.lastJob) {
-      const s = document.createElement("p");
-      s.className = "vera-management-notice";
-      s.textContent = `上次：${dreamStatus.lastJob.status ?? "—"}`;
-      dreamSection.appendChild(s);
-    }
+    const dreamButton = document.createElement("button");
+    dreamButton.type = "button";
+    dreamButton.className = "vera-secondary-button";
+    dreamButton.dataset.control = "dream-run";
+    dreamButton.textContent = dreamActive() ? "Dream 进行中（再次点击合并）" : "立即 Dream";
+    dreamButton.disabled = !taskAvailable("dream", dreamDraft) || !providerAvailable();
+    dreamButton.addEventListener("click", async () => {
+      if (!taskAvailable("dream", dreamDraft) || !providerAvailable()) return;
+      setBusy(dreamButton, true, "触发中…");
+      try {
+        const response = await memoryClient.enqueueDream(agentId, { requestId: crypto.randomUUID() });
+        showFeedback(response.coalesced ? "已有 Dream 在运行，本次请求已合并。" : "Dream 任务已加入队列", "success");
+        await refreshStatus();
+      } catch (err) {
+        showFeedback(`Dream 启动失败：${err.message}`, "danger");
+        setBusy(dreamButton, false);
+      }
+    });
+    const form = document.createElement("div");
+    form.className = "vera-form-actions";
+    form.append(field("Digest 窗口", pending), digestButton, dreamButton, libraryLink);
+    actionsSection.appendChild(form);
   }
 
   function render() {
@@ -170,33 +194,43 @@ export async function mountAgentMemoryConfigView({ root, platform, runtime, agen
       content.replaceChildren(createNotice("正在读取 Memory 配置…"));
       return;
     }
-    if (error) {
-      content.replaceChildren(createNotice(error, "danger"));
+    if (loadError) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "vera-secondary-button";
+      retry.textContent = "重试";
+      retry.addEventListener("click", () => { void load(); });
+      content.replaceChildren(createNotice(`Memory 配置读取失败：${loadError}`, "danger"), retry, libraryLink);
       return;
     }
-
     content.replaceChildren(feedback, providerSection, statusSection, digestSection, dreamSection, actionsSection);
-    renderProvider();
-    renderStatus();
-    renderDigest();
-    renderDream();
+    renderMemoryProviderSection(providerSection, { config, options, status });
+    renderMemoryStatusSection(statusSection, status);
+    renderTask("digest");
+    renderTask("dream");
+    renderActions();
   }
 
   async function load() {
     loading = true;
-    error = null;
+    loadError = null;
     render();
-
     try {
-      const [configRes, statusRes] = await Promise.all([
-        memoryClient.getConfig(agentId).catch(() => null),
-        memoryClient.getStatus(agentId).catch(() => null),
+      const [configResponse, optionsResponse, statusResponse] = await Promise.all([
+        memoryClient.getConfig(agentId),
+        memoryClient.getOptions(agentId),
+        memoryClient.getStatus(agentId),
       ]);
       if (disposed) return;
-      config = configRes?.config ?? null;
-      status = statusRes ?? null;
+      config = configResponse.config;
+      version = configResponse.version;
+      options = optionsResponse;
+      status = statusResponse;
+      digestDraft = structuredClone(config.digest);
+      dreamDraft = structuredClone(config.dream);
+      syncPendingSelection();
     } catch (err) {
-      if (!disposed) error = err.message;
+      if (!disposed) loadError = err.message;
     } finally {
       if (!disposed) {
         loading = false;
@@ -205,40 +239,16 @@ export async function mountAgentMemoryConfigView({ root, platform, runtime, agen
     }
   }
 
-  digestBtn.addEventListener("click", async () => {
-    setBusy(digestBtn, true, "触发中…");
-    try {
-      await memoryClient.enqueueDigest(agentId, { mode: "incremental" });
-      feedback.textContent = "Digest 任务已加入队列";
-      feedback.dataset.tone = "success";
-      feedback.hidden = false;
-      await load();
-    } catch (err) {
-      feedback.textContent = err.message;
-      feedback.dataset.tone = "danger";
-      feedback.hidden = false;
-    } finally {
-      setBusy(digestBtn, false);
-    }
-  });
-
-  dreamBtn.addEventListener("click", async () => {
-    setBusy(dreamBtn, true, "触发中…");
-    try {
-      await memoryClient.enqueueDream(agentId, { requestId: `dream-${Date.now()}` });
-      feedback.textContent = "Dream 任务已加入队列";
-      feedback.dataset.tone = "success";
-      feedback.hidden = false;
-      await load();
-    } catch (err) {
-      feedback.textContent = err.message;
-      feedback.dataset.tone = "danger";
-      feedback.hidden = false;
-    } finally {
-      setBusy(dreamBtn, false);
-    }
-  });
-
   await load();
-  return () => { disposed = true; root.replaceChildren(); };
+  const unsubscribe = runtime.subscribe((envelope) => {
+    const eventAgentId = envelope.data?.agentId ?? envelope.data?.job?.agentId;
+    if (["memory.digest-job.updated", "memory.dream-job.updated"].includes(envelope.type) && eventAgentId === agentId) {
+      void refreshStatus();
+    }
+  });
+  return () => {
+    disposed = true;
+    unsubscribe();
+    root.replaceChildren();
+  };
 }

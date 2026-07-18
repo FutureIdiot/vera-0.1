@@ -3,7 +3,7 @@
 // falling back to the chat run interface.
 
 export async function run(ctx) {
-  const { check, httpRequest, assertEqual, assert, sse, agent, space } = ctx;
+  const { check, httpRequest, assertEqual, assert, sse, agent, owningAccount, space } = ctx;
   let requestBody;
   let jobId;
 
@@ -13,6 +13,7 @@ export async function run(ctx) {
     const message = timeline.json.items.find((item) => item.itemType === "message" && item.status === "completed");
     assert(message, "expected one completed Message in the shared verify Space");
     requestBody = {
+      accountId: owningAccount.id,
       spaceId: space.id,
       spaceSessionId: timeline.json.spaceSession.id,
       mode: "range",

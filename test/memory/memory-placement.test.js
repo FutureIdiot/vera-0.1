@@ -64,6 +64,13 @@ test("status projects configured placement and never exposes or probes a non-gat
     assert.deepEqual(result.payload.provider.placement, { runtime: "daemon", hostId: "host_a" });
     assert.equal(result.payload.provider.state, "unavailable");
     assert.equal("location" in result.payload.provider, false);
+    assert.deepEqual(result.payload.longTerm, {
+      activeCount: null,
+      archivedCount: null,
+      logicalBytes: null,
+      estimatedTokens: { estimator: "vera-utf8-v1", value: null },
+    });
+    assert.equal("hooks" in result.payload, false);
     assert.equal(vaultCalls, 1);
     const blocked = await listRequest(router, "agt_owner");
     assert.equal(blocked.status, 503);

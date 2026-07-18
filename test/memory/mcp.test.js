@@ -25,6 +25,7 @@ async function withMcp(fn) {
       mcp: createMemoryMcpDispatcher({ memory, retrieval }),
       context: {
         agentId: "agt_alpha",
+        accountId: "acc_alpha",
         agentSessionId: recall.agentSessionId,
         generation: recall.generation,
         spaceId: message.spaceId,
@@ -47,7 +48,7 @@ test("Memory MCP schemas never let tool arguments select identity or sources", a
     ]);
     for (const spec of tools) {
       const properties = spec.inputSchema.properties;
-      for (const forbidden of ["agentId", "agentSessionId", "generation", "spaceSessionId", "scope", "origin", "sources", "sourceRefs"]) {
+      for (const forbidden of ["agentId", "accountId", "agentSessionId", "generation", "spaceSessionId", "scope", "origin", "sources", "sourceRefs"]) {
         assert.equal(forbidden in properties, false, `${spec.name} must not expose ${forbidden}`);
       }
       assert.equal(spec.inputSchema.additionalProperties, false);
@@ -71,6 +72,7 @@ test("MCP binds Digest to the trusted SpaceSession", async () => {
     assert.equal(result.isError, undefined);
     assert.deepEqual(calls, [{
       agentId: context.agentId,
+      accountId: context.accountId,
       spaceId: context.spaceId,
       spaceSessionId: context.spaceSessionId,
       mode: "incremental",
@@ -78,6 +80,15 @@ test("MCP binds Digest to the trusted SpaceSession", async () => {
       fromMessageId: undefined,
       toMessageId: "msg_source01",
     }]);
+    const { accountId, ...missingAccountContext } = context;
+    const missingAccount = await mcp.callTool({
+      context: { ...missingAccountContext, triggerMessageId: "msg_source01" },
+      name: "memory_digest",
+      arguments: { mode: "incremental" },
+    });
+    assert.equal(missingAccount.isError, true);
+    assert.match(missingAccount.content[0].text, /accountId/);
+    assert.equal(calls.length, 1);
   });
 });
 

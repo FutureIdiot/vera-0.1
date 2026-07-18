@@ -200,6 +200,9 @@ export function createMemoryMcpDispatcher({ memory, retrieval, digestService = n
         if (typeof trusted.spaceSessionId !== "string" || !trusted.spaceSessionId) {
           throw invalid("trusted Memory MCP context requires spaceSessionId for memory_digest");
         }
+        if (typeof trusted.accountId !== "string" || !trusted.accountId) {
+          throw invalid("trusted Memory MCP context requires accountId for memory_digest");
+        }
         if (args.mode === "range" && (!args.fromMessageId || !args.toMessageId)) {
           throw invalid("memory_digest range mode requires fromMessageId and toMessageId");
         }
@@ -207,6 +210,7 @@ export function createMemoryMcpDispatcher({ memory, retrieval, digestService = n
         if (!toMessageId) throw invalid("memory_digest requires toMessageId or trusted triggerMessageId");
         const job = await digestService.enqueue({
           agentId: trusted.agentId,
+          accountId: trusted.accountId,
           spaceId: trusted.spaceId,
           spaceSessionId: trusted.spaceSessionId,
           mode: args.mode,

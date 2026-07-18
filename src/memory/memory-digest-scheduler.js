@@ -3,12 +3,13 @@
 
 import { cronMatches, parseFiveFieldCron } from "../core/cron.js";
 import { dreamScheduleMatches, nextDreamRunAt } from "./memory-dream-scheduler.js";
+import { estimateMemoryTokens } from "./memory-retrieval-text.js";
 
 export { cronMatches, parseFiveFieldCron } from "../core/cron.js";
 
 const MINUTE_MS = 60_000;
 const unicodeLength = (value) => typeof value === "string" ? Array.from(value).length : 0;
-const pairKey = (agentId, spaceSessionId) => `${agentId}\0${spaceSessionId}`;
+const pairKey = (agentId, accountId, spaceSessionId) => `${agentId}\0${accountId}\0${spaceSessionId}`;
 
 function completedMessages(store, spaceSessionId) {
   return store.list("messages").filter((message) =>
@@ -17,15 +18,37 @@ function completedMessages(store, spaceSessionId) {
 function automaticPairs(store, onlySpaceSessionId, onlyAgentId) {
   const pairs = new Map();
   for (const agentSession of store.list("agentSessions")) {
-    if (!agentSession?.agentId || (onlyAgentId && agentSession.agentId !== onlyAgentId)) continue;
+    if (!agentSession?.agentId || !agentSession.accountId ||
+        (onlyAgentId && agentSession.agentId !== onlyAgentId)) continue;
     if (onlySpaceSessionId && agentSession.spaceSessionId !== onlySpaceSessionId) continue;
+    const account = store.find("accounts", agentSession.accountId);
+    if (!account || account.ownerAgentId !== agentSession.agentId) continue;
     const spaceSession = store.find("spaceSessions", agentSession.spaceSessionId);
     if (!spaceSession?.spaceId) continue;
-    pairs.set(pairKey(agentSession.agentId, spaceSession.id), {
-      agentId: agentSession.agentId, spaceId: spaceSession.spaceId, spaceSessionId: spaceSession.id,
+    pairs.set(pairKey(agentSession.agentId, agentSession.accountId, spaceSession.id), {
+      agentId: agentSession.agentId,
+      accountId: agentSession.accountId,
+      spaceId: spaceSession.spaceId,
+      spaceSessionId: spaceSession.id,
+      agentSession,
     });
   }
   return [...pairs.values()];
+}
+
+function projectCurrentContext(agentSession) {
+  if (agentSession?.status !== "active") return null;
+  const context = agentSession.context ?? {};
+  return {
+    agentSessionId: agentSession.id,
+    generation: Number.isInteger(agentSession.generation) ? agentSession.generation : null,
+    estimatedInputTokens: Number.isFinite(context.estimatedInputTokens) ? context.estimatedInputTokens : null,
+    effectiveLimitTokens: Number.isFinite(context.effectiveLimitTokens) ? context.effectiveLimitTokens : null,
+    pressureRatio: Number.isFinite(context.pressureRatio) ? context.pressureRatio : null,
+    measurement: ["provider_reported", "tokenizer", "estimate"].includes(context.measurement)
+      ? context.measurement
+      : null,
+  };
 }
 function lastSuccessfulWatermarkSeq(store, agentId, spaceSessionId) {
   let watermark = -Infinity;
@@ -62,9 +85,9 @@ export function createMemoryDigestScheduler({
   function report(error) { logger?.error?.("memory digest automatic trigger failed", { code: typeof error?.code === "string" ? error.code : "internal" }); }
   function enqueue(input) { Promise.resolve().then(() => digestService.enqueueIncremental(input)).catch(report); }
 
-  function pendingWindow(agentId, spaceId, spaceSessionId) {
+  function pendingWindow(agentId, accountId, spaceId, spaceSessionId) {
     if (typeof digestService.getIncrementalWindow === "function") {
-      const resolved = digestService.getIncrementalWindow({ agentId, spaceId, spaceSessionId });
+      const resolved = digestService.getIncrementalWindow({ agentId, accountId, spaceId, spaceSessionId });
       if (!resolved) return { messages: [], charCount: 0 };
       return { messages: resolved.messages, charCount: resolved.range.charCount };
     }
@@ -73,18 +96,45 @@ export function createMemoryDigestScheduler({
     return { messages, charCount: messages.reduce((sum, message) => sum + unicodeLength(message.content), 0) };
   }
   function getPendingContext(agentId) {
-    const spaces = automaticPairs(store, null, agentId).map(({ spaceId, spaceSessionId }) => {
-      const window = pendingWindow(agentId, spaceId, spaceSessionId);
-      return { spaceId, spaceSessionId, messageCount: window.messages.length, charCount: window.charCount };
+    const spaces = automaticPairs(store, null, agentId).map(({ accountId, spaceId, spaceSessionId, agentSession }) => {
+      const window = pendingWindow(agentId, accountId, spaceId, spaceSessionId);
+      const estimatedTokens = window.messages.length > 0
+        ? estimateMemoryTokens(window.messages.map((message) => message.content ?? "").join(""))
+        : 0;
+      const currentContext = projectCurrentContext(agentSession);
+      return {
+        accountId,
+        spaceId,
+        spaceSessionId,
+        messageCount: window.messages.length,
+        charCount: window.charCount,
+        estimatedTokens: { estimator: "vera-utf8-v1", value: estimatedTokens },
+        ...(currentContext ? { currentContext } : {}),
+      };
     }).filter((item) => item.messageCount > 0);
-    return { messageCount: spaces.reduce((sum, item) => sum + item.messageCount, 0), charCount: spaces.reduce((sum, item) => sum + item.charCount, 0), spaces };
+    return {
+      messageCount: spaces.reduce((sum, item) => sum + item.messageCount, 0),
+      charCount: spaces.reduce((sum, item) => sum + item.charCount, 0),
+      estimatedTokens: {
+        estimator: "vera-utf8-v1",
+        value: spaces.reduce((sum, item) => sum + item.estimatedTokens.value, 0),
+      },
+      spaces,
+    };
   }
   function enqueueCatchUp(agentId = null) {
     for (const pair of automaticPairs(store, null, agentId)) {
       const trigger = triggerFor(pair.agentId);
       if (trigger.mode !== "scheduled" || !isWriteEnabled(pair.agentId)) continue;
-      const { messages } = pendingWindow(pair.agentId, pair.spaceId, pair.spaceSessionId);
-      if (messages.length) enqueue({ ...pair, trigger: "scheduled", toMessageId: messages.at(-1).id });
+      const { messages } = pendingWindow(pair.agentId, pair.accountId, pair.spaceId, pair.spaceSessionId);
+      if (messages.length) enqueue({
+        agentId: pair.agentId,
+        accountId: pair.accountId,
+        spaceId: pair.spaceId,
+        spaceSessionId: pair.spaceSessionId,
+        trigger: "scheduled",
+        toMessageId: messages.at(-1).id,
+      });
     }
   }
   function scheduledMatches(trigger, date) {
@@ -102,8 +152,15 @@ export function createMemoryDigestScheduler({
       let matched = false;
       for (let minute = first; minute <= current; minute += MINUTE_MS) if (scheduledMatches(trigger, new Date(minute))) { matched = true; break; }
       if (!matched) continue;
-      const { messages } = pendingWindow(pair.agentId, pair.spaceId, pair.spaceSessionId);
-      if (messages.length) enqueue({ ...pair, trigger: "scheduled", toMessageId: messages.at(-1).id });
+      const { messages } = pendingWindow(pair.agentId, pair.accountId, pair.spaceId, pair.spaceSessionId);
+      if (messages.length) enqueue({
+        agentId: pair.agentId,
+        accountId: pair.accountId,
+        spaceId: pair.spaceId,
+        spaceSessionId: pair.spaceSessionId,
+        trigger: "scheduled",
+        toMessageId: messages.at(-1).id,
+      });
     }
     lastTickMinute = current;
   }
@@ -130,9 +187,16 @@ export function createMemoryDigestScheduler({
     for (const pair of automaticPairs(store, message.spaceSessionId)) {
       const trigger = triggerFor(pair.agentId);
       if (trigger.mode !== "realtime" || !isWriteEnabled(pair.agentId)) continue;
-      const window = pendingWindow(pair.agentId, pair.spaceId, pair.spaceSessionId);
+      const window = pendingWindow(pair.agentId, pair.accountId, pair.spaceId, pair.spaceSessionId);
       if (!Number.isInteger(trigger.thresholdChars) || window.charCount < trigger.thresholdChars || !window.messages.length) continue;
-      enqueue({ ...pair, trigger: "realtime", toMessageId: window.messages.at(-1).id });
+      enqueue({
+        agentId: pair.agentId,
+        accountId: pair.accountId,
+        spaceId: pair.spaceId,
+        spaceSessionId: pair.spaceSessionId,
+        trigger: "realtime",
+        toMessageId: window.messages.at(-1).id,
+      });
     }
   }
   function start() {

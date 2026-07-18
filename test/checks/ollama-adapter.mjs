@@ -141,7 +141,7 @@ export async function run(ctx) {
       assertEqual(reply?.content, "OLLAMA_GATEWAY_STUB_OK");
 
       const queued = await verifiedRequest("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, spaceSessionId: userMessage.spaceSessionId, mode: "range",
+        accountId: account.id, spaceId: space.id, spaceSessionId: userMessage.spaceSessionId, mode: "range",
         fromMessageId: userMessage.id, toMessageId: reply.id,
       });
       assertEqual(queued.status, 202, JSON.stringify(queued.json));
@@ -240,7 +240,7 @@ export async function runReal(ctx) {
       );
 
       const firstQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, spaceSessionId: durable.spaceSessionId, mode: "range",
+        accountId: account.id, spaceId: space.id, spaceSessionId: durable.spaceSessionId, mode: "range",
         fromMessageId: durable.id, toMessageId: duplicate.id,
       });
       assertEqual(firstQueued.status, 202, JSON.stringify(firstQueued.json));
@@ -265,7 +265,7 @@ export async function runReal(ctx) {
         [invented, "unsupported_inference"],
       ]) {
         const negativeQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
-          spaceId: space.id, spaceSessionId: negative.spaceSessionId, mode: "range",
+          accountId: account.id, spaceId: space.id, spaceSessionId: negative.spaceSessionId, mode: "range",
           fromMessageId: negative.id, toMessageId: negative.id,
         });
         assertEqual(negativeQueued.status, 202, JSON.stringify(negativeQueued.json));
@@ -293,7 +293,7 @@ export async function runReal(ctx) {
         "再次确认：Vera 的人工验收端口仍固定为 3210。",
       );
       const repeatedQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, spaceSessionId: repeated.spaceSessionId, mode: "range",
+        accountId: account.id, spaceId: space.id, spaceSessionId: repeated.spaceSessionId, mode: "range",
         fromMessageId: repeated.id, toMessageId: repeated.id,
       });
       assertEqual(repeatedQueued.status, 202, JSON.stringify(repeatedQueued.json));
@@ -312,7 +312,7 @@ export async function runReal(ctx) {
         "纠正：Vera 的人工验收端口不再是 3210，改为 3211；这条更正取代之前的 3210 规则。",
       );
       const correctionQueued = await request("POST", `/api/agents/${agent.id}/memory/_digest`, {
-        spaceId: space.id, spaceSessionId: correction.spaceSessionId, mode: "range",
+        accountId: account.id, spaceId: space.id, spaceSessionId: correction.spaceSessionId, mode: "range",
         fromMessageId: correction.id, toMessageId: correction.id,
       });
       assertEqual(correctionQueued.status, 202, JSON.stringify(correctionQueued.json));

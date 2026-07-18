@@ -2,7 +2,6 @@
 
 import { asHandler, readJsonBody, sendJson, sendNoContent } from "../api/http.js";
 import { ApiError } from "../core/errors.js";
-import { getUnitBinding } from "../agents/unit-bindings.js";
 import { VERA_MARKDOWN_CAPABILITIES } from "./memory-provider-capabilities.js";
 
 const MARKDOWN_PROVIDER_OPTION = Object.freeze({
@@ -31,6 +30,32 @@ export function registerMemoryRoutes(router, {
       throw new ApiError("memory_provider_unavailable", "Memory Provider is not available on the gateway");
     }
     return provider;
+  }
+  function validateDigestScope(agentId, { accountId, spaceId, spaceSessionId }) {
+    if (typeof accountId !== "string" || !accountId) {
+      throw new ApiError("invalid_request", "accountId is required");
+    }
+    if (typeof spaceId !== "string" || !spaceId) {
+      throw new ApiError("invalid_request", "spaceId is required");
+    }
+    if (typeof spaceSessionId !== "string" || !spaceSessionId) {
+      throw new ApiError("invalid_request", "spaceSessionId is required");
+    }
+    const account = store.find("accounts", accountId);
+    if (!account || account.ownerAgentId !== agentId) {
+      throw new ApiError("invalid_request", "Account is not owned by this Agent");
+    }
+    const spaceSession = store.find("spaceSessions", spaceSessionId);
+    if (!spaceSession || spaceSession.spaceId !== spaceId) {
+      throw new ApiError("invalid_request", "SpaceSession does not belong to the bound Space");
+    }
+    const visibleSession = store.list("agentSessions").some((session) =>
+      session.spaceSessionId === spaceSessionId &&
+      session.accountId === accountId &&
+      session.agentId === agentId);
+    if (!visibleSession) {
+      throw new ApiError("invalid_request", "Agent has no Account visibility for this SpaceSession");
+    }
   }
 
   router.get(
@@ -92,8 +117,6 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory/_status",
     asHandler(async ({ res, params }) => {
       requireAgent(params.agentId);
-      const recall = getUnitBinding(store, params.agentId, "vera.memory.recall");
-      const write = getUnitBinding(store, params.agentId, "vera.memory.write");
       const digestJobs = digestService?.listJobs(params.agentId) ?? [];
       const dreamJobs = dreamService?.listJobs(params.agentId) ?? [];
       const lastDigest = digestJobs.at(-1) ?? null;
@@ -104,11 +127,23 @@ export function registerMemoryRoutes(router, {
       };
       const placement = structuredClone(configured.placement);
       let providerState = "available";
+      let listedMemories = null;
       if (placement.runtime !== "gateway") providerState = "unavailable";
       else {
-        try { await memory.listWithDiagnostics(params.agentId); }
+        try { listedMemories = await memory.listWithDiagnostics(params.agentId); }
         catch { providerState = "unavailable"; }
       }
+      const memorySummaries = Array.isArray(listedMemories?.memories) ? listedMemories.memories : null;
+      const longTerm = {
+        activeCount: memorySummaries
+          ? memorySummaries.filter((item) => item.status === "active").length
+          : null,
+        archivedCount: memorySummaries
+          ? memorySummaries.filter((item) => item.status === "archived").length
+          : null,
+        logicalBytes: null,
+        estimatedTokens: { estimator: "vera-utf8-v1", value: null },
+      };
       const nextDigestRunAt = digestScheduler?.nextRunAt?.(params.agentId) ?? null;
       const nextScheduledDreamRunAt = dreamScheduler?.nextRunAt?.(params.agentId) ?? null;
       sendJson(res, 200, {
@@ -119,8 +154,13 @@ export function registerMemoryRoutes(router, {
           capabilities: VERA_MARKDOWN_CAPABILITIES,
           ...(placement.runtime === "gateway" ? { location: { runtime: "gateway", agentPath: params.agentId } } : {}),
         },
-        hooks: { recall: { enabled: recall.enabled }, write: { enabled: write.enabled } },
-        pendingContext: digestScheduler?.getPendingContext?.(params.agentId) ?? { messageCount: 0, charCount: 0, spaces: [] },
+        longTerm,
+        pendingContext: digestScheduler?.getPendingContext?.(params.agentId) ?? {
+          messageCount: 0,
+          charCount: 0,
+          estimatedTokens: { estimator: "vera-utf8-v1", value: 0 },
+          spaces: [],
+        },
         digest: {
           status: lastDigest?.status ?? "idle",
           ...(lastDigest ? { lastJob: lastDigest } : {}),
@@ -146,12 +186,14 @@ export function registerMemoryRoutes(router, {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         throw new ApiError("invalid_request", "digest body must be an object");
       }
-      const allowed = new Set(["spaceId", "spaceSessionId", "mode", "fromMessageId", "toMessageId"]);
+      const allowed = new Set(["accountId", "spaceId", "spaceSessionId", "mode", "fromMessageId", "toMessageId"]);
       for (const key of Object.keys(body)) {
         if (!allowed.has(key)) throw new ApiError("invalid_request", `unknown digest field: ${key}`);
       }
+      validateDigestScope(params.agentId, body);
       const job = await digestService.enqueue({
         agentId: params.agentId,
+        accountId: body.accountId,
         trigger: "manual",
         spaceId: body?.spaceId,
         spaceSessionId: body?.spaceSessionId,

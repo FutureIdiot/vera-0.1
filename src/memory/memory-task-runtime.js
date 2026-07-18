@@ -40,21 +40,31 @@ export function createMemoryTaskRuntime({ store, now = () => new Date().toISOStr
     }
     return { ...profile, connection: structuredClone(agent.runtimeBinding?.connection ?? {}) };
   }
-  function currentVerification({ taskKind, executorAgentId, runtime, model }) {
+  function runtimeRevision(agent) {
+    return typeof agent?.runtimeRevision === "string" && agent.runtimeRevision.trim()
+      ? agent.runtimeRevision.trim()
+      : null;
+  }
+  function currentVerification({ taskKind, executorAgentId, revision, runtime, model }) {
     const fingerprint = connectionFingerprint(runtime.connection);
     return [...store.list(COLLECTION)].reverse().find((record) =>
       record.taskKind === taskKind && record.executorAgentId === executorAgentId &&
+      record.runtimeRevision === revision &&
       record.kind === runtime.kind && record.provider === runtime.provider &&
       record.model === model && record.connectionFingerprint === fingerprint) ?? null;
   }
   function recordVerification({ taskKind, executorAgentId, model }) {
     requireTaskKind(taskKind);
+    const agent = requireAgent(executorAgentId);
     const runtime = agentRuntime(executorAgentId);
+    const revision = runtimeRevision(agent);
+    if (!revision) throw unavailable(`executor Agent ${executorAgentId} runtime is unavailable`);
     const taskModel = requireModel(model);
     const record = store.insert(COLLECTION, {
       id: `mtv_${randomUUID().replaceAll("-", "")}`,
       taskKind,
       executorAgentId,
+      runtimeRevision: revision,
       kind: runtime.kind,
       provider: runtime.provider,
       model: taskModel,
@@ -68,7 +78,10 @@ export function createMemoryTaskRuntime({ store, now = () => new Date().toISOStr
     requireTaskKind(taskKind);
     if (!taskConfig || typeof taskConfig !== "object" || Array.isArray(taskConfig)) throw invalid("taskConfig must be an object");
     const executorAgentId = taskConfig.executorAgentId ?? ownerAgentId;
+    const executor = requireAgent(executorAgentId);
     const runtime = agentRuntime(executorAgentId);
+    const revision = runtimeRevision(executor);
+    if (!revision) throw unavailable(`executor Agent ${executorAgentId} runtime is unavailable`);
     if (!new Set(["inherit", "fixed"]).has(taskConfig.modelMode)) throw invalid("modelMode must be inherit or fixed");
     let taskModel;
     if (taskConfig.modelMode === "inherit") {
@@ -78,12 +91,18 @@ export function createMemoryTaskRuntime({ store, now = () => new Date().toISOStr
     } else {
       taskModel = requireModel(taskConfig.model);
     }
-    const verification = currentVerification({ taskKind, executorAgentId, runtime, model: taskModel });
+    const verification = currentVerification({
+      taskKind,
+      executorAgentId,
+      revision,
+      runtime,
+      model: taskModel,
+    });
     if (!verification) throw unavailable(`${taskKind} task model is not verified for the executor Agent runtime`);
     return {
       ownerAgentId,
       executorAgentId,
-      runtimeRevision: store.find("agents", executorAgentId)?.runtimeRevision ?? null,
+      runtimeRevision: revision,
       kind: runtime.kind,
       provider: runtime.provider,
       modelMode: taskConfig.modelMode,
@@ -96,19 +115,39 @@ export function createMemoryTaskRuntime({ store, now = () => new Date().toISOStr
     requireTaskKind(taskKind);
     const executors = store.list("agents").map((agent) => {
       let runtime;
-      try { runtime = agentRuntime(agent.id); } catch { return { agentId: agent.id, name: agent.name, availability: "unavailable", models: [] }; }
+      const revision = runtimeRevision(agent);
+      try {
+        runtime = agentRuntime(agent.id);
+        if (!revision) throw unavailable(`executor Agent ${agent.id} runtime is unavailable`);
+      } catch {
+        return {
+          agentId: agent.id,
+          name: agent.name,
+          runtimeRevision: null,
+          availability: "unavailable",
+          models: [],
+        };
+      }
       const fingerprint = connectionFingerprint(runtime.connection);
       const latestByModel = new Map();
       for (const record of store.list(COLLECTION)) {
         if (record.taskKind !== taskKind || record.executorAgentId !== agent.id ||
+            record.runtimeRevision !== revision ||
             record.kind !== runtime.kind || record.provider !== runtime.provider || record.connectionFingerprint !== fingerprint) continue;
         latestByModel.set(record.model, record);
       }
       const models = [...latestByModel.values()].sort((a, b) => a.model.localeCompare(b.model)).map((record) => ({
         model: record.model,
         verificationId: record.id,
+        isDefault: typeof runtime.model === "string" && runtime.model === record.model,
       }));
-      return { agentId: agent.id, name: agent.name, availability: models.length ? "available" : "unavailable", models };
+      return {
+        agentId: agent.id,
+        name: agent.name,
+        runtimeRevision: revision,
+        availability: models.length ? "available" : "unavailable",
+        models,
+      };
     });
     return { executors };
   }
@@ -129,6 +168,7 @@ export function createMemoryTaskRuntime({ store, now = () => new Date().toISOStr
     const fingerprint = connectionFingerprint(runtime.connection);
     const verification = store.find(COLLECTION, snapshot.verificationId);
     if (!verification || !TASK_KINDS.has(verification.taskKind) || verification.executorAgentId !== snapshot.executorAgentId ||
+        verification.runtimeRevision !== snapshot.runtimeRevision ||
         verification.kind !== runtime.kind || verification.provider !== runtime.provider ||
         verification.model !== snapshot.taskModel || verification.connectionFingerprint !== fingerprint ||
         snapshot.connectionFingerprint !== fingerprint) {

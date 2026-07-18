@@ -20,12 +20,16 @@ export async function run(ctx) {
     const status = await httpRequest("GET", `/api/agents/${agent.id}/memory/_status`);
     assertEqual(status.status, 200);
     assertEqual(status.json.provider.state, "available");
-    assertEqual(status.json.hooks.recall.enabled, true);
-    assertEqual(status.json.hooks.write.enabled, true);
+    assertEqual("hooks" in status.json, false);
+    assertEqual("activeCount" in status.json.longTerm, true);
+    assertEqual("archivedCount" in status.json.longTerm, true);
+    assertEqual("logicalBytes" in status.json.longTerm, true);
+    assertEqual(status.json.longTerm.estimatedTokens.estimator, "vera-utf8-v1");
     assertEqual("messageCount" in status.json.pendingContext, true);
+    assertEqual(status.json.pendingContext.estimatedTokens.estimator, "vera-utf8-v1");
   });
 
-  await check("p5-m4.2 Hook bindings use optimistic versions and status reads the same authority", async () => {
+  await check("p5-m4.2 Hook bindings use optimistic versions outside Memory status", async () => {
     const hooks = await httpRequest("GET", `/api/agents/${agent.id}/unit-bindings?kind=hook`);
     assertEqual(hooks.status, 200);
     assertEqual(hooks.json.bindings.length, 2);
@@ -41,8 +45,8 @@ export async function run(ctx) {
       ifMatch: recall.version,
     });
     assertEqual(stale.status, 409);
-    const status = await httpRequest("GET", `/api/agents/${agent.id}/memory/_status`);
-    assertEqual(status.json.hooks.recall.enabled, false);
+    const refreshed = await httpRequest("GET", `/api/agents/${agent.id}/unit-bindings?kind=hook`);
+    assertEqual(refreshed.json.bindings.find((item) => item.unitId === "vera.memory.recall").enabled, false);
   });
 
   await check("p5-m4.3 Dream is asynchronous, idempotent, and fails without an unverified fallback", async () => {
