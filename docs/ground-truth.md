@@ -159,7 +159,7 @@ Account与owner Agent严格1:1表示永久归属：每个Agent固定拥有一个
 - **网络门禁**：Tailscale 身份 + tailnet ACL 是全部 Vera 请求的外层网络门禁，不再使用 Cloudflare Access。
 - **Agent 身份**：Vera agent token（长随机串，gateway在`~/.vera/agent-tokens.json`加载校验，daemon在本机secret store持有），per-Agent一条，回答“实际是谁在执行”，并绑定该Agent的Memory。加入tailnet不等于获得Agent身份。
 - **Account访问权**：Account access key由User在Account页生成/轮换/撤销，是低频重新授权凭证，不是每次HTTP/SSE连接都发送的会话凭证。Phase 5.5当前仅与owner Agent token组合建立自己的Account Session；持有其他Account Key仍固定拒绝`delegation_unavailable`。未来开放代上线时，其他Agent也必须以自己的Agent Token + 目标Account Key建立临时Session，Key不改变其Agent身份或Memory。
-- **Account Session Token**：首次登录或需要重新授权时，gateway验证Agent Token + Account Key并签发高熵opaque Session Token；两端每次启动生成不落盘的`daemonBootId/gatewayBootId`，Token绑定`agentId + accountId + agentTokenFingerprint + accessKeyVersion + daemonBootId + gatewayBootId`。gateway只在内存保存Token hash，daemon只在当前进程持有明文，不落store、不进日志。此后同一daemon进程的SSE/HTTP重连及Account范围请求使用Agent Token + Session Token，不再重复验证Account Key。daemon重启后重验依赖受信daemon遵守Session Token不落盘；宿主失陷不属于该机制能掩盖的边界。
+- **Account Session Token**：首次登录或需要重新授权时，gateway验证Agent Token + Account Key并签发高熵opaque Session Token；两端每次启动生成不落盘的`daemonBootId/gatewayBootId`，Token绑定`agentId + accountId + agentTokenFingerprint + accessKeyVersion + daemonBootId + gatewayBootId`。每次Session另有非秘密、可审计的`accountSessionId`；它可写入Run但不能替代Token做认证。gateway只在内存保存Token hash，daemon只在当前进程持有明文，不落store、不进日志。此后同一daemon进程的SSE/HTTP重连及Account范围请求使用Agent Token + Session Token，不再重复验证Account Key。daemon重启后重验依赖受信daemon遵守Session Token不落盘；宿主失陷不属于该机制能掩盖的边界。
 - **重新授权条件**：gateway任一进程重启、daemon任一进程重启、显式登出、Account Key轮换/撤销或安全撤销都会令Session Token无效；下一次登录必须重新验证Account Key。普通网络抖动、SSE断线、presence因心跳暂时转offline、runtime配置刷新都不触发Key重验，也不设置周期性Key重验。
 - **无人值守重启**：Account Key可以只在daemon宿主的`~/.vera/secrets.json`中以`0600`权限保存，用于上述重新授权；它仍不得进入runtime profile、provider请求、Run、日志或gateway普通响应。若User选择不落盘，则daemon重启后需要重新输入Key。
 - **Owner 身份**：普通客户端请求只接受 Tailscale Serve 从回环代理注入且已去伪造的身份头；login 必须命中部署级 `config.security.ownerTailscaleLogins`。该列表默认空，生产启动时为空则拒绝普通业务 API 并报配置错误，不能因“单用户”退化成 tailnet 内任意设备均可管理。
@@ -167,6 +167,7 @@ Account与owner Agent严格1:1表示永久归属：每个Agent固定拥有一个
 
 `config.security.ownerTailscaleLogins` 与原生客户端 `config.security.cors.allowedOrigins` 是部署级字段，不进入普通 Settings UI；实现时支持对应 env override，但不得在路由中硬编码 owner 邮箱或 Origin。
 - **双凭证授权闸门**（Phase 5.5）：Account Session的建立/重新建立先以Agent Token固定`agentId`，再以Account Key固定`accountId`；二者都通过且`agentId === ownerAgentId`后才签发Session Token。普通续连只接受与两端boot id、当前Key version和Agent Token fingerprint匹配的Session Token。每条Execution还必须匹配当前owner Session并取得唯一租约。不存在`authorizedAgentIds`、共享Key或takeover旁路。
+- **Execution租约**（Phase 5.5）：daemon承载的pending Run在创建时冻结当前`accountSessionId`，只有同一Session可原子取得`executionLeaseId`并转为running；其他pending Run可以排队，但同一Account只有一个running租约。旧Session创建的Run不得被新Session重新认领。当前进程内adapter过渡链路显式标为`gateway-local`且不伪造Session/lease；迁入daemon后删除该过渡形态。
 
 **AgentState 改为 per-Agent + Account + Space**（联邦形态必需的精化）：
 

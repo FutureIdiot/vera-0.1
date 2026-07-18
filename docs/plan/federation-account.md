@@ -8,7 +8,7 @@
 
 ## 租约与Workspace
 
-- [ ] 每个Account同一时刻只允许一个owner会话和一个活跃Execution租约；`activeAgentId`只允许`ownerAgentId/null`。
+- [~] 每个Account同一时刻只允许一个owner会话和一个活跃Execution租约；daemon Run冻结非秘密`accountSessionId`，取得唯一`executionLeaseId`后才能running；`activeAgentId`只允许`ownerAgentId/null`。
 - [ ] 每个Account恰有一个Workspace。
 - [ ] gateway只保存Workspace宿主、绑定、策略、状态和校验时间；实际文件留在daemon宿主，且当前要求`workspace.hostId === owner runtime.hostId`。
 - [ ] Workspace、Space与项目数据按`accountId`隔离；provider/runtime/model按`agentId`隔离。
