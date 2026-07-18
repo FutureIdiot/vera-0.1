@@ -42,4 +42,6 @@
 - 2026-07-18收口Workspace数据边界：`hostId`固定表示可解释同一组绝对路径的Vera宿主命名空间；Workspace只承载Account项目执行边界，不吸收Space时间线、会话或附件。在线绑定与存量store统一规范化路径，规范化`(hostId,path)`最多属于一个Account；重复存量绑定在任何写入前阻止启动，迁移幂等。Space/Message/File纯性与普通投影不泄露path/policy均有独立回归测试。
 - 2026-07-18完成Account Session与Execution租约闭环：每次Session签发非秘密`accountSessionId`，daemon Run必须预先绑定同一Session并原子取得唯一`executionLeaseId`后才能running；同Account pending可排队、running只能一个，幂等authorize不重复发`run.started`，旧Session和`gateway-local` Run不能认领daemon租约。过渡期两种transport也做对称互斥，旧Run幂等补为`gateway-local`且不重跑身份迁移。
 - Control Service公开后续SSE/Run端点可复用的Account Session鉴权能力，但只返回去除Token hash的内部安全上下文；`accountSessionId/executionLeaseId`均不能替代Agent Token + Session Token认证。
-- 本切片验收：`npm test`为293通过、3个显式opt-in跳过；固定`PORT=3210`临时gateway启动成功，`GET /api/health`返回200。
+- 2026-07-18完成daemon本机凭证存储基础：`config.agentDaemon.secretsPath`默认`~/.vera/secrets.json`，`agentCredentials[agentId]`只持久化Agent Token与User选择保存的per-Account Key；严格拒绝符号链接、非`0600`文件及任意AccountSession字段，原子更新时保留其他顶层secretRef数据。AccountSession继续只存在于daemon/gateway当前进程；登录、心跳与授权控制面不调用模型。
+- 2026-07-18完成Memory Provider placement持久形状与存量登记：provider严格保存`providerId + placement + config`，独立v2迁移把Phase 5现存`vera.markdown`幂等登记为`gateway`且不触碰Memory正文；binding version包含placement，普通PATCH不能偷换宿主。非gateway placement在daemon driver接线前明确unavailable，HTTP Memory读写与新整理任务均在触碰gateway vault前拒绝，状态投影不返回绝对路径。新CLI的daemon默认绑定留给后续真实daemon首次login，既有gateway数据不静默改挂。
+- 本切片最新验收：`npm test`为307通过、3个显式opt-in跳过；固定`PORT=3210`临时gateway启动成功，`GET /api/health`返回200。

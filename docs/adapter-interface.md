@@ -272,7 +272,8 @@ gateway只在owner登录会话期间把Agent runtime能力与自己Account的Wor
 
 Key模式成功后gateway生成高熵Account Session Token与非秘密`accountSessionId`，并把Token绑定记录只保存在当前进程内；daemon同样只在当前
 进程内持有Token。`accountSessionId`可进入Run审计但不能认证；响应中的Token只出现一次，不落store、不进日志。无人值守daemon若要在自身或gateway重启后
-自动重新授权，可把Account Key保存在本机`~/.vera/secrets.json`（权限`0600`）；Session Token仍不得落盘。
+自动重新授权，可把Account Key保存在本机`~/.vera/secrets.json`的`agentCredentials[agentId].accountKeys[accountId]`（权限`0600`），Agent Token保存在同一Agent条目；AccountSession Token仍不得落盘。daemon必须拒绝符号链接或宽松权限文件，并在更新该命名空间时保留其他顶层secretRef数据。
+本机路径由`config.agentDaemon.secretsPath`提供，默认`~/.vera/secrets.json`，可用`VERA_AGENT_SECRETS_PATH`覆盖；路径配置本身不是secret，不得把文件正文或明文值登记到gateway。
 
 gateway把Account置`online`、写`activeAgentId=ownerAgentId`和`lastSeenAt`，广播
 `account.presence.updated`。同一daemon只登录该Agent自己的owner Account；每次登录只对应一个Workspace与租约。

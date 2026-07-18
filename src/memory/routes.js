@@ -25,11 +25,19 @@ export function registerMemoryRoutes(router, {
     if (!agent) throw new ApiError("not_found", `agent ${agentId} does not exist`);
     return agent;
   }
+  function requireGatewayProvider(agentId) {
+    const provider = configService?.getConfig?.(agentId)?.config?.provider;
+    if (!provider || provider.placement?.runtime !== "gateway") {
+      throw new ApiError("memory_provider_unavailable", "Memory Provider is not available on the gateway");
+    }
+    return provider;
+  }
 
   router.get(
     "/api/agents/:agentId/memory",
     asHandler(async ({ res, params }) => {
       requireAgent(params.agentId);
+      requireGatewayProvider(params.agentId);
       const result = await memory.listWithDiagnostics(params.agentId);
       const memories = result.memories.map(({ sourceRefs, links, schemaVersion, scope, ...summary }) => ({
         ...summary,
@@ -91,17 +99,25 @@ export function registerMemoryRoutes(router, {
       const lastDigest = digestJobs.at(-1) ?? null;
       const lastDream = dreamJobs[0] ?? null;
       const currentDream = dreamJobs.find((job) => ["queued", "running", "applying"].includes(job.status));
+      const configured = configService?.getConfig?.(params.agentId)?.config?.provider ?? {
+        providerId: "vera.markdown", placement: { runtime: "gateway" }, config: {},
+      };
+      const placement = structuredClone(configured.placement);
       let providerState = "available";
-      try { await memory.listWithDiagnostics(params.agentId); }
-      catch { providerState = "unavailable"; }
+      if (placement.runtime !== "gateway") providerState = "unavailable";
+      else {
+        try { await memory.listWithDiagnostics(params.agentId); }
+        catch { providerState = "unavailable"; }
+      }
       const nextDigestRunAt = digestScheduler?.nextRunAt?.(params.agentId) ?? null;
       const nextScheduledDreamRunAt = dreamScheduler?.nextRunAt?.(params.agentId) ?? null;
       sendJson(res, 200, {
         provider: {
-          providerId: "vera.markdown",
+          providerId: configured.providerId,
+          placement,
           state: providerState,
           capabilities: VERA_MARKDOWN_CAPABILITIES,
-          location: { vaultRoot: memory.getVaultPath(), agentPath: params.agentId },
+          ...(placement.runtime === "gateway" ? { location: { runtime: "gateway", agentPath: params.agentId } } : {}),
         },
         hooks: { recall: { enabled: recall.enabled }, write: { enabled: write.enabled } },
         pendingContext: digestScheduler?.getPendingContext?.(params.agentId) ?? { messageCount: 0, charCount: 0, spaces: [] },
@@ -124,6 +140,7 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory/_digest",
     asHandler(async ({ req, res, params }) => {
       requireAgent(params.agentId);
+      requireGatewayProvider(params.agentId);
       if (!digestService) throw new ApiError("adapter_unavailable", "Memory digest service is unavailable");
       const body = await readJsonBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -150,6 +167,7 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory/_dream",
     asHandler(async ({ req, res, params }) => {
       requireAgent(params.agentId);
+      requireGatewayProvider(params.agentId);
       if (!dreamService) throw new ApiError("memory_task_unavailable", "Memory Dream service is unavailable");
       const body = await readJsonBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body) ||
@@ -183,6 +201,7 @@ export function registerMemoryRoutes(router, {
       `/api/agents/:agentId/memory/_dream/jobs/:jobId/${action}`,
       asHandler(async ({ res, params }) => {
         requireAgent(params.agentId);
+        if (action === "retry") requireGatewayProvider(params.agentId);
         if (!dreamService) throw new ApiError("not_found", `Dream job ${params.jobId} does not exist`);
         sendJson(res, 200, { job: dreamService[action](params.agentId, params.jobId) });
       }),
@@ -193,6 +212,7 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory/:slug/pin",
     asHandler(async ({ req, res, params }) => {
       requireAgent(params.agentId);
+      requireGatewayProvider(params.agentId);
       await memory.getMemory(params.agentId, params.slug);
       const body = await readJsonBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body) ||
@@ -230,6 +250,7 @@ export function registerMemoryRoutes(router, {
       `/api/agents/:agentId/memory/_digest-jobs/:jobId/${action}`,
       asHandler(async ({ res, params }) => {
         requireAgent(params.agentId);
+        if (action === "retry") requireGatewayProvider(params.agentId);
         if (!digestService) throw new ApiError("not_found", `digest job ${params.jobId} does not exist`);
         const job = await digestService[action](params.agentId, params.jobId);
         sendJson(res, 200, { job });
@@ -241,6 +262,7 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory",
     asHandler(async ({ req, res, params }) => {
       requireAgent(params.agentId);
+      requireGatewayProvider(params.agentId);
       const body = await readJsonBody(req);
       const saved = await memory.saveMemory(params.agentId, body);
       retrieval.recordUserEdit(params.agentId, saved.slug);
@@ -252,6 +274,7 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory/:slug",
     asHandler(async ({ res, params }) => {
       requireAgent(params.agentId);
+      requireGatewayProvider(params.agentId);
       const mem = await memory.getMemory(params.agentId, params.slug);
       sendJson(res, 200, { memory: mem });
     }),
@@ -261,6 +284,7 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory/:slug",
     asHandler(async ({ req, res, params }) => {
       requireAgent(params.agentId);
+      requireGatewayProvider(params.agentId);
       const body = await readJsonBody(req);
       const mem = await memory.updateMemory(params.agentId, params.slug, body);
       if (["type", "description", "status", "content"].some((key) => Object.hasOwn(body, key))) {
@@ -274,6 +298,7 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory/:slug",
     asHandler(async ({ res, params, query }) => {
       requireAgent(params.agentId);
+      requireGatewayProvider(params.agentId);
       await memory.deleteMemory(params.agentId, params.slug, query.get("ifMatch") ?? undefined);
       sendNoContent(res);
     }),

@@ -160,8 +160,10 @@ Account与owner Agent严格1:1表示永久归属：每个Agent固定拥有一个
 - **Agent 身份**：Vera agent token（长随机串，gateway在`~/.vera/agent-tokens.json`加载校验，daemon在本机secret store持有），per-Agent一条，回答“实际是谁在执行”，并绑定该Agent的Memory。加入tailnet不等于获得Agent身份。
 - **Account访问权**：Account access key由User在Account页生成/轮换/撤销，是低频重新授权凭证，不是每次HTTP/SSE连接都发送的会话凭证。Phase 5.5当前仅与owner Agent token组合建立自己的Account Session；持有其他Account Key仍固定拒绝`delegation_unavailable`。未来开放代上线时，其他Agent也必须以自己的Agent Token + 目标Account Key建立临时Session，Key不改变其Agent身份或Memory。
 - **Account Session Token**：首次登录或需要重新授权时，gateway验证Agent Token + Account Key并签发高熵opaque Session Token；两端每次启动生成不落盘的`daemonBootId/gatewayBootId`，Token绑定`agentId + accountId + agentTokenFingerprint + accessKeyVersion + daemonBootId + gatewayBootId`。每次Session另有非秘密、可审计的`accountSessionId`；它可写入Run但不能替代Token做认证。gateway只在内存保存Token hash，daemon只在当前进程持有明文，不落store、不进日志。此后同一daemon进程的SSE/HTTP重连及Account范围请求使用Agent Token + Session Token，不再重复验证Account Key。daemon重启后重验依赖受信daemon遵守Session Token不落盘；宿主失陷不属于该机制能掩盖的边界。
+- **Session命名不得混用**：本条登录态统一称“Account授权会话（`AccountSession`）”。它不同于Space聊天窗口`SpaceSession`、per-Agent模型上下文`AgentSession`及CLI/provider自己的thread/session。AccountSession失效只撤销登录与Execution授权，不删除或换代后三者、Memory、Workspace绑定或provider binding。
 - **重新授权条件**：gateway任一进程重启、daemon任一进程重启、显式登出、Account Key轮换/撤销或安全撤销都会令Session Token无效；下一次登录必须重新验证Account Key。普通网络抖动、SSE断线、presence因心跳暂时转offline、runtime配置刷新都不触发Key重验，也不设置周期性Key重验。
-- **无人值守重启**：Account Key可以只在daemon宿主的`~/.vera/secrets.json`中以`0600`权限保存，用于上述重新授权；它仍不得进入runtime profile、provider请求、Run、日志或gateway普通响应。若User选择不落盘，则daemon重启后需要重新输入Key。
+- **无人值守重启**：Account Key可以只在daemon宿主的`~/.vera/secrets.json`中以`0600`权限保存，用于上述重新授权；Agent Token同样由daemon从该文件的Agent凭证命名空间加载。该文件不得是符号链接，daemon只读写自己的`agentCredentials`命名空间并保留其他secretRef数据；AccountSession Token绝不允许进入文件。若User选择不保存Account Key，则daemon重启后需要重新输入Key。
+- 登录、心跳、SSE重连、Workspace/Execution授权都只运行Vera控制逻辑，不调用provider或模型，因此不产生模型token消耗。只有聊天/工作Run及明确启用的Digest、Dream、compact或模型型扩展任务调用模型；Recall等确定性投影本身不调用模型，但会增加后续Run输入上下文。
 - **Owner 身份**：普通客户端请求只接受 Tailscale Serve 从回环代理注入且已去伪造的身份头；login 必须命中部署级 `config.security.ownerTailscaleLogins`。该列表默认空，生产启动时为空则拒绝普通业务 API 并报配置错误，不能因“单用户”退化成 tailnet 内任意设备均可管理。
 - **客户端撤销**：撤销手机/Mac访问通过tailnet管理台移除设备或ACL；Vera当前不再自建owner配对码、device session或第二套设备目录。daemon的进程内Account Session Token不属于owner客户端device session，也不授予普通管理API权限。
 

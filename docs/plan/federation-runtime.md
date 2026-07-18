@@ -18,6 +18,7 @@
 ## Agent daemon
 
 - [ ] 新增`scripts/agent-daemon.js`，读取私网gateway URL、Agent Token与可选本机Account Key secret；Session Token只放进程内。
+- [ ] daemon直接复用已完成的`daemon-credentials`模块；daemon链路启用后才把随后新登记的CLI Agent在首次login原子绑定到已验证的daemon placement Memory。此前已登记为gateway placement的Agent保持原位，不借login静默改挂。
 - [ ] daemon按Agent报告稳定`hostId`、runtime/provider/model，按自己的owner Account报告同宿主唯一Workspace，并可报告daemon placement Memory Provider revision。
 - [ ] main Run冻结`spaceSessionId + agentSessionId + generation`；isolated任务终态销毁。
 - [ ] 处理专用compact request/result，不把压缩结果发布为聊天Message。

@@ -5,6 +5,7 @@ import { parseFiveFieldCron } from "../core/cron.js";
 const COLLECTION = "memoryConfigs";
 const PROVIDER_ID = "vera.markdown";
 const MIGRATION_ID = "_migration:memory-config-v1";
+const PLACEMENT_MIGRATION_ID = "_migration:memory-config-v2";
 const BODY_KEYS = new Set(["provider", "digest", "dream", "ifMatch"]);
 
 function invalid(message) { return new ApiError("invalid_request", message); }
@@ -57,14 +58,31 @@ function validateModelSelection(store, value, label) {
   }
 }
 function validateProvider(value) {
-  exactKeys(value, ["providerId", "config"], "provider");
+  exactKeys(value, ["providerId", "placement", "config"], "provider");
   if (value.providerId !== PROVIDER_ID) {
     throw new ApiError("memory_provider_unsupported", `Memory Provider ${value.providerId} is unsupported`);
   }
   if (!value.config || typeof value.config !== "object" || Array.isArray(value.config) || Object.keys(value.config).length) {
     throw invalid("vera.markdown provider config must be an empty object");
   }
-  return { providerId: PROVIDER_ID, config: {} };
+  const placement = value.placement;
+  if (!placement || typeof placement !== "object" || Array.isArray(placement) || typeof placement.runtime !== "string") {
+    throw invalid("provider.placement is invalid");
+  }
+  if (placement.runtime === "gateway" || placement.runtime === "remote") {
+    exactKeys(placement, ["runtime"], "provider.placement");
+  } else if (placement.runtime === "daemon") {
+    exactKeys(placement, ["runtime", "hostId"], "provider.placement");
+    if (typeof placement.hostId !== "string" || !placement.hostId.trim()) {
+      throw invalid("provider.placement.hostId must be a non-empty string");
+    }
+  } else {
+    throw invalid("provider.placement.runtime must be gateway, daemon, or remote");
+  }
+  const normalizedPlacement = placement.runtime === "daemon"
+    ? { runtime: "daemon", hostId: placement.hostId.trim() }
+    : { runtime: placement.runtime };
+  return { providerId: PROVIDER_ID, placement: normalizedPlacement, config: {} };
 }
 function validateDigest(store, value) {
   exactKeys(value, ["executorAgentId", "modelMode", "model", "trigger"], "digest");
@@ -138,7 +156,7 @@ export function createMemoryConfigService({ store, settingsStore = null, config,
   function create(agentId, digest = defaultTaskConfig("digest")) {
     const publicConfig = {
       agentId,
-      provider: { providerId: PROVIDER_ID, config: {} },
+      provider: { providerId: PROVIDER_ID, placement: { runtime: "gateway" }, config: {} },
       digest,
       dream: defaultTaskConfig("dream"),
     };
@@ -189,6 +207,40 @@ export function createMemoryConfigService({ store, settingsStore = null, config,
     // the new M4 manual defaults, including after a crash/restart.
     for (const agent of store.list("agents")) if (!find(agent.id)) create(agent.id);
     await store.flush?.();
+
+    // P5 legacy configs are registered in place. This migration deliberately
+    // touches binding metadata only; it never inspects or rewrites Memory data.
+    let placementMarker = store.find(COLLECTION, PLACEMENT_MIGRATION_ID);
+    if (!placementMarker) {
+      placementMarker = store.insert(COLLECTION, {
+        id: PLACEMENT_MIGRATION_ID,
+        migration: "memory-config-v2",
+        status: "prepared",
+        pending: store.list(COLLECTION)
+          .filter((record) => record.id !== MIGRATION_ID && !record.id.startsWith("_migration:") &&
+            store.find("agents", record.agentId) && record.provider?.providerId === PROVIDER_ID &&
+            !record.provider.placement)
+          .map((record) => record.id),
+      });
+      await store.flush?.();
+    }
+    if (placementMarker.status !== "completed") {
+      for (const recordId of placementMarker.pending ?? []) {
+        const record = store.find(COLLECTION, recordId);
+        if (record?.provider?.providerId === PROVIDER_ID && !record.provider.placement) {
+          const provider = { ...structuredClone(record.provider), placement: { runtime: "gateway" } };
+          const migrated = { agentId: record.agentId, provider, digest: record.digest, dream: record.dream };
+          store.update(COLLECTION, recordId, { provider, version: versionFor(migrated) });
+        }
+        const pending = (placementMarker.pending ?? []).filter((id) => id !== recordId);
+        placementMarker = store.update(COLLECTION, PLACEMENT_MIGRATION_ID, { pending });
+        await store.flush?.();
+      }
+      placementMarker = store.update(COLLECTION, PLACEMENT_MIGRATION_ID, {
+        status: "completed", completedAt: new Date().toISOString(), pending: [],
+      });
+      await store.flush?.();
+    }
   }
   async function patchConfig(agentId, body) {
     requireAgent(agentId);
@@ -199,7 +251,13 @@ export function createMemoryConfigService({ store, settingsStore = null, config,
     const current = find(agentId) ?? create(agentId);
     if (current.version !== body.ifMatch) throw new ApiError("conflict", "Memory config was modified");
     const next = stripRecord(current);
-    if (body.provider !== undefined) next.provider = validateProvider(body.provider);
+    if (body.provider !== undefined) {
+      const provider = validateProvider(body.provider);
+      if (JSON.stringify(provider.placement) !== JSON.stringify(current.provider.placement)) {
+        throw invalid("provider placement changes require an explicit migration");
+      }
+      next.provider = provider;
+    }
     if (body.digest !== undefined) next.digest = validateDigest(store, body.digest);
     if (body.dream !== undefined) next.dream = validateDream(store, body.dream);
     if (typeof validateTaskSelection === "function") {
@@ -216,6 +274,7 @@ export function createMemoryConfigService({ store, settingsStore = null, config,
     const providerVersion = versionFor(current.provider);
     return {
       providerId: current.provider.providerId,
+      placement: structuredClone(current.provider.placement),
       bindingVersion: providerVersion,
       configVersion: versionFor(current.provider.config),
     };

@@ -114,7 +114,67 @@ test("config PATCH replaces complete nested sections with opaque optimistic vers
     await assert.rejects(() => service.patchConfig("agt_owner", { dream: after.config.dream, ifMatch: before.version }),
       (error) => error.code === "conflict");
     await assert.rejects(() => service.patchConfig("agt_owner", {
-      provider: { providerId: "third.party", config: {} }, ifMatch: after.version,
+      provider: { providerId: "third.party", placement: { runtime: "gateway" }, config: {} }, ifMatch: after.version,
     }), (error) => error.code === "memory_provider_unsupported");
+  });
+});
+
+test("provider bindings use strict placement and gateway is the create default", async () => {
+  await fixture(async ({ service }) => {
+    const created = service.getConfig("agt_owner");
+    assert.deepEqual(created.config.provider, {
+      providerId: "vera.markdown", placement: { runtime: "gateway" }, config: {},
+    });
+    for (const placement of [
+      { runtime: "gateway", hostId: "unexpected" },
+      { runtime: "remote", hostId: "unexpected" },
+      { runtime: "daemon" },
+      { runtime: "daemon", hostId: "   " },
+      { runtime: "unknown" },
+    ]) {
+      await assert.rejects(() => service.patchConfig("agt_owner", {
+        provider: { providerId: "vera.markdown", placement, config: {} }, ifMatch: created.version,
+      }), (error) => error.code === "invalid_request");
+    }
+  });
+});
+
+test("legacy provider placement migration is independent, idempotent, and body-preserving", async () => {
+  await fixture(async ({ store, service }) => {
+    const legacy = {
+      id: "agt_owner", agentId: "agt_owner",
+      provider: { providerId: "vera.markdown", config: {} },
+      digest: { executorAgentId: null, modelMode: "inherit", model: null, trigger: { mode: "manual" } },
+      dream: { executorAgentId: null, modelMode: "inherit", model: null, schedule: { mode: "manual" } },
+      version: "legacy-version",
+      memoryBodySentinel: "must-not-be-touched",
+    };
+    store.insert("memoryConfigs", legacy);
+    await service.initializeExistingAgents();
+    const migrated = store.find("memoryConfigs", "agt_owner");
+    assert.deepEqual(migrated.provider, {
+      providerId: "vera.markdown", placement: { runtime: "gateway" }, config: {},
+    });
+    assert.equal(migrated.memoryBodySentinel, "must-not-be-touched");
+    const firstVersion = migrated.version;
+    await service.initializeExistingAgents();
+    assert.equal(store.find("memoryConfigs", "agt_owner").version, firstVersion);
+    assert.equal(store.find("memoryConfigs", "_migration:memory-config-v2").status, "completed");
+    assert.equal(service.listAll().some((item) => item.config?.migration === "memory-config-v2"), false);
+    assert.notEqual(firstVersion, "legacy-version");
+  });
+});
+
+test("provider binding version includes safe placement and placement cannot be changed by PATCH", async () => {
+  await fixture(async ({ service }) => {
+    const before = service.getConfig("agt_owner");
+    const snapshot = service.getProviderSnapshot("agt_owner");
+    assert.deepEqual(snapshot.placement, { runtime: "gateway" });
+    assert.match(snapshot.bindingVersion, /^sha256:[a-f0-9]{64}$/);
+    await assert.rejects(() => service.patchConfig("agt_owner", {
+      provider: { providerId: "vera.markdown", placement: { runtime: "daemon", hostId: "host_a" }, config: {} },
+      ifMatch: before.version,
+    }), (error) => error.code === "invalid_request");
+    assert.deepEqual(service.getConfig("agt_owner").config.provider.placement, { runtime: "gateway" });
   });
 });
