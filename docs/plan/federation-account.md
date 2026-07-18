@@ -6,13 +6,6 @@
 - 本文件负责Account固定owner数据模型、Space Seat、Execution绑定、Workspace、前端管理，以及Agent Token + Account Key +进程内Account Session的完整凭证闭环；SSE、Run上报与provider执行wire仍在后续文件
 - 固定owner、Account Seat、Execution身份与portable Agent profile迁移已完成；事实与验收证据见`completed-foundation.md`
 
-## 租约与Workspace
-
-- [ ] 每个Account恰有一个Workspace。
-- [ ] gateway只保存Workspace宿主、绑定、策略、状态和校验时间；实际文件留在daemon宿主，且当前要求`workspace.hostId === owner runtime.hostId`。
-- [ ] Workspace、Space与项目数据按`accountId`隔离；provider/runtime/model按`agentId`隔离。
-- [ ] SpaceSession、AgentSession与API规范history继续由gateway持有。
-
 ## 凭证安全与Account Session
 
 - [ ] daemon从本机secret store加载明文Agent Token；明文不进repo、日志、普通API响应或gateway持久化。

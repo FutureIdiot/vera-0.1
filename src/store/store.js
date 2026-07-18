@@ -49,6 +49,7 @@ import {
   preflightFederationAccountMigration,
   migrateFederationAccounts,
 } from "./migrations/federation-account.mjs";
+import { planWorkspaceBindings } from "./migrations/workspace-bindings.mjs";
 
 const COLLECTIONS = [
   "agents", "accounts", "spaces", "messages", "activities", "approvals", "runs", "themes",
@@ -147,7 +148,6 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
   }
 
   async function preflightFinalFederationShape(source = data) {
-    if (!needsFederationAccountMigration({ data: source })) return;
     // Some very old stores still need the Phase 4.1 and P5-C1 transforms before
     // their final ownership graph can be evaluated. Rehearse that exact order
     // on a clone with inert persistence, then validate Phase 5.5. A rejected
@@ -159,7 +159,19 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     if (needsContextSessionsMigration({ data: preview })) {
       await migrateContextSessions({ data: preview, markDirty() {} });
     }
-    preflightFederationAccountMigration({ data: preview });
+    if (needsFederationAccountMigration({ data: preview })) {
+      const federationPlan = preflightFederationAccountMigration({ data: preview });
+      preview.accounts = federationPlan.accounts;
+    }
+    planWorkspaceBindings(preview.accounts);
+  }
+
+  function normalizeAccountWorkspaceBindings() {
+    const plan = planWorkspaceBindings(data.accounts);
+    if (!plan.changed) return false;
+    data.accounts = plan.accounts;
+    markDirty("accounts");
+    return true;
   }
 
   async function preflightLegacyPayload(parsed) {
@@ -216,6 +228,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
       const plan = preflightFederationAccountMigration({ data });
       await migrateFederationAccounts({ data, markDirty, flush, plan });
     }
+    normalizeAccountWorkspaceBindings();
     normalizeRunExecutionFields(data, markDirty);
     markAllDirty();
     await flush();
@@ -336,10 +349,11 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
       });
       await migrateFederationAccounts({ data, markDirty, flush, plan });
     }
+    normalizeAccountWorkspaceBindings();
     const runsNormalized = normalizeRunExecutionFields(data, markDirty);
     if (sessionStates) await retireLegacySessionStatesFile(legacySessionStatesPath);
     delete data.sessionStates;
-    if (runsNormalized) await flush();
+    if (runsNormalized || dirty.has("accounts")) await flush();
   }
 
   function assertCollection(name) {

@@ -43,7 +43,7 @@ Vera是单用户、自部署的多agent协作空间。
 | 字段 | 说明 |
 |------|------|
 | 命名 | Space中展示的账号名；历史Message冻结发送时名称快照 |
-| Space与项目数据 | Seat、Workspace、Files可见性及项目资料随Account；当前只授权其owner Agent使用 |
+| Space与项目数据 | Seat记录Account的成员身份与响应规则；Space时间线和Space-owned Files由gateway按Space共享管理。Account自己的Workspace与项目执行权限当前只授权其owner Agent使用 |
 | 所属Agent | `ownerAgentId`；首次成功接入时建立，之后不可普通修改，且一个Agent只能拥有一个Account |
 | 接入Key | `accessKeyState`为`active/revoked`，version单调递增；User生成、轮换、撤销，明文只返回一次，gateway只保存不可逆校验值 |
 | 当前上线者 | `activeAgentId`是登录会话/租约派生状态；Phase 5.5当前只允许为`ownerAgentId`或`null`，字段保留未来代上线扩展 |
@@ -57,7 +57,7 @@ Vera是单用户、自部署的多agent协作空间。
 | provider/runtime/model | 属于Agent daemon的真实执行能力；Account不再保存或决定模型 |
 | 能力与Data设置 | Skills / Hooks / MCP / Data四个平级目录继续属于Agent |
 
-**Execution（执行）**：一次实际运行的绑定关系。每个Execution创建时固定`agentId + accountId + runtimeRevision + effectiveModel + delegated`；Agent贡献自己的Memory与模型能力，Account贡献Space、Workspace、Files和项目数据。
+**Execution（执行）**：一次实际运行的绑定关系。每个Execution创建时固定`agentId + accountId + runtimeRevision + effectiveModel + delegated`；Agent贡献自己的Memory与模型能力，Account贡献本次Space Seat身份、Account Workspace与相应项目执行权限。Space时间线和附件仍是gateway持有的Space共享数据，不移入Workspace。
 
 **说明：**
 - 创建入口固定为Account；不得要求User先创建空Agent再补连接。新Account首次且仅首次`enroll`时原子创建owner Agent并写入`ownerAgentId`；该绑定建立后不可再用此Account创建第二个Agent。
@@ -68,9 +68,9 @@ Vera是单用户、自部署的多agent协作空间。
 - 一个Agent同一时刻只能维持自己的一个Account登录会话；重复或竞争会话遵守Account租约，不得形成多Account经营入口。
 - **每个Account同一时刻只允许一个活跃登录/Execution租约**。owner重复登录不得以接管参数强制撤销旧会话或取消在飞Execution；普通竞争请求返回`account_busy`，由正常退出、超时或明确的owner会话管理流程释放租约。
 - `effectiveModel`必须是本次Execution实际使用的可展示模型名，由Agent runtime在Run创建前解析并冻结；不得为空、写成`default`或回退显示Account名/provider名。
-- Memory始终按`agentId`隔离；Workspace、Space成员关系与项目数据按`accountId`隔离；AgentSession按`spaceSessionId + accountId + agentId`建模。
+- Memory始终按`agentId`隔离；Workspace与项目执行权限按`accountId`隔离；Space时间线按`spaceId`共享、成员关系和响应规则落在Account Seat；AgentSession按`spaceSessionId + accountId + agentId`建模。
 - MCP或第三方Hook是否需要额外执行者由该unit自己的契约声明，不把`executorAgentId`设为所有Hook的强制公共字段。gateway内置的确定性Hook直接由gateway程序执行，不展示执行Agent或模型选择。需要模型的领域任务在自身Data配置中指定任务模型，不把模型选择扩张成所有MCP/Hook单元的通用字段
-- Gateway、Agent daemon、Workspace与Memory Provider可部署在不同机器；每台执行宿主以稳定`hostId`登记，gateway只保存路由、绑定、策略、状态与校验信息，不把任一宿主绝对路径当成跨设备可用数据。
+- Gateway、Agent daemon、Workspace与Memory Provider可部署在不同机器；每个能解释同一组本地绝对路径并直接执行其Workspace的Vera宿主命名空间以稳定`hostId`登记。daemon重启不得改变`hostId`；同机但文件系统互相隔离的容器视为不同宿主命名空间。gateway只保存路由、绑定、策略、状态与校验信息，不把任一宿主绝对路径当成跨设备可用数据。
 - Phase 5.5当前Workspace必须与owner Agent daemon位于同一`hostId`；实际文件留在该宿主，gateway不复制项目内容。跨宿主挂载与远程Workspace执行均不在当前闭环，宿主不匹配明确`workspace_unavailable`。
 - Phase 5.5现在建立gateway内的唯一`Vera Control Service`：统一负责Agent/Account重新授权、进程内Account Session、Workspace宿主准入与Execution权限判定。它与gateway共用事实来源和HTTP入口，不另建第二套账号、Key或权限数据库。
 - Workspace宿主后续以稳定`hostId`接入Control Service并执行实际文件/Git/进程操作；Control Service只决定“谁可在何次Execution访问哪个Workspace”，不读取、代理保存或备份宿主正文。第一方Workspace Node协议是权威内部协议，未来`vera.workspace` MCP只能作为该协议的适配入口，不能成为身份或授权事实来源。
@@ -187,7 +187,7 @@ Account与owner Agent严格1:1表示永久归属：每个Agent固定拥有一个
 
 ## 三、数据层
 
-数据分四个独立领域，隔离规则分别定义。前三类是用户认知、内容和活动数据；Workspace是Account的执行数据边界，不混入Files。
+数据分四个独立领域，隔离规则分别定义。前三类是用户认知、内容和活动数据；Workspace是Account的执行数据边界，不混入Space时间线或Files。
 
 ### 3.1 Memory
 对话记录、长期记忆。Agent的认知层。

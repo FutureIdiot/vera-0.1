@@ -1,7 +1,7 @@
 // Account-bound Workspace control data. This module never reads or proxies
 // Workspace files; it only validates and projects gateway-side bindings.
 
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { ApiError } from "../core/errors.js";
 
 const UNAVAILABLE_STATUSES = new Set(["offline", "unavailable", "error"]);
@@ -41,7 +41,7 @@ export function parseWorkspace(value, { requirePath = true, allowLastValidatedAt
   if (requirePath || workspace.path !== undefined) {
     const path = text(workspace.path, "workspace.path");
     if (!isAbsolute(path)) invalid("workspace.path must be absolute");
-    result.path = path;
+    result.path = resolve(path);
   }
   if (workspace.lastValidatedAt !== undefined) {
     if (!allowLastValidatedAt) invalid("workspace contains unsupported fields");
@@ -50,13 +50,22 @@ export function parseWorkspace(value, { requirePath = true, allowLastValidatedAt
   return result;
 }
 
-export function refreshWorkspaceBinding(account, incoming, { runtimeHostId }) {
+export function refreshWorkspaceBinding(account, incoming, { runtimeHostId, accounts }) {
+  if (!Array.isArray(accounts)) throw new TypeError("refreshWorkspaceBinding requires Account records");
   if (runtimeHostId !== incoming.hostId) {
     throw new ApiError("workspace_unavailable", "Workspace host does not match the Agent runtime host");
   }
   const current = account.workspace;
   const now = new Date().toISOString();
   if (!current) {
+    const conflict = accounts.find((other) => {
+      if (!other || other.id === account.id || !other.workspace) return false;
+      return other.workspace.hostId === incoming.hostId &&
+        resolve(other.workspace.path) === incoming.path;
+    });
+    if (conflict) {
+      throw new ApiError("workspace_unavailable", "Workspace is already bound to another Account");
+    }
     return {
       ...incoming,
       accountId: account.id,
@@ -64,11 +73,12 @@ export function refreshWorkspaceBinding(account, incoming, { runtimeHostId }) {
       updatedAt: now,
     };
   }
-  if (current.hostId !== incoming.hostId || current.path !== incoming.path) {
+  if (current.hostId !== incoming.hostId || resolve(current.path) !== incoming.path) {
     throw new ApiError("workspace_unavailable", "Workspace binding does not match this Account");
   }
   return {
     ...current,
+    path: incoming.path,
     status: incoming.status,
     lastValidatedAt: incoming.lastValidatedAt ?? now,
     updatedAt: now,

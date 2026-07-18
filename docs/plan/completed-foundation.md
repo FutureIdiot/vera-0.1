@@ -39,6 +39,7 @@
 - Account Key创建/轮换/撤销基础已实现：明文只在创建或轮换响应出现一次且响应为`no-store`，持久化仅保存salted scrypt材料和单调版本。
 - 2026-07-18完成gateway内唯一`Vera Control Service`：`enroll/login/logout`实现Agent Token + Account Key低频重新授权和Agent Token +进程内Account Session普通续连；gateway的Agent Token文件只保存SHA-256校验摘要，Account Session只保存进程内hash并绑定两端boot、Agent Token fingerprint与Key version。daemon/gateway重启、登出、Key轮换或撤销均使旧Session失效；非owner固定`delegation_unavailable`，重复owner竞争固定`account_busy`。
 - Workspace控制面已实现首次原子绑定、精确匹配register及逐Run authorize；普通Account和Workspace投影不返回绝对路径或policy原文，失败login不留下runtime/Workspace部分写入。当前仍不包含Workspace Node独立进程、远程文件/Git/process、MCP或非owner代上线。
+- 2026-07-18收口Workspace数据边界：`hostId`固定表示可解释同一组绝对路径的Vera宿主命名空间；Workspace只承载Account项目执行边界，不吸收Space时间线、会话或附件。在线绑定与存量store统一规范化路径，规范化`(hostId,path)`最多属于一个Account；重复存量绑定在任何写入前阻止启动，迁移幂等。Space/Message/File纯性与普通投影不泄露path/policy均有独立回归测试。
 - 2026-07-18完成Account Session与Execution租约闭环：每次Session签发非秘密`accountSessionId`，daemon Run必须预先绑定同一Session并原子取得唯一`executionLeaseId`后才能running；同Account pending可排队、running只能一个，幂等authorize不重复发`run.started`，旧Session和`gateway-local` Run不能认领daemon租约。过渡期两种transport也做对称互斥，旧Run幂等补为`gateway-local`且不重跑身份迁移。
 - Control Service公开后续SSE/Run端点可复用的Account Session鉴权能力，但只返回去除Token hash的内部安全上下文；`accountSessionId/executionLeaseId`均不能替代Agent Token + Session Token认证。
 - 本切片验收：`npm test`为293通过、3个显式opt-in跳过；固定`PORT=3210`临时gateway启动成功，`GET /api/health`返回200。

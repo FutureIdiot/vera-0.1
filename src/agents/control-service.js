@@ -199,6 +199,7 @@ export function createControlService({ store, config, memoryConfigService = null
       validateRuntime(agent, input.runtime);
       const workspaceBinding = refreshWorkspaceBinding(account, input.workspace, {
         runtimeHostId: input.runtime.hostId,
+        accounts: store.list("accounts"),
       });
 
       if (record) {
@@ -254,7 +255,10 @@ export function createControlService({ store, config, memoryConfigService = null
       if (input.runtimeRevision !== agent.runtimeRevision || input.runtimeRevision !== session.runtimeRevision) {
         throw new ApiError("workspace_unavailable", "runtimeRevision does not match the active Agent runtime");
       }
-      const binding = refreshWorkspaceBinding(account, input.workspace, { runtimeHostId: session.runtimeHostId });
+      const binding = refreshWorkspaceBinding(account, input.workspace, {
+        runtimeHostId: session.runtimeHostId,
+        accounts: store.list("accounts"),
+      });
       const updated = store.update("accounts", account.id, {
         workspace: binding,
         lastSeenAt: new Date().toISOString(),
