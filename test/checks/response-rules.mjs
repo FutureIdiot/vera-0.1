@@ -2,19 +2,12 @@
 // blockAccountIds 声告段过滤 + 直向 @ 穿透。
 
 export async function run(ctx) {
-  const { check, httpRequest, sse, assertEqual, assert } = ctx;
+  const { check, httpRequest, sse, assertEqual, assert, createOnlineMockAccount } = ctx;
 
   await check("m.1 silent 默认（respondTo=null）：广播不响应、定向 @ 响应", async () => {
-    const agentS1Resp = await httpRequest("POST", "/api/agents", {
-      name: "VerifyMockS1",
-      kind: "cli",
-      provider: "mock",
-      connection: {},
-      model: "mock-v1",
-    });
-    assertEqual(agentS1Resp.status, 201);
-    const agentS1 = agentS1Resp.json.agent;
-    const accountS1 = agentS1Resp.json.account;
+    const onlineS1 = await createOnlineMockAccount({ name: "VerifyMockS1" });
+    const agentS1 = onlineS1.agent;
+    const accountS1 = onlineS1.account;
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m1-space",
       seats: [{ accountId: accountS1.id, responseMode: "silent" }],
@@ -46,26 +39,12 @@ export async function run(ctx) {
   });
 
   await check("m.2 silent + respondTo=['user']：user 广播响应、agent 广播不响应、direct @ 响应", async () => {
-    const agentS2Resp = await httpRequest("POST", "/api/agents", {
-      name: "VerifyMockS2",
-      kind: "cli",
-      provider: "mock",
-      connection: {},
-      model: "mock-v1",
-    });
-    assertEqual(agentS2Resp.status, 201);
-    const agentS2 = agentS2Resp.json.agent;
-    const accountS2 = agentS2Resp.json.account;
-    const agentS2bResp = await httpRequest("POST", "/api/agents", {
-      name: "VerifyMockS2b",
-      kind: "cli",
-      provider: "mock",
-      connection: {},
-      model: "mock-v1",
-    });
-    assertEqual(agentS2bResp.status, 201);
-    const agentS2b = agentS2bResp.json.agent;
-    const accountS2b = agentS2bResp.json.account;
+    const onlineS2 = await createOnlineMockAccount({ name: "VerifyMockS2" });
+    const agentS2 = onlineS2.agent;
+    const accountS2 = onlineS2.account;
+    const onlineS2b = await createOnlineMockAccount({ name: "VerifyMockS2b" });
+    const agentS2b = onlineS2b.agent;
+    const accountS2b = onlineS2b.account;
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m2-space",
       seats: [
@@ -107,16 +86,9 @@ export async function run(ctx) {
   });
 
   await check("m.3 focused：广播不响应、定向 @ 响应", async () => {
-    const agentF3Resp = await httpRequest("POST", "/api/agents", {
-      name: "VerifyMockF3",
-      kind: "cli",
-      provider: "mock",
-      connection: {},
-      model: "mock-v1",
-    });
-    assertEqual(agentF3Resp.status, 201);
-    const agentF3 = agentF3Resp.json.agent;
-    const accountF3 = agentF3Resp.json.account;
+    const onlineF3 = await createOnlineMockAccount({ name: "VerifyMockF3" });
+    const agentF3 = onlineF3.agent;
+    const accountF3 = onlineF3.account;
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m3-space",
       seats: [{ accountId: accountF3.id, responseMode: "focused" }],
@@ -144,26 +116,12 @@ export async function run(ctx) {
   });
 
   await check("m.4 blockAccountIds：声告段过滤 + 不影响 shouldRespond + direct @ 穿透", async () => {
-    const agentXResp = await httpRequest("POST", "/api/agents", {
-      name: "VerifyMockX",
-      kind: "cli",
-      provider: "mock",
-      connection: {},
-      model: "mock-v1",
-    });
-    assertEqual(agentXResp.status, 201);
-    const agentX = agentXResp.json.agent;
-    const accountX = agentXResp.json.account;
-    const agentYResp = await httpRequest("POST", "/api/agents", {
-      name: "VerifyMockY",
-      kind: "cli",
-      provider: "mock",
-      connection: {},
-      model: "mock-v1",
-    });
-    assertEqual(agentYResp.status, 201);
-    const agentY = agentYResp.json.agent;
-    const accountY = agentYResp.json.account;
+    const onlineX = await createOnlineMockAccount({ name: "VerifyMockX" });
+    const agentX = onlineX.agent;
+    const accountX = onlineX.account;
+    const onlineY = await createOnlineMockAccount({ name: "VerifyMockY" });
+    const agentY = onlineY.agent;
+    const accountY = onlineY.account;
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m4-space",
       seats: [

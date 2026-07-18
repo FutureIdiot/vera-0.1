@@ -1,7 +1,7 @@
 // 发消息（api-contract.md 三、POST /api/spaces/:id/messages）：创建 Message，
 // 按每个 seat 的 responseMode 决定哪些 agent 产生 run。
 
-import { newMessageId } from "../core/id.js";
+import { newActivityId, newMessageId } from "../core/id.js";
 import { ApiError } from "../core/errors.js";
 import { getAccountOrThrow } from "../agents/accounts.js";
 import { getSpaceOrThrow } from "./spaces.js";
@@ -50,6 +50,26 @@ function shouldRespond(seat, message) {
   return false;
 }
 
+function publishOfflineActivity({ store, hub, space, spaceSession, account }) {
+  const timestamp = new Date().toISOString();
+  const activity = store.insert("activities", {
+    id: newActivityId(),
+    spaceId: space.id,
+    spaceSessionId: spaceSession.id,
+    runId: null,
+    accountId: account.id,
+    agentId: null,
+    phase: "error",
+    label: "agent-offline",
+    detail: `${account.name} Account当前离线，已跳过此条`,
+    toolStatus: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+  hub.publish("activity.created", { activity: stripInternal(activity) });
+  return activity;
+}
+
 export function postMessage({
   store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
   contextCompaction, files, spaceId, body,
@@ -92,7 +112,17 @@ export function postMessage({
     if (body.author?.type === "account" && body.author.accountId === seat.accountId) continue; // 不自问自答
     if (!shouldRespond(seat, message)) continue;
     const account = getAccountOrThrow(store, seat.accountId);
-    const agent = account.ownerAgentId ? store.find("agents", account.ownerAgentId) : null;
+    const addressed = isAddressedTo(message, account.id);
+    const activeAgent = account.activeAgentId ? store.find("agents", account.activeAgentId) : null;
+    const isOnlineOwner = account.presence === "online" && activeAgent &&
+      activeAgent.id === account.ownerAgentId;
+    if (addressed && !isOnlineOwner) {
+      publishOfflineActivity({ store, hub, space, spaceSession, account });
+      continue;
+    }
+    // federation-runtime 尚未切走 gateway-local adapter；广播仍沿用 owner
+    // 过渡链路。定向 @ 已严格要求当前 owner Account Session 在线。
+    const agent = addressed ? activeAgent : account.ownerAgentId ? store.find("agents", account.ownerAgentId) : null;
     if (!agent) continue;
 
     const adapter = resolveAdapter(agent);

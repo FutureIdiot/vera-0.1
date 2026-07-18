@@ -1,5 +1,6 @@
 export function createRunStatus({ onCancel } = {}) {
   const activeRuns = new Map();
+  const agentStates = new Map();
   const element = document.createElement("div");
   element.className = "vera-work-status";
   element.hidden = true;
@@ -10,9 +11,22 @@ export function createRunStatus({ onCancel } = {}) {
   cancel.textContent = "取消";
   element.append(text, cancel);
 
+  function stateKey(state) {
+    if (!state?.agentId || !state?.accountId || !state?.spaceId) return null;
+    return `${state.agentId}:${state.accountId}:${state.spaceId}`;
+  }
+
   function render() {
-    text.textContent = activeRuns.size > 1 ? `${activeRuns.size} 个 Agent 正在处理…` : "Agent 正在处理…";
-    element.hidden = activeRuns.size === 0;
+    const visibleStates = [...agentStates.values()].filter((state) => state.status !== "idle");
+    if (visibleStates.length > 1) {
+      text.textContent = `${visibleStates.length} 个 Agent 正在处理…`;
+    } else if (visibleStates.length === 1) {
+      const state = visibleStates[0];
+      text.textContent = `${state.status}${state.detail ? ` · ${state.detail}` : ""}`;
+    } else {
+      text.textContent = activeRuns.size > 1 ? `${activeRuns.size} 个 Agent 正在处理…` : "Agent 正在处理…";
+    }
+    element.hidden = visibleStates.length === 0 && activeRuns.size === 0;
   }
 
   cancel.addEventListener("click", async () => {
@@ -33,12 +47,12 @@ export function createRunStatus({ onCancel } = {}) {
         render();
       } else if (envelope.type === "agent.state.updated" && envelope.data?.agentState) {
         const state = envelope.data.agentState;
-        if (!state.spaceId || state.spaceId === spaceId) {
-          text.textContent = state.detail || state.status;
-          element.hidden = state.status === "idle" && activeRuns.size === 0;
-        }
+        const key = stateKey(state);
+        if (!key || state.spaceId !== spaceId) return;
+        agentStates.set(key, state);
+        render();
       }
     },
-    reset() { activeRuns.clear(); render(); },
+    reset() { activeRuns.clear(); agentStates.clear(); render(); },
   };
 }

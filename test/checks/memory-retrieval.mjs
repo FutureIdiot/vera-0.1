@@ -2,15 +2,12 @@
 // Agent isolation, stain safety, and unchanged SSE event vocabulary.
 
 export async function run(ctx) {
-  const { check, httpRequest, assertEqual, assert, sse } = ctx;
+  const { check, httpRequest, assertEqual, assert, sse, createOnlineMockAccount } = ctx;
 
   await check("r.1 M3 retrieval injects safely once per session and keeps SSE unchanged", async () => {
-    const created = await httpRequest("POST", "/api/agents", {
-      name: "M3 alpha", kind: "cli", provider: "mock", model: "mock-v1", connection: {},
-    });
-    assertEqual(created.status, 201);
-    const agentId = created.json.agent.id;
-    ctx.m3AccountId = created.json.account.id;
+    const created = await createOnlineMockAccount({ name: "M3 alpha" });
+    const agentId = created.agent.id;
+    ctx.m3AccountId = created.account.id;
     const memories = [
       ["orchid-alpha", "兰花协议甲：检索必须保持确定性"],
       ["orchid-pinned", "兰花协议乙：游标必须保持稳定"],
@@ -31,7 +28,7 @@ export async function run(ctx) {
     assertEqual(listed.json.memories.find((item) => item.slug === "orchid-pinned").pinned, true);
 
     await httpRequest("PATCH", "/api/settings", { settings: { "memory.injectionBudgetResidentLines": 1 } });
-    const accountId = created.json.account.id;
+    const accountId = created.account.id;
     const space = await httpRequest("POST", "/api/spaces", { name: "M3 retrieval", seats: [{ accountId }] });
     assertEqual(space.status, 201);
     const beforeSeq = Math.max(0, ...sse.events.map((event) => event.seq ?? 0));
@@ -80,11 +77,9 @@ export async function run(ctx) {
   });
 
   await check("r.3 M3 retrieval never crosses Agent scope", async () => {
-    const created = await httpRequest("POST", "/api/agents", {
-      name: "M3 beta", kind: "cli", provider: "mock", model: "mock-v1", connection: {},
-    });
-    const agentId = created.json.agent.id;
-    const accountId = created.json.account.id;
+    const created = await createOnlineMockAccount({ name: "M3 beta" });
+    const agentId = created.agent.id;
+    const accountId = created.account.id;
     await httpRequest("POST", `/api/agents/${agentId}/memory`, {
       slug: "beta-orchid", type: "project_rule", description: "兰花协议仅属于beta",
       content: "beta authority",

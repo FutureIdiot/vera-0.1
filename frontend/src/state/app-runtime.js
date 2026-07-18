@@ -63,11 +63,19 @@ export function createAppRuntime({
       bootstrap.accounts = upsert(bootstrap.accounts, envelope.data.account);
     } else if (envelope.type === "account.presence.updated" && envelope.data?.accountId) {
       bootstrap.accounts = bootstrap.accounts.map((account) => account.id === envelope.data.accountId
-        ? { ...account, presence: envelope.data.presence, lastSeenAt: envelope.data.lastSeenAt }
+        ? {
+            ...account,
+            presence: envelope.data.presence,
+            lastSeenAt: envelope.data.lastSeenAt,
+            activeAgentId: envelope.data.activeAgentId,
+          }
         : account);
     } else if (envelope.type === "agent.state.updated" && envelope.data?.agentState) {
       const state = envelope.data.agentState;
-      const index = bootstrap.agentStates.findIndex((candidate) => candidate.agentId === state.agentId && candidate.spaceId === state.spaceId);
+      const index = bootstrap.agentStates.findIndex((candidate) =>
+        candidate.agentId === state.agentId
+        && candidate.accountId === state.accountId
+        && candidate.spaceId === state.spaceId);
       bootstrap.agentStates = index === -1
         ? [...bootstrap.agentStates, state]
         : bootstrap.agentStates.map((candidate, candidateIndex) => candidateIndex === index ? state : candidate);

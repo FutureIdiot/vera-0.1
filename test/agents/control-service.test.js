@@ -673,6 +673,7 @@ test("daemon authorize claims one lease idempotently and rejects unsafe transpor
 
 test("concurrent daemon authorize requests serialize to one lease", async () => {
   await daemonFixture(async ({ created, enrolled, login, store, router, hub }) => {
+    const seqBeforeAuthorization = hub.currentSeq();
     const session = login.json.accountSession;
     const first = daemonRun(store, {
       id: "run_concurrent_a",
@@ -702,7 +703,35 @@ test("concurrent daemon authorize requests serialize to one lease", async () => 
     ]);
     assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
     assert.equal(store.list("runs").filter((run) => run.status === "running").length, 1);
-    assert.equal(hub.currentSeq(), 1);
+    assert.equal(hub.currentSeq(), seqBeforeAuthorization + 1);
+  });
+});
+
+test("Account login reconnect publishes the exact online presence event", async () => {
+  await daemonFixture(async ({ created, enrolled, login, store, router, hub }) => {
+    const events = [];
+    const unsubscribe = hub.subscribe({
+      write(frame) {
+        const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
+        if (dataLine) events.push(JSON.parse(dataLine.slice("data: ".length)));
+      },
+    });
+    try {
+      const reconnect = await request(router, "POST", "/api/agent/login", loginBody(created.account.id), {
+        authorization: `Bearer ${enrolled.json.agentToken}`,
+        "x-vera-account-session": login.json.accountSession.token,
+      });
+      assert.equal(reconnect.status, 200);
+      const account = store.find("accounts", created.account.id);
+      assert.deepEqual(events.filter((event) => event.type === "account.presence.updated").map((event) => event.data), [{
+        accountId: created.account.id,
+        presence: "online",
+        lastSeenAt: account.lastSeenAt,
+        activeAgentId: enrolled.json.agent.id,
+      }]);
+    } finally {
+      unsubscribe();
+    }
   });
 });
 

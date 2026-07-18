@@ -126,6 +126,62 @@ export function createBinaryHttpClient(defaultPort) {
   };
 }
 
+export async function createOnlineMockAccount({ port, name }) {
+  const hostId = `verify-${crypto.randomUUID()}`;
+  async function jsonRequest(path, { method = "GET", headers = {}, body } = {}) {
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers: body === undefined ? headers : { "Content-Type": "application/json", ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const json = await response.json();
+    if (!response.ok) throw new Error(`${method} ${path} failed: ${response.status} ${JSON.stringify(json)}`);
+    return json;
+  }
+
+  const created = await jsonRequest("/api/accounts", { method: "POST", body: { name } });
+  const enrolled = await jsonRequest("/api/agent/enroll", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${created.accessKey}` },
+    body: {
+      accountId: created.account.id,
+      agent: { name: `${name} Agent` },
+      runtimeProfile: { schemaVersion: 1, kind: "cli", provider: "mock", model: "mock-v1" },
+    },
+  });
+  const login = await jsonRequest("/api/agent/login", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${enrolled.agentToken}`,
+      "X-Vera-Account-Key": created.accessKey,
+    },
+    body: {
+      accountId: created.account.id,
+      daemonBootId: `boot-${hostId}`,
+      runtime: {
+        hostId,
+        kind: "cli",
+        provider: "mock",
+        model: "mock-v1",
+        revision: `sha256:${hostId}`,
+        runtimeCapabilities: { tools: [] },
+      },
+      workspace: {
+        hostId,
+        path: `/tmp/${hostId}`,
+        status: "ready",
+        policy: { allow: ["read", "write"] },
+      },
+    },
+  });
+  return {
+    agent: login.agent,
+    account: login.account,
+    agentToken: enrolled.agentToken,
+    accountSession: login.accountSession,
+  };
+}
+
 // 打开一条真实 SSE 连接，逐帧解析为事件对象，累积在 .events；waitFor 等
 // 满足条件的事件出现。
 export function connectSse({ port, since } = {}) {
@@ -218,8 +274,15 @@ export async function waitForHealth(port, timeoutMs = 8000) {
 export async function startGateway({ repoRoot, env, cwd = repoRoot }) {
   const port = await getFreePort();
   const resolvedEnv = { ...env };
+  if (resolvedEnv.VERA_ALLOW_LOOPBACK_DEVELOPMENT === undefined) {
+    resolvedEnv.VERA_ALLOW_LOOPBACK_DEVELOPMENT = "true";
+  }
+  if (resolvedEnv.NODE_ENV === undefined) resolvedEnv.NODE_ENV = "test";
   if (resolvedEnv.VERA_DATA_PATH && !resolvedEnv.VERA_FILES_ATTACHMENTS_PATH) {
     resolvedEnv.VERA_FILES_ATTACHMENTS_PATH = join(resolvedEnv.VERA_DATA_PATH, "files");
+  }
+  if (resolvedEnv.VERA_DATA_PATH && !resolvedEnv.VERA_AGENT_TOKENS_PATH) {
+    resolvedEnv.VERA_AGENT_TOKENS_PATH = join(resolvedEnv.VERA_DATA_PATH, "agent-tokens.json");
   }
   const child = spawn(process.execPath, [`${repoRoot}/src/server.js`], {
     cwd,

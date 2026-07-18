@@ -2,26 +2,23 @@
 // consumers rather than CRUD responses alone.
 
 export async function run(ctx) {
-  const { check, httpRequest, assertEqual, assert, sse } = ctx;
+  const { check, httpRequest, assertEqual, assert, sse, createOnlineMockAccount } = ctx;
 
-  await check("q.1 bootstrap Account shape exposes honest offline capability state", async () => {
+  await check("q.1 bootstrap Account shape exposes honest presence capability state", async () => {
     const response = await httpRequest("GET", "/api/bootstrap");
     assertEqual(response.status, 200);
     for (const account of response.json.accounts) {
-      assertEqual(account.presence, "offline");
-      assertEqual(account.runtimeCapabilities, null);
+      assert(["online", "offline"].includes(account.presence), "presence must be an honest contract value");
       assert(typeof account.ownerAgentId === "string", "ownerAgentId should be present");
-      assertEqual(account.activeAgentId, null);
+      if (account.presence === "online") assertEqual(account.activeAgentId, account.ownerAgentId);
+      else assertEqual(account.activeAgentId, null);
     }
   });
 
   await check("q.2 presentation settings hot-update the active bubble consumer", async () => {
-    const created = await httpRequest("POST", "/api/agents", {
-      name: "F4 bubble runtime", kind: "cli", provider: "mock", model: "mock-v1", connection: {},
-    });
-    assertEqual(created.status, 201);
-    const agentId = created.json.agent.id;
-    const accountId = created.json.account.id;
+    const created = await createOnlineMockAccount({ name: "F4 bubble runtime" });
+    const agentId = created.agent.id;
+    const accountId = created.account.id;
     const space = await httpRequest("POST", "/api/spaces", { name: "F4 bubble runtime", seats: [{ accountId }] });
     assertEqual(space.status, 201);
     const setting = await httpRequest("PATCH", "/api/settings", {
@@ -48,16 +45,13 @@ export async function run(ctx) {
   });
 
   await check("q.3 resident-index budget hot-updates before a new external session", async () => {
-    const created = await httpRequest("POST", "/api/agents", {
-      name: "F4 memory budget", kind: "cli", provider: "mock", model: "mock-v1", connection: {},
-    });
-    assertEqual(created.status, 201);
-    const agentId = created.json.agent.id;
+    const created = await createOnlineMockAccount({ name: "F4 memory budget" });
+    const agentId = created.agent.id;
     await httpRequest("POST", `/api/agents/${agentId}/memory`, { slug: "first-memory", type: "decision", description: "first hook", content: "first" });
     await httpRequest("POST", `/api/agents/${agentId}/memory`, { slug: "second-memory", type: "decision", description: "second hook", content: "second" });
     const setting = await httpRequest("PATCH", "/api/settings", { settings: { "memory.injectionBudgetResidentLines": 1 } });
     assertEqual(setting.status, 200);
-    const accountId = created.json.account.id;
+    const accountId = created.account.id;
     const space = await httpRequest("POST", "/api/spaces", { name: "F4 memory budget", seats: [{ accountId }] });
     const sent = await httpRequest("POST", `/api/spaces/${space.json.space.id}/messages`, {
       author: { type: "user", userId: "owner" },

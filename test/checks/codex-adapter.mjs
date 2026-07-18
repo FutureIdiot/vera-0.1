@@ -114,7 +114,7 @@ export async function run(ctx) {
         name: "Codex cross-Space recall", seats: [{ accountId: account.id }],
       });
       const recalled = await verifiedRequest("POST", `/api/spaces/${recallSpace.json.space.id}/messages`, {
-        author: { type: "user" }, target: { type: "direct", accountIds: [account.id] },
+        author: { type: "user" }, target: { type: "broadcast" },
         content: "What is the Vera test port?",
       });
       assertEqual(recalled.status, 201);

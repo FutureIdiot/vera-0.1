@@ -6,7 +6,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export async function run(ctx) {
-  const { check, httpRequest, sse, assertEqual, assert, dataDir } = ctx;
+  const { check, httpRequest, sse, assertEqual, assert, dataDir, createOnlineMockAccount } = ctx;
 
   // 模块局部状态：l.1 拿到的 agentB reply content 给 l.2 阳性对照用。
   let agentB;
@@ -15,16 +15,9 @@ export async function run(ctx) {
   let l1AgentBReplyContent = null;
 
   await check("l.1 群聊声告段：被 @ 的 agentB echo reply 含他人署名", async () => {
-    const agentBResp = await httpRequest("POST", "/api/agents", {
-      name: "VerifyMockB",
-      kind: "cli",
-      provider: "mock",
-      connection: {},
-      model: "mock-v1",
-    });
-    assertEqual(agentBResp.status, 201);
-    agentB = agentBResp.json.agent;
-    accountB = agentBResp.json.account;
+    const onlineB = await createOnlineMockAccount({ name: "VerifyMockB" });
+    agentB = onlineB.agent;
+    accountB = onlineB.account;
 
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "l1-space",
@@ -115,16 +108,9 @@ updatedAt: 2026-07-08T00:00:00.000Z
 
 测试正文
 `;
-    const agentCResp = await httpRequest("POST", "/api/agents", {
-      name: "VerifyMockC",
-      kind: "cli",
-      provider: "mock",
-      connection: {},
-      model: "mock-v1",
-    });
-    assertEqual(agentCResp.status, 201);
-    const agentC = agentCResp.json.agent;
-    const accountC = agentCResp.json.account;
+    const onlineC = await createOnlineMockAccount({ name: "VerifyMockC" });
+    const agentC = onlineC.agent;
+    const accountC = onlineC.account;
     const agentVaultPath = join(vaultPath, agentC.id);
     await mkdir(agentVaultPath, { recursive: true });
     await writeFile(join(agentVaultPath, "decision-test.md"), decisionFile, "utf8");
@@ -176,16 +162,9 @@ updatedAt: 2026-07-08T00:00:00.000Z
   });
 
   await check("l.4 上限截断 hint 出现", async () => {
-    const newAgentResp = await httpRequest("POST", "/api/agents", {
-      name: "VerifyMockD",
-      kind: "cli",
-      provider: "mock",
-      connection: {},
-      model: "mock-v1",
-    });
-    assertEqual(newAgentResp.status, 201);
-    const newAgent = newAgentResp.json.agent;
-    const newAccount = newAgentResp.json.account;
+    const onlineD = await createOnlineMockAccount({ name: "VerifyMockD" });
+    const newAgent = onlineD.agent;
+    const newAccount = onlineD.account;
 
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "l4-space",

@@ -138,9 +138,11 @@ export async function run(ctx) {
       cwd: repoRoot,
       env: {
         ...process.env,
+        NODE_ENV: "test",
         PORT: String(migPort1),
         VERA_DATA_PATH: migDir,
         VERA_MEMORY_VAULT_PATH: join(migDir, "memory"),
+        VERA_ALLOW_LOOPBACK_DEVELOPMENT: "true",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -177,9 +179,11 @@ export async function run(ctx) {
         cwd: repoRoot,
         env: {
           ...process.env,
+          NODE_ENV: "test",
           PORT: String(migPort2),
           VERA_DATA_PATH: migDir,
           VERA_MEMORY_VAULT_PATH: join(migDir, "memory"),
+          VERA_ALLOW_LOOPBACK_DEVELOPMENT: "true",
         },
         stdio: ["ignore", "pipe", "pipe"],
       });

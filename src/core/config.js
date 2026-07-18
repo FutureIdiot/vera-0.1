@@ -108,6 +108,11 @@ const DEFAULTS = {
     secretsPath: "~/.vera/secrets.json", // daemon本机持久Agent Token与可选Account Key
     sessionTimeoutMs: 45000, // daemon 多久没心跳 gateway 把 Account.presence 置 offline
   },
+  security: {
+    ownerTailscaleLogins: [],
+    cors: { allowedOrigins: [] },
+    allowLoopbackDevelopment: false,
+  },
 };
 
 function num(value, fallback) {
@@ -141,6 +146,34 @@ function timeZone(value, fallback) {
   }
 }
 
+function commaSeparatedList(value, fallback = []) {
+  if (value === undefined || value === "") return [...fallback];
+  return [...new Set(String(value).split(",").map((item) => item.trim()).filter(Boolean))];
+}
+
+function strictOrigins(value, fallback) {
+  const origins = commaSeparatedList(value, fallback);
+  for (const origin of origins) {
+    if (origin === "*" || origin === "null" || !/^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]+$/u.test(origin)) {
+      throw new TypeError("VERA_CORS_ALLOWED_ORIGINS must contain exact serialized Origins");
+    }
+    let parsed;
+    try {
+      parsed = new URL(origin);
+    } catch {
+      throw new TypeError("VERA_CORS_ALLOWED_ORIGINS must contain exact serialized Origins");
+    }
+    if (!parsed.host || parsed.username || parsed.password || `${parsed.protocol}//${parsed.host}` !== origin) {
+      throw new TypeError("VERA_CORS_ALLOWED_ORIGINS must contain exact serialized Origins");
+    }
+  }
+  return origins;
+}
+
+function explicitTrue(value) {
+  return typeof value === "string" && value.toLowerCase() === "true";
+}
+
 // `~` 前缀展开为用户主目录，其余路径原样返回（config 唯一负责展开的地方，
 // 其余模块只拿到已展开的绝对/相对路径）。
 function expandHome(path) {
@@ -153,6 +186,10 @@ function expandHome(path) {
 export function loadConfig(env = process.env) {
   const opencodeDigestPrimaryModel = env.VERA_OPENCODE_MEMORY_DIGEST_PRIMARY_MODEL || DEFAULTS.opencode.memoryDigestPrimaryModel;
   const opencodeDigestFallbackModel = env.VERA_OPENCODE_MEMORY_DIGEST_QUOTA_FALLBACK_MODEL || DEFAULTS.opencode.memoryDigestQuotaFallbackModel;
+  const allowLoopbackDevelopment = explicitTrue(env.VERA_ALLOW_LOOPBACK_DEVELOPMENT);
+  if (env.NODE_ENV === "production" && allowLoopbackDevelopment) {
+    throw new TypeError("VERA_ALLOW_LOOPBACK_DEVELOPMENT cannot be enabled in production");
+  }
   return {
     port: num(env.PORT, DEFAULTS.port),
     dataPath: env.VERA_DATA_PATH || DEFAULTS.dataPath,
@@ -279,6 +316,19 @@ export function loadConfig(env = process.env) {
       tokensPath: expandHome(env.VERA_AGENT_TOKENS_PATH || DEFAULTS.agentDaemon.tokensPath),
       secretsPath: expandHome(env.VERA_AGENT_SECRETS_PATH || DEFAULTS.agentDaemon.secretsPath),
       sessionTimeoutMs: num(env.VERA_AGENT_SESSION_TIMEOUT_MS, DEFAULTS.agentDaemon.sessionTimeoutMs),
+    },
+    security: {
+      ownerTailscaleLogins: commaSeparatedList(
+        env.VERA_OWNER_TAILSCALE_LOGINS,
+        DEFAULTS.security.ownerTailscaleLogins,
+      ),
+      cors: {
+        allowedOrigins: strictOrigins(
+          env.VERA_CORS_ALLOWED_ORIGINS,
+          DEFAULTS.security.cors.allowedOrigins,
+        ),
+      },
+      allowLoopbackDevelopment,
     },
   };
 }

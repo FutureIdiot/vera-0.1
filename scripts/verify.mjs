@@ -26,6 +26,7 @@ import {
   createCounter,
   createHttpClient,
   createBinaryHttpClient,
+  createOnlineMockAccount,
   connectSse,
   startGateway,
 } from "../test/checks/_helpers.mjs";
@@ -50,6 +51,7 @@ import * as contextSessions from "../test/checks/context-sessions.mjs";
 import * as ollamaAdapter from "../test/checks/ollama-adapter.mjs";
 import * as codexAdapter from "../test/checks/codex-adapter.mjs";
 import * as files from "../test/checks/files.mjs";
+import * as security from "../test/checks/security.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..");
@@ -102,6 +104,8 @@ async function main() {
     sleep,
     getFreePort,
     fileExistsAt,
+    startGateway,
+    createOnlineMockAccount: (options) => createOnlineMockAccount({ port, ...options }),
     httpRequest,
     binaryRequest: createBinaryHttpClient(port),
     // connectSse helper：统一把打开的 handle 注册进 openSseHandles 以便
@@ -130,7 +134,13 @@ async function main() {
 
   // 按依赖序执行各 check 段：
   await healthBootstrap.run(ctx); // a. (建 ctx.bootstrap / ctx.sse)
+  await security.run(ctx);
   await agentAccount.run(ctx); // b. (建 ctx.agent / ctx.owningAccount)
+  {
+    const online = await ctx.createOnlineMockAccount({ name: "Verify Online" });
+    ctx.agent = online.agent;
+    ctx.owningAccount = online.account;
+  }
   await spaceMessages.run(ctx); // c. + d. (建 ctx.space / ctx.firstRunId)
   await sseFlow.run(ctx); // e. + f. monotonic/replay
   await triggers.run(ctx); // g. + h. + i. + j.（顺序内含使用 ctx.agent / ctx.space）

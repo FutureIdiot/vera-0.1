@@ -218,8 +218,8 @@ test("local Space merges and presence events update the canonical bootstrap proj
   await flushAsyncWork();
   runtime.mergeSpace({ id: "spc_local", name: "Local", archivedAt: null });
   assert.equal(runtime.getBootstrap().spaces[0].id, "spc_local");
-  sources[0].onmessage({ data: JSON.stringify({ seq: 2, type: "account.presence.updated", data: { accountId: "acc_1", presence: "online", lastSeenAt: "now" } }) });
-  assert.deepEqual(runtime.getBootstrap().accounts[0], { id: "acc_1", presence: "online", lastSeenAt: "now" });
+  sources[0].onmessage({ data: JSON.stringify({ seq: 2, type: "account.presence.updated", data: { accountId: "acc_1", presence: "online", lastSeenAt: "now", activeAgentId: "agt_1" } }) });
+  assert.deepEqual(runtime.getBootstrap().accounts[0], { id: "acc_1", presence: "online", lastSeenAt: "now", activeAgentId: "agt_1" });
   runtime.close();
 });
 
@@ -244,5 +244,41 @@ test("local Agent and Account mutations keep route transitions on the canonical 
   runtime.removeAgent(agent.id);
   assert.equal(runtime.getBootstrap().agents.some((item) => item.id === agent.id), false);
   assert.equal(runtime.getBootstrap().accounts.some((item) => item.ownerAgentId === agent.id), false);
+  runtime.close();
+});
+
+test("AgentState events merge by Agent, Account, and Space without cross-Account replacement", async () => {
+  const sources = [];
+  const platform = {
+    async getGatewayUrl() { return "https://vera.test"; },
+    async fetch() { return jsonResponse({ agents: [], accounts: [], spaces: [], agentStates: [], seq: 1 }); },
+    createEventSource(url) { const source = { url, close() {} }; sources.push(source); return source; },
+  };
+  const runtime = createAppRuntime({ platform });
+  await runtime.start();
+  await flushAsyncWork();
+
+  const state = (accountId, status, seq) => ({
+    seq,
+    type: "agent.state.updated",
+    data: {
+      agentState: {
+        agentId: "agt_shared",
+        accountId,
+        spaceId: "spc_shared",
+        status,
+        detail: "",
+        lastActiveAt: `2026-07-19T00:00:0${seq}.000Z`,
+      },
+    },
+  });
+  sources[0].onmessage({ data: JSON.stringify(state("acc_a", "coding", 2)) });
+  sources[0].onmessage({ data: JSON.stringify(state("acc_b", "reading", 3)) });
+  sources[0].onmessage({ data: JSON.stringify(state("acc_a", "typing", 4)) });
+
+  assert.deepEqual(runtime.getBootstrap().agentStates.map(({ accountId, status }) => ({ accountId, status })), [
+    { accountId: "acc_a", status: "typing" },
+    { accountId: "acc_b", status: "reading" },
+  ]);
   runtime.close();
 });

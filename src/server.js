@@ -44,11 +44,13 @@ import { recoverInterruptedRuns } from "./spaces/run-controller.js";
 import { createFilesService } from "./memory/files-service.js";
 import { registerFilesRoutes } from "./memory/files-routes.js";
 import { createControlService } from "./agents/control-service.js";
+import { createRequestSecurity } from "./api/request-security.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
 
 const config = loadConfig(process.env);
+const enforceRequestSecurity = createRequestSecurity({ config });
 const bootPaths = await applyBootPathOverrides(config);
 const store = await createStore({ dataPath: config.dataPath, debounceMs: config.store.debounceMs });
 recoverInterruptedRuns(store);
@@ -254,6 +256,7 @@ registerThemesRoutes(router, { store, settingsStore });
 
 const server = createServer(async (req, res) => {
   try {
+    if (enforceRequestSecurity(req, res)) return;
     const handled = await router.handle(req, res);
     if (handled) return;
     // 非 /api/ 路径回退到 production build（frontend/dist/）。

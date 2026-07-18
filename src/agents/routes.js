@@ -76,7 +76,6 @@ export function registerAgentRoutes(router, {
     asHandler(async ({ req, res }) => {
       const body = await readJsonBody(req);
       const { agent, account } = createAgent(store, body);
-      agentStates.ensure(agent.id);
       memoryConfigService?.ensureAgentConfig(agent.id);
       sendJson(res, 201, { agent, account });
     }),
@@ -119,8 +118,9 @@ export function registerAgentRoutes(router, {
     "/api/agent-states",
     asHandler(async ({ res, query }) => {
       const spaceId = query.get("spaceId") || undefined;
+      const accountId = query.get("accountId") || undefined;
       const agentId = query.get("agentId") || undefined;
-      sendJson(res, 200, { agentStates: agentStates.list({ spaceId, agentId }) });
+      sendJson(res, 200, { agentStates: agentStates.list({ spaceId, accountId, agentId }) });
     }),
   );
 

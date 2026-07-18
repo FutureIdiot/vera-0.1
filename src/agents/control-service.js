@@ -92,6 +92,15 @@ export function createControlService({ store, config, memoryConfigService = null
     return updated;
   }
 
+  function publishAccountPresence(account) {
+    hub?.publish("account.presence.updated", {
+      accountId: account.id,
+      presence: account.presence,
+      lastSeenAt: account.lastSeenAt,
+      activeAgentId: account.activeAgentId,
+    });
+  }
+
   function attributableAccountId(bodyOrAccountId) {
     const candidate = typeof bodyOrAccountId === "string"
       ? bodyOrAccountId
@@ -290,6 +299,7 @@ export function createControlService({ store, config, memoryConfigService = null
             runtimeHostId: input.runtime.hostId,
             runtimeRevision: input.runtime.revision,
           });
+          publishAccountPresence(updatedAccount);
           return accountResponse(store, updatedAccount, updatedAgent, config, { record });
         }
 
@@ -304,6 +314,7 @@ export function createControlService({ store, config, memoryConfigService = null
           runtimeHostId: input.runtime.hostId,
           runtimeRevision: input.runtime.revision,
         });
+        publishAccountPresence(updatedAccount);
         return accountResponse(store, updatedAccount, updatedAgent, config, issued);
       });
     });

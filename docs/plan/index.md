@@ -17,13 +17,12 @@
 
 ## 当前依赖顺序
 
-1. [~] [联邦状态、presence与owner入口边界](federation-security.md)
-2. [ ] [Agent daemon 与跨进程运行链路](federation-runtime.md)
-3. [ ] [VPS 私网部署与旧链路清理](federation-deployment.md)
-4. [ ] [原生客户端](native-clients.md)
-5. [ ] [运行时能力真实闭环（阶段C）](runtime-capabilities.md)
-6. [ ] [Extension 体系](extensions.md)
-7. [ ] [原生发布与三端回归](native-release.md)
+1. [~] [Agent daemon 与跨进程运行链路](federation-runtime.md)
+2. [ ] [VPS 私网部署与旧链路清理](federation-deployment.md)
+3. [ ] [原生客户端](native-clients.md)
+4. [ ] [运行时能力真实闭环（阶段C）](runtime-capabilities.md)
+5. [ ] [Extension 体系](extensions.md)
+6. [ ] [原生发布与三端回归](native-release.md)
 
 不得从前项未完成处跳过依赖直接生成原生工程。某一文件内部若有更细依赖，以该文件为准。
 
@@ -35,7 +34,7 @@
 | [`files.md`](files.md) | Files完成记录入口；当前无未完成事项 |
 | [`phase-5-closeout.md`](phase-5-closeout.md) | Phase 5冻结记录入口；当前无未完成事项 |
 | [`federation-account.md`](federation-account.md) | Account详情、Memory配置与Session安全完成记录入口；当前无未完成事项 |
-| [`federation-security.md`](federation-security.md) | AgentState、Account presence、owner Tailscale identity与入口边界 |
+| [`federation-security.md`](federation-security.md) | AgentState、Account presence、owner Tailscale identity与入口边界完成记录入口；当前无未完成事项 |
 | [`federation-runtime.md`](federation-runtime.md) | `/api/agent/*`、调度器、daemon、mock daemon |
 | [`federation-deployment.md`](federation-deployment.md) | gateway/daemon/Workspace/Memory跨宿主部署、Tailscale Serve、备份与真实模型复验 |
 | [`native-clients.md`](native-clients.md) | Capacitor共享平台、Android壳与iOS壳 |
