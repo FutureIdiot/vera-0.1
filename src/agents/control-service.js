@@ -1,7 +1,7 @@
 // Vera Control Service: the single gateway authority for Agent credentials,
 // Account Sessions, Account-bound Workspace admission, and Execution grants.
 
-import { ApiError } from "../core/errors.js";
+import { ApiError, STATUS_BY_CODE } from "../core/errors.js";
 import { newAgentId } from "../core/id.js";
 import { projectAgent } from "./agents.js";
 import { ensureUnitBindings } from "./unit-bindings.js";
@@ -33,6 +33,7 @@ import {
 import {
   deriveRuntimeRevision,
 } from "../store/migrations/federation-account.mjs";
+import { recordAccountLoginAudit } from "./login-audit.js";
 
 function reauth() {
   throw new ApiError("account_reauthentication_required", "Account Session requires reauthentication");
@@ -61,6 +62,44 @@ export function createControlService({ store, config, memoryConfigService = null
     const next = mutationTail.catch(() => {}).then(task);
     mutationTail = next;
     return next;
+  }
+
+  function attributableAccountId(bodyOrAccountId) {
+    const candidate = typeof bodyOrAccountId === "string"
+      ? bodyOrAccountId
+      : bodyOrAccountId?.accountId;
+    if (typeof candidate !== "string" || !candidate.trim()) return null;
+    const accountId = candidate.trim();
+    return store.find("accounts", accountId) ? accountId : null;
+  }
+
+  async function withLoginAudit(attempt, task) {
+    try {
+      const result = await task();
+      if (attempt.accountId) {
+        recordAccountLoginAudit(store, {
+          accountId: attempt.accountId,
+          agentId: attempt.agentId,
+          event: attempt.event,
+          result: "succeeded",
+          reasonCode: null,
+        });
+      }
+      return result;
+    } catch (error) {
+      if (attempt.accountId) {
+        recordAccountLoginAudit(store, {
+          accountId: attempt.accountId,
+          agentId: attempt.agentId,
+          event: attempt.event,
+          result: "rejected",
+          reasonCode: typeof error?.code === "string" && Object.hasOwn(STATUS_BY_CODE, error.code)
+            ? error.code
+            : "internal",
+        });
+      }
+      throw error;
+    }
   }
 
   async function authenticateAgent(headers) {
@@ -109,121 +148,136 @@ export function createControlService({ store, config, memoryConfigService = null
 
 
   async function enroll(body, headers) {
-    const input = validateEnrollBody(body);
-    const accessKey = bearerToken(headers);
-    if (!accessKey) throw new ApiError("unauthorized", "Account Key is required");
-    return serialized(async () => {
-      const account = requireAccount(store, input.accountId);
-      if (!verifyAccountAccessKey(account, accessKey)) {
-        throw new ApiError("unauthorized", "Account Key is not valid");
-      }
-      if (account.ownerAgentId !== null) {
-        throw new ApiError("account_busy", "Account already has an owner Agent");
-      }
-      const now = new Date().toISOString();
-      const agent = store.insert("agents", {
-        id: newAgentId(),
-        name: input.name,
-        runtimeProfile: input.runtimeProfile,
-        runtimeBinding: { connection: {} },
-        runtimeRevision: deriveRuntimeRevision(input.runtimeProfile, { connection: {} }),
-        createdAt: now,
-        updatedAt: now,
-      });
-      let token;
-      try {
-        const updatedAccount = store.update("accounts", account.id, {
-          ownerAgentId: agent.id,
+    const attempt = { accountId: attributableAccountId(body), agentId: null, event: "enroll" };
+    return withLoginAudit(attempt, async () => {
+      const input = validateEnrollBody(body);
+      attempt.accountId = attributableAccountId(input.accountId);
+      const accessKey = bearerToken(headers);
+      if (!accessKey) throw new ApiError("unauthorized", "Account Key is required");
+      return serialized(async () => {
+        const account = requireAccount(store, input.accountId);
+        if (!verifyAccountAccessKey(account, accessKey)) {
+          throw new ApiError("unauthorized", "Account Key is not valid");
+        }
+        if (account.ownerAgentId !== null) {
+          throw new ApiError("account_busy", "Account already has an owner Agent");
+        }
+        const now = new Date().toISOString();
+        const agent = store.insert("agents", {
+          id: newAgentId(),
+          name: input.name,
+          runtimeProfile: input.runtimeProfile,
+          runtimeBinding: { connection: {} },
+          runtimeRevision: deriveRuntimeRevision(input.runtimeProfile, { connection: {} }),
+          createdAt: now,
           updatedAt: now,
         });
-        token = await credentials.issue(agent.id);
-        agentStates?.ensure?.(agent.id);
-        ensureUnitBindings(store, agent.id);
-        memoryConfigService?.ensureAgentConfig?.(agent.id);
-        return { agent: projectAgent(agent), agentToken: token.token, account: projectAccount(updatedAccount) };
-      } catch (error) {
-        store.update("accounts", account.id, { ownerAgentId: null, updatedAt: now });
-        store.remove("agents", agent.id);
+        attempt.agentId = agent.id;
+        let token;
         try {
-          await credentials.revoke(agent.id);
-        } catch {
-          // Preserve the original failure; the token file is outside the
-          // Account store and will be reconciled on the next enrollment.
+          const updatedAccount = store.update("accounts", account.id, {
+            ownerAgentId: agent.id,
+            updatedAt: now,
+          });
+          token = await credentials.issue(agent.id);
+          agentStates?.ensure?.(agent.id);
+          ensureUnitBindings(store, agent.id);
+          memoryConfigService?.ensureAgentConfig?.(agent.id);
+          return { agent: projectAgent(agent), agentToken: token.token, account: projectAccount(updatedAccount) };
+        } catch (error) {
+          store.update("accounts", account.id, { ownerAgentId: null, updatedAt: now });
+          store.remove("agents", agent.id);
+          attempt.agentId = null;
+          try {
+            await credentials.revoke(agent.id);
+          } catch {
+            // Preserve the original failure; the token file is outside the
+            // Account store and will be reconciled on the next enrollment.
+          }
+          throw error;
         }
-        throw error;
-      }
+      });
     });
   }
 
   async function login(body, headers) {
-    const input = validateLoginBody(body);
     const hasKey = Boolean(headerValue(headers, "x-vera-account-key"));
     const hasSession = Boolean(headerValue(headers, "x-vera-account-session"));
-    if (hasKey && hasSession) invalid("Account Key and Account Session are mutually exclusive");
-    if (!hasKey && !hasSession) reauth();
-    const { identity, agent } = await authenticateAgent(headers);
-    return serialized(async () => {
-      const account = requireAccount(store, input.accountId);
-      accountOwnerOrDelegation(account, agent.id);
-      if (hasKey) {
-        if (!verifyAccountAccessKey(account, headerValue(headers, "x-vera-account-key"))) {
-          throw new ApiError("unauthorized", "Account Key is not valid");
+    const attempt = {
+      accountId: attributableAccountId(body),
+      agentId: null,
+      event: hasSession && !hasKey ? "reconnect" : "login",
+    };
+    return withLoginAudit(attempt, async () => {
+      const input = validateLoginBody(body);
+      attempt.accountId = attributableAccountId(input.accountId);
+      if (hasKey && hasSession) invalid("Account Key and Account Session are mutually exclusive");
+      if (!hasKey && !hasSession) reauth();
+      const { identity, agent } = await authenticateAgent(headers);
+      attempt.agentId = agent.id;
+      return serialized(async () => {
+        const account = requireAccount(store, input.accountId);
+        accountOwnerOrDelegation(account, agent.id);
+        if (hasKey) {
+          if (!verifyAccountAccessKey(account, headerValue(headers, "x-vera-account-key"))) {
+            throw new ApiError("unauthorized", "Account Key is not valid");
+          }
+          const current = sessions.getAccountSession(account.id);
+          const activeRun = store.list("runs").some((run) => run.accountId === account.id && ["pending", "running"].includes(run.status));
+          if (current && (account.presence === "online" || activeRun)) {
+            throw new ApiError("account_busy", "Account already has an active owner session");
+          }
+          const agentSession = sessions.getAgentSession(agent.id);
+          if (agentSession && agentSession.accountId !== account.id) {
+            throw new ApiError("account_busy", "Agent already has an Account session");
+          }
+        } else if (headerValue(headers, "x-vera-account-key")) {
+          invalid("Account Key and Account Session are mutually exclusive");
         }
-        const current = sessions.getAccountSession(account.id);
-        const activeRun = store.list("runs").some((run) => run.accountId === account.id && ["pending", "running"].includes(run.status));
-        if (current && (account.presence === "online" || activeRun)) {
-          throw new ApiError("account_busy", "Account already has an active owner session");
-        }
-        const agentSession = sessions.getAgentSession(agent.id);
-        if (agentSession && agentSession.accountId !== account.id) {
-          throw new ApiError("account_busy", "Agent already has an Account session");
-        }
-      } else if (headerValue(headers, "x-vera-account-key")) {
-        invalid("Account Key and Account Session are mutually exclusive");
-      }
 
-      let record = null;
-      if (hasSession) {
-        record = sessions.authenticate({
-          token: headerValue(headers, "x-vera-account-session"),
+        let record = null;
+        if (hasSession) {
+          record = sessions.authenticate({
+            token: headerValue(headers, "x-vera-account-session"),
+            agentId: agent.id,
+            accountId: account.id,
+            agentTokenFingerprint: identity.fingerprint,
+            accessKeyVersion: account.accessKeyVersion,
+            daemonBootId: input.daemonBootId,
+          });
+        }
+
+        // Complete binding validation is pure. Nothing below this point may
+        // update Agent or Account until runtime and Workspace both match.
+        validateRuntime(agent, input.runtime);
+        const workspaceBinding = refreshWorkspaceBinding(account, input.workspace, {
+          runtimeHostId: input.runtime.hostId,
+          accounts: store.list("accounts"),
+        });
+
+        if (record) {
+          const updatedAgent = updateRuntime(agent, input.runtime);
+          const updatedAccount = applyAccountRuntime(account, updatedAgent, input.runtime, workspaceBinding);
+          sessions.updateRuntime(record, {
+            runtimeHostId: input.runtime.hostId,
+            runtimeRevision: input.runtime.revision,
+          });
+          return accountResponse(store, updatedAccount, updatedAgent, config, { record });
+        }
+
+        const updatedAgent = updateRuntime(agent, input.runtime);
+        const updatedAccount = applyAccountRuntime(account, updatedAgent, input.runtime, workspaceBinding);
+        const issued = sessions.issue({
           agentId: agent.id,
           accountId: account.id,
           agentTokenFingerprint: identity.fingerprint,
           accessKeyVersion: account.accessKeyVersion,
           daemonBootId: input.daemonBootId,
-        });
-      }
-
-      // Complete binding validation is pure. Nothing below this point may
-      // update Agent or Account until runtime and Workspace both match.
-      validateRuntime(agent, input.runtime);
-      const workspaceBinding = refreshWorkspaceBinding(account, input.workspace, {
-        runtimeHostId: input.runtime.hostId,
-        accounts: store.list("accounts"),
-      });
-
-      if (record) {
-        const updatedAgent = updateRuntime(agent, input.runtime);
-        const updatedAccount = applyAccountRuntime(account, updatedAgent, input.runtime, workspaceBinding);
-        sessions.updateRuntime(record, {
           runtimeHostId: input.runtime.hostId,
           runtimeRevision: input.runtime.revision,
         });
-        return accountResponse(store, updatedAccount, updatedAgent, config, { record });
-      }
-
-      const updatedAgent = updateRuntime(agent, input.runtime);
-      const updatedAccount = applyAccountRuntime(account, updatedAgent, input.runtime, workspaceBinding);
-      const issued = sessions.issue({
-        agentId: agent.id,
-        accountId: account.id,
-        agentTokenFingerprint: identity.fingerprint,
-        accessKeyVersion: account.accessKeyVersion,
-        daemonBootId: input.daemonBootId,
-        runtimeHostId: input.runtime.hostId,
-        runtimeRevision: input.runtime.revision,
+        return accountResponse(store, updatedAccount, updatedAgent, config, issued);
       });
-      return accountResponse(store, updatedAccount, updatedAgent, config, issued);
     });
   }
 
@@ -294,31 +348,35 @@ export function createControlService({ store, config, memoryConfigService = null
   }
 
   async function logout(accountId, headers) {
-    const { identity, agent } = await authenticateAgent(headers);
-    const sessionToken = headerValue(headers, "x-vera-account-session");
-    if (headerValue(headers, "x-vera-account-key")) {
-      invalid("Account Key is not accepted on a Session-authenticated endpoint");
-    }
-    if (!sessionToken) reauth();
-    return serialized(async () => {
-      const account = requireAccount(store, accountId);
-      accountOwnerOrDelegation(account, agent.id);
-      sessions.authenticate({
-        token: sessionToken,
-        agentId: agent.id,
-        accountId,
-        agentTokenFingerprint: identity.fingerprint,
-        accessKeyVersion: account.accessKeyVersion,
-        daemonBootId: headerValue(headers, "x-vera-daemon-boot-id") || account.daemonBootId,
-      });
-      sessions.invalidateAccountSessions(accountId);
-      releaseAccountExecutions(store, accountId);
-      store.update("accounts", accountId, {
-        presence: "offline",
-        activeAgentId: null,
-        runtimeCapabilities: null,
-        lastSeenAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+    const attempt = { accountId: attributableAccountId(accountId), agentId: null, event: "logout" };
+    return withLoginAudit(attempt, async () => {
+      const { identity, agent } = await authenticateAgent(headers);
+      attempt.agentId = agent.id;
+      const sessionToken = headerValue(headers, "x-vera-account-session");
+      if (headerValue(headers, "x-vera-account-key")) {
+        invalid("Account Key is not accepted on a Session-authenticated endpoint");
+      }
+      if (!sessionToken) reauth();
+      return serialized(async () => {
+        const account = requireAccount(store, accountId);
+        accountOwnerOrDelegation(account, agent.id);
+        sessions.authenticate({
+          token: sessionToken,
+          agentId: agent.id,
+          accountId,
+          agentTokenFingerprint: identity.fingerprint,
+          accessKeyVersion: account.accessKeyVersion,
+          daemonBootId: headerValue(headers, "x-vera-daemon-boot-id") || account.daemonBootId,
+        });
+        sessions.invalidateAccountSessions(accountId);
+        releaseAccountExecutions(store, accountId);
+        store.update("accounts", accountId, {
+          presence: "offline",
+          activeAgentId: null,
+          runtimeCapabilities: null,
+          lastSeenAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
       });
     });
   }

@@ -9,6 +9,7 @@ import { registerAgentRoutes } from "../../src/agents/routes.js";
 import { createUnownedAccount } from "../../src/agents/accounts.js";
 import { createControlService } from "../../src/agents/control-service.js";
 import { agentTokenFingerprint } from "../../src/agents/credentials.js";
+import { listAccountLoginAudits } from "../../src/agents/login-audit.js";
 import { createEventHub } from "../../src/api/sse.js";
 import { createStore } from "../../src/store/store.js";
 
@@ -170,7 +171,14 @@ test("Control Service closes the owner credential, Workspace, Session, and Execu
     assert.equal(failedReconnect.status, 409);
     assert.equal(failedReconnect.json.error.code, "workspace_unavailable");
     assert.deepEqual(store.find("agents", enrolled.json.agent.id), agentBeforeMismatch);
-    assert.deepEqual(store.find("accounts", accountId), accountBeforeMismatch);
+    const { loginAudits: auditsBeforeMismatch, ...accountBusinessBeforeMismatch } = accountBeforeMismatch;
+    const { loginAudits: auditsAfterMismatch, ...accountBusinessAfterMismatch } = store.find("accounts", accountId);
+    assert.deepEqual(accountBusinessAfterMismatch, accountBusinessBeforeMismatch);
+    assert.equal(auditsAfterMismatch.length, auditsBeforeMismatch.length + 1);
+    assert.ok(listAccountLoginAudits(store, accountId).some((audit) =>
+      audit.event === "reconnect" &&
+      audit.result === "rejected" &&
+      audit.reasonCode === "workspace_unavailable"));
 
     const reconnect = await request(router, "POST", "/api/agent/login", loginBody(accountId), {
       authorization: `Bearer ${agentToken}`,

@@ -120,23 +120,25 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
     );
     accessStatus.textContent = `状态：${account.accessKeyState ?? "未知"} · 版本：${account.accessKeyVersion ?? "—"}`;
     revoke.disabled = account.accessKeyState === "revoked";
-    const workspaceValue = detail?.workspace ?? account.workspace ?? null;
+    const workspaceValue = detail?.account?.workspace ?? account.workspace ?? null;
     workspaceFacts.replaceChildren(
       infoRow("状态", workspaceValue?.status ?? "尚未绑定"),
       infoRow("宿主", workspaceValue?.hostId ?? "—"),
       infoRow("最近校验", formatTime(workspaceValue?.lastValidatedAt)),
     );
-    const entries = detail?.recentLogins ?? detail?.loginAudit ?? [];
+    const entries = Array.isArray(detail?.recentLogins) ? detail.recentLogins : [];
     auditList.replaceChildren();
     if (!entries.length) auditList.appendChild(createNotice("还没有登录记录。"));
     for (const entry of entries) {
       const card = document.createElement("article");
       card.className = "vera-management-card";
-      const title = document.createElement("strong");
-      title.textContent = findAgent(entry.agentId)?.name ?? entry.agentId ?? "Agent";
-      const summary = document.createElement("small");
-      summary.textContent = `${entry.status ?? entry.result ?? "记录"} · ${formatTime(entry.createdAt ?? entry.at)}`;
-      card.append(title, summary);
+      card.append(
+        infoRow("事件", entry.event ?? "—"),
+        infoRow("结果", entry.result ?? "—"),
+        infoRow("原因", entry.reasonCode ?? "—"),
+        infoRow("Agent", agentLink(findAgent(entry.agentId), entry.agentId ?? "—")),
+        infoRow("时间", formatTime(entry.createdAt)),
+      );
       auditList.appendChild(card);
     }
   }
@@ -185,9 +187,10 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
       const response = await accountsClient.rotateAccessKey(account.id);
       account = response.account ?? account;
       runtime.mergeAccount(account);
+      await load();
+      if (disposed) return;
       feedback.textContent = `一次性接入 Key：${response.accessKey}`;
       feedback.dataset.tone = "success";
-      render();
     } catch (error) {
       feedback.textContent = error.message;
       feedback.dataset.tone = "danger";
@@ -203,9 +206,10 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
       const response = await accountsClient.revokeAccessKey(account.id);
       account = response?.account ?? { ...account, accessKeyState: "revoked" };
       runtime.mergeAccount(account);
+      await load();
+      if (disposed) return;
       feedback.textContent = "接入 Key 已撤销";
       feedback.dataset.tone = "success";
-      render();
     } catch (error) {
       feedback.textContent = error.message;
       feedback.dataset.tone = "danger";

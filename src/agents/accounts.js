@@ -50,10 +50,11 @@ function issueAccessKey() {
 export function projectAccount({
   _seq,
   accessKeyHash,
+  loginAudits,
   ...account
 }) {
-  // accessKeyHash is reserved for the credentials slice and must never enter a
-  // normal Account response even if a later migration adds it to the record.
+  // Credential material and bounded login history are reserved for their
+  // dedicated slices and must never enter a normal Account response.
   const projected = structuredClone(account);
   projected.workspace = projectWorkspace(projected.workspace);
   return projected;
