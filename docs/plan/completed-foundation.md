@@ -36,5 +36,7 @@
 - Space Seat、定向目标、respondTo/block名单、消息展示身份和通知模式统一迁为Account；AgentSession使用`spaceSessionId + accountId + agentId`，Run冻结`accountId/agentId/runtimeRevision/effectiveModel/delegated`，为未来非owner代上线保留独立执行维度但当前不开放。
 - Agent的公开`runtimeProfile`固定为稳定纯JSON `{schemaVersion,kind,provider,model}`；本机connection独立保存在非公开runtime binding，Account、Workspace、凭证、secret/secretRef、绝对路径和daemon派生状态均不进入profile。
 - Account成为前端首层创建与Space联系人；消息持久化Account名称快照、实际执行Agent、实际模型与delegated标志。
-- Account Key创建/轮换/撤销基础已实现：明文只在创建或轮换响应出现一次且响应为`no-store`，持久化仅保存salted scrypt材料和单调版本；完整Agent Token、enroll/login与进程内Account Session仍由现行执行文件继续追踪。
-- 验收：`npm test`为287通过、3个显式opt-in跳过；`npm run build:web`通过；`node scripts/verify.mjs`为94通过、0失败。
+- Account Key创建/轮换/撤销基础已实现：明文只在创建或轮换响应出现一次且响应为`no-store`，持久化仅保存salted scrypt材料和单调版本。
+- 2026-07-18完成gateway内唯一`Vera Control Service`：`enroll/login/logout`实现Agent Token + Account Key低频重新授权和Agent Token +进程内Account Session普通续连；gateway的Agent Token文件只保存SHA-256校验摘要，Account Session只保存进程内hash并绑定两端boot、Agent Token fingerprint与Key version。daemon/gateway重启、登出、Key轮换或撤销均使旧Session失效；非owner固定`delegation_unavailable`，重复owner竞争固定`account_busy`。
+- Workspace控制面已实现首次原子绑定、精确匹配register及逐Run authorize；普通Account和Workspace投影不返回绝对路径或policy原文，失败login不留下runtime/Workspace部分写入。当前仍不包含Workspace Node独立进程、远程文件/Git/process、MCP或非owner代上线。
+- 本切片验收：`npm test`为289通过、3个显式opt-in跳过；固定`PORT=3210`临时gateway启动成功，`GET /api/health`返回200。

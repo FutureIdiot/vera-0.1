@@ -104,7 +104,7 @@ const DEFAULTS = {
   },
   agentDaemon: {
     heartbeatIntervalMs: 15000, // gateway 在 agent SSE 通道上发 agent.heartbeat 的间隔
-    tokensPath: "~/.vera/agent-tokens.json", // agent token 文件（身份层 token，{ "agt_xxx": "<long-random>" }）
+    tokensPath: "~/.vera/agent-tokens.json", // gateway只保存Agent Token的sha256校验摘要
     sessionTimeoutMs: 45000, // daemon 多久没心跳 gateway 把 Account.presence 置 offline
   },
 };

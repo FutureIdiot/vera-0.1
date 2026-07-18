@@ -43,6 +43,7 @@ import { createContextCompactionService } from "./spaces/context-compactions.js"
 import { recoverInterruptedRuns } from "./spaces/run-controller.js";
 import { createFilesService } from "./memory/files-service.js";
 import { registerFilesRoutes } from "./memory/files-routes.js";
+import { createControlService } from "./agents/control-service.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
@@ -79,6 +80,12 @@ const memoryConfig = createMemoryConfigService({
 });
 await memoryConfig.initializeExistingAgents();
 for (const agent of store.list("agents")) ensureUnitBindings(store, agent.id);
+const controlService = createControlService({
+  store,
+  config,
+  agentStates,
+  memoryConfigService: memoryConfig,
+});
 const memory = createMemoryVault({
   vaultPath: config.memory.vaultPath,
   resolveSource: ({ messageId }) => store.find("messages", messageId),
@@ -213,7 +220,7 @@ router.get("/api/events", ({ req, res }) => {
   handleSseRequest(hub, req, res, { pingIntervalMs: config.sse.pingIntervalMs });
 });
 
-registerAgentRoutes(router, { store, agentStates, memoryConfigService: memoryConfig });
+registerAgentRoutes(router, { store, agentStates, memoryConfigService: memoryConfig, controlService });
 registerSpaceRoutes(router, {
   store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
   contextCompaction, memory, files,

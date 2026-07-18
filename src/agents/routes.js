@@ -9,12 +9,60 @@ import {
   createUnownedAccount,
   rotateAccountAccessKey,
   revokeAccountAccessKey,
+  projectAccount,
   updateAccount,
   deleteAccount,
 } from "./accounts.js";
 import { listUnitBindings, updateUnitBinding } from "./unit-bindings.js";
 
-export function registerAgentRoutes(router, { store, agentStates, memoryConfigService = null }) {
+export function registerAgentRoutes(router, {
+  store,
+  agentStates,
+  memoryConfigService = null,
+  controlService = null,
+}) {
+  if (controlService) {
+    router.post(
+      "/api/agent/enroll",
+      asHandler(async ({ req, res }) => {
+        const result = await controlService.enroll(await readJsonBody(req), req.headers);
+        res.setHeader("Cache-Control", "no-store");
+        sendJson(res, 201, result);
+      }),
+    );
+
+    router.post(
+      "/api/agent/login",
+      asHandler(async ({ req, res }) => {
+        const result = await controlService.login(await readJsonBody(req), req.headers);
+        res.setHeader("Cache-Control", "no-store");
+        sendJson(res, 200, result);
+      }),
+    );
+
+    router.post(
+      "/api/agent/workspace/register",
+      asHandler(async ({ req, res }) => {
+        sendJson(res, 200, await controlService.registerWorkspace(await readJsonBody(req), req.headers));
+      }),
+    );
+
+    router.post(
+      "/api/agent/workspace/authorize",
+      asHandler(async ({ req, res }) => {
+        sendJson(res, 200, await controlService.authorizeWorkspace(await readJsonBody(req), req.headers));
+      }),
+    );
+
+    router.delete(
+      "/api/agent/sessions/:accountId",
+      asHandler(async ({ req, res, params }) => {
+        await controlService.logout(params.accountId, req.headers);
+        sendNoContent(res);
+      }),
+    );
+  }
+
   router.get(
     "/api/agents",
     asHandler(async ({ res }) => {
@@ -106,6 +154,15 @@ export function registerAgentRoutes(router, { store, agentStates, memoryConfigSe
     "/api/accounts/:id/access-key/rotate",
     asHandler(async ({ res, params }) => {
       const result = rotateAccountAccessKey(store, params.id);
+      controlService?.invalidateAccountSessions(params.id);
+      store.update("accounts", params.id, {
+        presence: "offline",
+        activeAgentId: null,
+        runtimeCapabilities: null,
+        lastSeenAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      result.account = projectAccount(store.find("accounts", params.id));
       res.setHeader("Cache-Control", "no-store");
       sendJson(res, 200, result);
     }),
@@ -115,7 +172,16 @@ export function registerAgentRoutes(router, { store, agentStates, memoryConfigSe
     "/api/accounts/:id/access-key",
     asHandler(async ({ res, params }) => {
       const account = revokeAccountAccessKey(store, params.id);
-      sendJson(res, 200, { account });
+      controlService?.invalidateAccountSessions(params.id);
+      store.update("accounts", params.id, {
+        presence: "offline",
+        activeAgentId: null,
+        runtimeCapabilities: null,
+        lastSeenAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      const projected = projectAccount(store.find("accounts", params.id));
+      sendJson(res, 200, { account: projected });
     }),
   );
 

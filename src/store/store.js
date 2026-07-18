@@ -255,6 +255,15 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     // so an ownership ambiguity cannot trigger a delayed write after startup
     // rejects the store.
     await preflightFinalFederationShape();
+    // Version 1 stores created before Workspace became an explicit nullable
+    // Account field are already on the federation identity shape. Normalize
+    // that additive field only after the ownership preflight has succeeded.
+    for (const account of data.accounts) {
+      if (!("workspace" in account)) {
+        account.workspace = null;
+        markDirty("accounts");
+      }
+    }
     let collectionHighWatermark = 0;
     for (const name of COLLECTIONS) {
       for (const item of data[name]) {

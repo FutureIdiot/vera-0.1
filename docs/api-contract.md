@@ -144,7 +144,7 @@ Workspace = Account 对应的执行环境与项目工作边界；`Account 1:1 Wo
 - Workspace Node的第一方内部协议不依赖MCP。当前节点只接受`executingAgentId === ownerAgentId`且与Account Session、runtime revision、Workspace binding和Execution租约一致的请求；未来MCP入口只能适配同一授权结果。
 - Workspace 重新绑定宿主或路径必须显式校验并更新绑定；不得静默生成同一 Account 的第二个 Workspace。
 - `vera.workspace` MCP是后续跨宿主代上线的开发目标；当前不注册该MCP、不开放非owner登录，也不把未来工具名/Schema伪装成已实现接口。
-- 本形状及持久化在 Phase 5.5 实施；当前代码尚未完成迁移，不得据本文档宣称运行时已隔离。
+- 本形状、首次绑定及Control Service授权已在Phase 5.5落地；Workspace Node独立进程与远程工具数据面尚未实现，因此不得据控制面完成宣称跨宿主执行已可用。
 
 ### Space
 

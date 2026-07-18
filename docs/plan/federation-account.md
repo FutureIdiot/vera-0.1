@@ -9,24 +9,15 @@
 ## 租约与Workspace
 
 - [ ] 每个Account同一时刻只允许一个owner会话和一个活跃Execution租约；`activeAgentId`只允许`ownerAgentId/null`。
-- [ ] owner重复登录或会话竞争返回`account_busy`；当前不实现takeover、非owner会话或跨Account切换。
 - [ ] 每个Account恰有一个Workspace。
-- [ ] 在gateway内实现唯一`Vera Control Service`，统一复用Account/Agent/Session事实来源管理Workspace首次绑定、宿主准入和Execution授权；不另建第二套账号或权限数据库。
 - [ ] gateway只保存Workspace宿主、绑定、策略、状态和校验时间；实际文件留在daemon宿主，且当前要求`workspace.hostId === owner runtime.hostId`。
-- [ ] 提供第一方Workspace Node内部协议的register/authorize控制面；当前只允许owner且不实现文件/Git/进程远程工具、MCP适配或非owner代上线。
 - [ ] Workspace、Space与项目数据按`accountId`隔离；provider/runtime/model按`agentId`隔离。
 - [ ] SpaceSession、AgentSession与API规范history继续由gateway持有。
 
 ## 凭证安全与Account Session
 
-- [ ] 实现per-Agent高熵Agent Token加载/校验；gateway校验材料在`~/.vera/agent-tokens.json`，daemon明文只在本机secret store，不进repo、日志或API响应。
-- [ ] `enroll`只允许`ownerAgentId:null`的Account创建唯一owner Agent并签发Agent Token；owner建立后不得再次enroll，既有Agent不得认领第二个Account。
-- [ ] `login`支持互斥的重新授权与普通续连：重新授权验证Agent Token + Account Key；续连验证Agent Token + `X-Vera-Account-Session`，不得每次网络/SSE重连重复校验Key。
-- [ ] 两端每次启动生成不落盘的boot id；Key模式成功后签发高熵opaque Account Session Token，绑定`agentId/accountId/Agent Token fingerprint/accessKeyVersion/daemonBootId/gatewayBootId`。只在login成功响应返回一次，gateway仅存进程内Token hash、daemon仅存进程内明文并经header发送，禁止持久化、日志、query、请求body或SSE data泄露。
-- [ ] gateway或daemon进程重启、显式登出、Key轮换/撤销及安全撤销令Session失效并返回`account_reauthentication_required`；普通断线、presence暂时offline及runtime刷新继续使用同一Session，无周期性Key重验。
+- [ ] daemon从本机secret store加载明文Agent Token；明文不进repo、日志、普通API响应或gateway持久化。
 - [ ] 无人值守daemon可从本机`~/.vera/secrets.json`读取Account Key完成崩溃/重启后的自动重新授权；文件权限必须为`0600`，Key不得进入runtime profile、Run或gateway store。
-- [ ] Phase 5.5重新授权仍强制`agentId === ownerAgentId`；非owner即使同时持有合法Agent Token与Account Key也固定`delegation_unavailable`。未来代上线只复用该建Session路径，`vera.workspace` MCP只提供受Execution租约约束的Workspace工具平面，不做身份替换；二者均不在本任务开放。
-- [ ] 当前任务实现并黑盒验证`/api/agent/enroll`、`/api/agent/login`的Key/Session双模式与`DELETE /api/agent/sessions/:accountId`；后续daemon任务只消费此凭证层，不重新实现认证。
 
 ## Memory任务关系
 
@@ -50,5 +41,4 @@
 - [ ] 非owner即使持有Account Key也不能读取Space/Files/Workspace或建立AgentSession；不同Agent的Memory与provider binding严格隔离。
 - [ ] 不同owner Agent的Account可并行；同一Account只有自己的owner Agent可驾驶一个会话。
 - [ ] Workspace路径和secret不进入普通API摘要。
-- [ ] Workspace register只允许首次原子绑定或精确匹配；login/reconnect不能静默改绑，authorize必须同时匹配owner Session、runtime revision、hostId与目标Run。
 - [ ] `runtimeProfile`稳定JSON序列化验收通过；导出数据不含Account/Workspace/宿主状态、会话/租约、任一凭证、secret/`secretRef`、绝对路径或daemon派生snapshot字段。

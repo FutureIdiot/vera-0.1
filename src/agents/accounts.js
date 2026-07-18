@@ -3,7 +3,8 @@
 
 import { newAccountId } from "../core/id.js";
 import { ApiError } from "../core/errors.js";
-import { randomBytes, scryptSync } from "node:crypto";
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { projectWorkspace } from "../spaces/workspace-control.js";
 
 function invalid(message) {
   return new ApiError("invalid_request", message);
@@ -53,7 +54,28 @@ export function projectAccount({
 }) {
   // accessKeyHash is reserved for the credentials slice and must never enter a
   // normal Account response even if a later migration adds it to the record.
-  return structuredClone(account);
+  const projected = structuredClone(account);
+  projected.workspace = projectWorkspace(projected.workspace);
+  return projected;
+}
+
+export function verifyAccountAccessKey(account, accessKey) {
+  if (!account || account.accessKeyState !== "active" ||
+      !account.accessKeyHash || typeof accessKey !== "string" || !accessKey) return false;
+  const material = account.accessKeyHash;
+  if (material.algorithm !== "scrypt" || typeof material.salt !== "string" ||
+      typeof material.digest !== "string") return false;
+  try {
+    const expected = Buffer.from(material.digest, "base64url");
+    const actual = scryptSync(accessKey, Buffer.from(material.salt, "base64url"), material.keyLength, {
+      N: material.cost,
+      r: material.blockSize,
+      p: material.parallelization,
+    });
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
 }
 
 export function accountDisplayName(agent, body = {}) {
@@ -97,6 +119,7 @@ export function createUnownedAccount(store, body) {
     accessKeyState: "active",
     accessKeyVersion: 1,
     accessKeyHash,
+    workspace: null,
     createdAt: now,
     updatedAt: now,
   });
@@ -147,6 +170,7 @@ export function createAccount(store, agentId, body = {}) {
     runtimeCapabilities: null,
     accessKeyState: "revoked",
     accessKeyVersion: 0,
+    workspace: null,
     createdAt: now,
     updatedAt: now,
   });

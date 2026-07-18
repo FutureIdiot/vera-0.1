@@ -179,6 +179,7 @@ function buildPlan(data) {
       runtimeCapabilities: null,
       accessKeyState: "revoked",
       accessKeyVersion: 0,
+      workspace: account.workspace ?? null,
       createdAt: account.createdAt,
       updatedAt: account.updatedAt,
       ...(hasOwn(account, "_seq") ? { _seq: account._seq } : {}),
