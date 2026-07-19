@@ -311,6 +311,8 @@ Accept: text/event-stream
 
 除`enroll`、`login`的Key重新授权模式，以及不绑定Account的Vera Memory MCP/Memory task通道外，daemon对所有Account/Run/AgentSession范围端点都必须同时发送Agent Token与`X-Vera-Account-Session`。gateway逐请求匹配当前内存Session；不能因为SSE已经连接或Bearer Agent Token合法就跳过Account Session校验。
 
+Memory worker使用独立的Agent-only通道，不复用上面的Account事件流：`GET /api/agent/memory-tasks/events`只验证Agent Token，`PUT /api/agent/memory-tasks/:dispatchId/result`以同一Token提交结果。请求信封为`{dispatchId,jobId,attempt,kind,memoryTaskSnapshot,payload}`；安全快照只含owner/executor Agent id、冻结runtime revision/kind/provider/model mode/task model与verification id，绝不发送connection fingerprint、connection、Account、Workspace、AgentSession、binding、system prompt、Tools或secret。gateway按Token Agent匹配冻结executor，并在派发及收结果时各重验一次；daemon不得自行换Agent、runtime、模型或fallback。`dispatchId + attempt`去重，迟到结果拒绝。迁移期保留显式选择的进程内Memory adapter，但已选择daemon的单次任务失败后不得自动回退。
+
 gateway先创建`pending` Run；取得目标Account租约后原子改为`running`、广播`run.started`并向对应daemon发送`run.requested`。daemon收到的是已存在且已获租约的Run，不得再次POST创建/认领；它直接跑CLI/API并流式上报：
 
 每条Run就是一个Execution，`agentId/accountId/runtimeRevision/effectiveModel/delegated`创建后不可修改。主Run绑定seat Account与其当前active Agent。subagent只能沿用同pair与runtime revision，不允许跨Account派生。
@@ -319,8 +321,7 @@ gateway先创建`pending` Run；取得目标Account租约后原子改为`running
 |---|---|---|
 | 派生subagent | 父Run调用`POST /api/agent/runs/:id/subagents` body `{ task, context? }` | 沿用父Run冻结的`agentId + accountId`，创建`agentSessionId/contextGeneration:null`的pending子Run；下发`sessionMode:"isolated"`，取得同一Account租约后广播`run.started`并发`run.requested` |
 | 流式增量 | `POST /api/agent/runs/:id/delta` body `{ delta }` | 转 `message.delta` SSE（gateway 按段落边界切气泡，daemon 不切） |
-| 创建气泡 | `POST /api/agent/runs/:id/messages` body Message 形状去 `id/runId/createdAt/status` | 落地 Message（`status: "streaming"`）、广播 `message.created` |
-| 气泡定稿 | daemon 在切分点发出 `POST .../messages` 后用 `PATCH .../messages/:id` 设 `status: "completed"`（或 gateway 检测到 delta 间隙自动定稿，见下） | 广播 `message.completed` |
+| 气泡定稿 | `POST /api/agent/runs/:id/messages` body `{content,target?,fileIds?}` | 已有delta时以完整content作权威定稿信号且不重复正文；零delta时作为fallback创建并定稿。gateway返回Message id并广播`message.completed` |
 | Activity | `POST /api/agent/runs/:id/activities` body `{ phase, label, detail, toolStatus?, callId? }` | 同 callId 合并同一条；广播 `activity.created` / `activity.updated` |
 | Approval | `POST /api/agent/runs/:id/approvals` body `{ prompt, options }` | 落地 Approval、广播 `approval.requested`；用户答复后 gateway 通过 SSE `approval.answered` 推给 daemon |
 | API结果提交 | API main Run在气泡定稿后调用`PUT /api/agent/runs/:id/api-result` body `{agentSessionId,generation,baseHistoryVersion,assistantMessageIds,toolTranscript?,usage?}` | 从权威Message构造assistant，与trigger署名input作为完整turn做CAS；成功返回新historyVersion。409 `history_conflict`时history不变且Run必须failed，不重调provider |

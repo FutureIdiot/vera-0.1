@@ -7,6 +7,45 @@ import net from "node:net";
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
+import { createDaemonClient } from "../../src/agents/daemon-client.js";
+import { createMockAdapter } from "../../src/adapters/mock-adapter.js";
+
+const mockDaemons = new Set();
+
+export async function stopMockDaemons() {
+  const clients = [...mockDaemons];
+  mockDaemons.clear();
+  await Promise.allSettled(clients.map((client) => client.stop()));
+}
+
+export async function startTestDaemon({
+  port,
+  agentId,
+  accountId,
+  agentToken,
+  accountKey,
+  runtime,
+  workspace,
+  executor,
+  memoryExecutor = null,
+}) {
+  const daemon = createDaemonClient({
+    gatewayUrl: `http://127.0.0.1:${port}`,
+    agentId,
+    accountId,
+    runtime,
+    workspace,
+    credentialStore: {
+      async load() { return { agentToken, accountKey }; },
+    },
+    executor,
+    memoryExecutor,
+  });
+  await daemon.start();
+  mockDaemons.add(daemon);
+  await sleep(25);
+  return daemon;
+}
 
 export function assert(cond, msg) {
   if (!cond) throw new Error(msg || "assertion failed");
@@ -149,36 +188,87 @@ export async function createOnlineMockAccount({ port, name }) {
       runtimeProfile: { schemaVersion: 1, kind: "cli", provider: "mock", model: "mock-v1" },
     },
   });
-  const login = await jsonRequest("/api/agent/login", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${enrolled.agentToken}`,
-      "X-Vera-Account-Key": created.accessKey,
+  const runtime = {
+    hostId,
+    kind: "cli",
+    provider: "mock",
+    model: "mock-v1",
+    revision: `sha256:${hostId}`,
+    runtimeCapabilities: { tools: [] },
+  };
+  const workspace = {
+    hostId,
+    path: `/tmp/${hostId}`,
+    status: "ready",
+    policy: { allow: ["read", "write"] },
+  };
+  const adapter = createMockAdapter({ chunkDelayMs: 150 });
+  const daemon = await startTestDaemon({
+    port,
+    agentId: enrolled.agent.id,
+    accountId: created.account.id,
+    agentToken: enrolled.agentToken,
+    accountKey: created.accessKey,
+    runtime, workspace,
+    executor: {
+      execute(context) {
+        return adapter.run({
+          runtime,
+          workspacePath: workspace.path,
+          agent: context.agent,
+          account: context.account,
+          sessionMode: context.input.sessionMode,
+          prompt: { text: context.input.promptText },
+          providerBinding: context.input.providerBinding ?? null,
+          spaceSessionId: context.run.spaceSessionId,
+          agentSessionId: context.run.agentSessionId,
+          contextGeneration: context.run.contextGeneration,
+          signal: context.signal,
+          onDelta: context.onDelta,
+          onActivity: context.onActivity,
+          requestApproval: context.requestApproval,
+          persistProviderBinding: context.persistProviderBinding,
+        });
+      },
+      shutdown: () => adapter.shutdown?.(),
     },
+  });
+  const detail = await jsonRequest(`/api/accounts/${created.account.id}`);
+  return {
+    agent: detail.ownerAgent,
+    account: detail.account,
+    agentToken: enrolled.agentToken,
+    accountSession: { id: daemon.state.accountSessionId },
+    daemon,
+  };
+}
+
+export async function enrollDaemonIdentity({ port, name, runtimeProfile }) {
+  async function request(path, { method = "GET", headers = {}, body } = {}) {
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers: body === undefined ? headers : { "Content-Type": "application/json", ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const json = await response.json();
+    if (!response.ok) throw new Error(`${method} ${path} failed: ${response.status} ${JSON.stringify(json)}`);
+    return json;
+  }
+  const created = await request("/api/accounts", { method: "POST", body: { name } });
+  const enrolled = await request("/api/agent/enroll", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${created.accessKey}` },
     body: {
       accountId: created.account.id,
-      daemonBootId: `boot-${hostId}`,
-      runtime: {
-        hostId,
-        kind: "cli",
-        provider: "mock",
-        model: "mock-v1",
-        revision: `sha256:${hostId}`,
-        runtimeCapabilities: { tools: [] },
-      },
-      workspace: {
-        hostId,
-        path: `/tmp/${hostId}`,
-        status: "ready",
-        policy: { allow: ["read", "write"] },
-      },
+      agent: { name: `${name} Agent` },
+      runtimeProfile,
     },
   });
   return {
-    agent: login.agent,
-    account: login.account,
+    agent: enrolled.agent,
+    account: enrolled.account,
     agentToken: enrolled.agentToken,
-    accountSession: login.accountSession,
+    accountKey: created.accessKey,
   };
 }
 

@@ -4,7 +4,7 @@
 // main() 那个 export const runsAfterTriggerCheckList 的注释）。
 
 export async function run(ctx) {
-  const { check, httpRequest, assertEqual, assert } = ctx;
+  const { check, httpRequest, assertEqual, assert, createOnlineMockAccount } = ctx;
 
   await check("b. POST /api/agents bridge creates one portable Agent profile and strict owner Account", async () => {
     const { status, json } = await httpRequest("POST", "/api/agents", {
@@ -82,26 +82,20 @@ export async function run(ctx) {
     // 4.4 起 Seat 不再携带 accountId（账户归属改登录级 / 默认 owning account）。
     // 两个 Agent 各自拥有 `(spaceSessionId, agentId)` AgentSession，generation 1
     // 的 provider binding 都从空开始，因此各 counter 都从 1 开始。
-    const agent2Resp = await httpRequest("POST", "/api/agents", {
-      name: "VerifyMock2b",
-      kind: "cli",
-      provider: "mock",
-      connection: {},
-      model: "mock-spare",
-    });
-    assertEqual(agent2Resp.status, 201);
-    const agent2 = agent2Resp.json.agent;
-    const account2 = agent2Resp.json.account;
+    const online1 = await createOnlineMockAccount({ name: "VerifyMock2a" });
+    const online2 = await createOnlineMockAccount({ name: "VerifyMock2b" });
+    const agent2 = online2.agent;
+    const account2 = online2.account;
 
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "driving-space",
       seats: [
-        { accountId: ctx.owningAccount.id, responseMode: "default" },
+        { accountId: online1.account.id, responseMode: "default" },
         { accountId: account2.id, responseMode: "default" },
       ],
     });
     assertEqual(spaceResp.status, 201);
-    assertEqual(spaceResp.json.space.seats[0].accountId, ctx.owningAccount.id);
+    assertEqual(spaceResp.json.space.seats[0].accountId, online1.account.id);
     assertEqual(spaceResp.json.space.seats[1].accountId, account2.id);
     const driveSpace = spaceResp.json.space;
 

@@ -21,6 +21,7 @@ export function registerAgentRoutes(router, {
   agentStates,
   memoryConfigService = null,
   controlService = null,
+  daemonRuntime = null,
 }) {
   if (controlService) {
     router.post(
@@ -62,6 +63,82 @@ export function registerAgentRoutes(router, {
         sendNoContent(res);
       }),
     );
+
+    if (daemonRuntime) {
+      router.get(
+        "/api/agent/events",
+        asHandler(async ({ req, res }) => {
+          await daemonRuntime.openEvents(req, res);
+        }),
+      );
+
+      router.post(
+        "/api/agent/runs/:id/subagents",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 201, await daemonRuntime.createSubagent(params.id, await readJsonBody(req), req.headers));
+        }),
+      );
+
+      router.patch(
+        "/api/agent/runs/:id",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 200, await daemonRuntime.updateRun(params.id, await readJsonBody(req), req.headers));
+        }),
+      );
+
+      router.post(
+        "/api/agent/runs/:id/messages",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 201, await daemonRuntime.createMessage(params.id, await readJsonBody(req), req.headers));
+        }),
+      );
+
+      router.post(
+        "/api/agent/runs/:id/delta",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 200, await daemonRuntime.appendDelta(params.id, await readJsonBody(req), req.headers));
+        }),
+      );
+
+      router.post(
+        "/api/agent/runs/:id/activities",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 200, await daemonRuntime.upsertActivity(params.id, await readJsonBody(req), req.headers));
+        }),
+      );
+
+      router.post(
+        "/api/agent/runs/:id/approvals",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 201, await daemonRuntime.createApproval(params.id, await readJsonBody(req), req.headers));
+        }),
+      );
+
+      router.put(
+        "/api/agent/provider-bindings/:agentSessionId",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 200, await daemonRuntime.saveProviderBinding(
+            params.agentSessionId, await readJsonBody(req), req.headers,
+          ));
+        }),
+      );
+
+      router.put(
+        "/api/agent/runs/:id/api-result",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 200, await daemonRuntime.saveApiResult(params.id, await readJsonBody(req), req.headers));
+        }),
+      );
+
+      router.put(
+        "/api/agent/compactions/:jobId/targets/:agentId",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 200, await daemonRuntime.submitCompaction(
+            params.jobId, params.agentId, await readJsonBody(req), req.headers,
+          ));
+        }),
+      );
+    }
   }
 
   router.get(

@@ -65,6 +65,8 @@ const DEFAULTS = {
     scheduleTimezone: "UTC",
     dreamBatchSize: 256,
     derivedWeightSeed: "vera-m4-v1",
+    taskTransport: "in-process", // 迁移期开关：in-process | daemon；单次任务冻结后不回退
+    taskDaemonTimeoutMs: 10 * 60 * 1000,
   },
   files: {
     attachmentsPath: "~/.vera/files",
@@ -294,6 +296,11 @@ export function loadConfig(env = process.env) {
         256,
       ),
       derivedWeightSeed: env.VERA_MEMORY_DERIVED_WEIGHT_SEED || DEFAULTS.memory.derivedWeightSeed,
+      taskTransport: env.VERA_MEMORY_TASK_TRANSPORT === "daemon" ? "daemon" : DEFAULTS.memory.taskTransport,
+      taskDaemonTimeoutMs: positiveInt(
+        env.VERA_MEMORY_TASK_DAEMON_TIMEOUT_MS,
+        DEFAULTS.memory.taskDaemonTimeoutMs,
+      ),
     },
     files: {
       attachmentsPath: expandHome(env.VERA_FILES_ATTACHMENTS_PATH || DEFAULTS.files.attachmentsPath),

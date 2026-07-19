@@ -5,9 +5,11 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createHttpClient, startGateway } from "./_helpers.mjs";
+import { createHttpClient, enrollDaemonIdentity, startGateway, startTestDaemon } from "./_helpers.mjs";
 import { createStore } from "../../src/store/store.js";
 import { createMemoryTaskRuntime } from "../../src/memory/memory-task-runtime.js";
+import { createOllamaAdapter } from "../../src/adapters/ollama-adapter.js";
+import { loadConfig } from "../../src/core/config.js";
 
 async function verifyDigestTask(dataPath, agentId, model) {
   const store = await createStore({ dataPath, debounceMs: 5 });
@@ -87,6 +89,7 @@ export async function run(ctx) {
     const dataPath = join(dir, "data");
     const ollama = await startOllamaStub();
     let gateway;
+    let daemon;
     try {
       gateway = await startGateway({
         repoRoot,
@@ -97,16 +100,12 @@ export async function run(ctx) {
           VERA_OLLAMA_MEMORY_DIGEST_TIMEOUT_MS: "5000",
         },
       });
-      const request = createHttpClient(gateway.port);
-      const created = await request("POST", "/api/agents", {
+      const identity = await enrollDaemonIdentity({
+        port: gateway.port,
         name: "Ollama black-box",
-        kind: "api",
-        provider: "ollama",
-        connection: { baseUrl: ollama.baseUrl, secretRef: null },
-        model: "gemma4:e4b",
+        runtimeProfile: { schemaVersion: 1, kind: "api", provider: "ollama", model: "gemma4:e4b" },
       });
-      assertEqual(created.status, 201);
-      const { agent, account } = created.json;
+      const { agent, account } = identity;
       assertEqual(agent.runtimeProfile.provider, "ollama");
       await gateway.stop();
       gateway = null;
@@ -118,9 +117,50 @@ export async function run(ctx) {
           VERA_MEMORY_VAULT_PATH: join(dir, "memory"),
           VERA_OLLAMA_WATCHDOG_MS: "5000",
           VERA_OLLAMA_MEMORY_DIGEST_TIMEOUT_MS: "5000",
+          VERA_MEMORY_TASK_TRANSPORT: "daemon",
         },
       });
       const verifiedRequest = createHttpClient(gateway.port);
+      const runtime = {
+        hostId: `ollama-${agent.id}`,
+        kind: "api",
+        provider: "ollama",
+        model: "gemma4:e4b",
+        revision: agent.runtimeRevision,
+        runtimeCapabilities: { tools: [] },
+        connection: { baseUrl: ollama.baseUrl, secretRef: null },
+      };
+      const adapter = createOllamaAdapter({ config: loadConfig({
+        VERA_OLLAMA_WATCHDOG_MS: "5000",
+        VERA_OLLAMA_MEMORY_DIGEST_TIMEOUT_MS: "5000",
+      }).ollama });
+      daemon = await startTestDaemon({
+        port: gateway.port,
+        agentId: agent.id,
+        accountId: account.id,
+        agentToken: identity.agentToken,
+        accountKey: identity.accountKey,
+        runtime,
+        workspace: { hostId: runtime.hostId, path: dir, status: "ready", policy: { allow: ["read", "write"] } },
+        executor: {
+          execute(context) {
+            return adapter.run({
+              runtime,
+              sessionMode: context.input.sessionMode,
+              prompt: { apiMessages: context.input.messages },
+              historyVersion: context.input.historyVersion,
+              signal: context.signal,
+              onDelta: context.onDelta,
+              onActivity: context.onActivity,
+            });
+          },
+          shutdown: () => adapter.shutdown?.(),
+        },
+        memoryExecutor: {
+          digestMemory: (input) => adapter.digestMemory(input),
+          dreamMemory: (input) => adapter.dreamMemory(input),
+        },
+      });
       const madeSpace = await verifiedRequest("POST", "/api/spaces", {
         name: "Ollama black-box",
         seats: [{ accountId: account.id, responseMode: "default" }],
@@ -171,6 +211,7 @@ export async function run(ctx) {
       assertEqual(history.turns[0].assistant[0].content, "OLLAMA_GATEWAY_STUB_OK");
       assertEqual("providerState" in history, false);
     } finally {
+      await daemon?.stop();
       if (gateway) await gateway.stop();
       await ollama.close();
       await rm(dir, { recursive: true, force: true });

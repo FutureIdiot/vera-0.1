@@ -11,9 +11,11 @@ import {
 } from "./context-compaction-store.js";
 import { withAccountExecutionLock } from "./execution-lock.js";
 import { checkpointForAgent } from "./run-context.js";
+import { getProviderBinding } from "./context-state.js";
 
-export function createContextCompactionService({ store, hub, config }) {
+export function createContextCompactionService({ store, hub, config, dispatchDaemonCompaction = null }) {
   const inFlight = new Map();
+  const daemonResults = new Map();
   recoverInterruptedContextCompactions(store);
 
   function publicSession(agentSessionId) {
@@ -65,6 +67,53 @@ export function createContextCompactionService({ store, hub, config }) {
             sourceSeq: target.sourceSeq,
             includedRunIds: target.includedRunIds,
           });
+          if (dispatchDaemonCompaction) {
+            const resultKey = `${jobId}:${agentId}`;
+            const result = new Promise((resolve, reject) => {
+              const timeoutMs = config.agentDaemon?.sessionTimeoutMs ?? 45000;
+              const timer = setTimeout(() => {
+                daemonResults.delete(resultKey);
+                reject(new ApiError("context_capacity", "Context compaction daemon timed out"));
+              }, timeoutMs);
+              timer.unref?.();
+              daemonResults.set(resultKey, {
+                resolve(value) { clearTimeout(timer); resolve(value); },
+                cancel() { clearTimeout(timer); },
+              });
+            });
+            const input = target.mode === "native"
+              ? {
+                providerBinding: getProviderBinding(store, {
+                  agentSessionId: current.id,
+                  generation: current.generation,
+                  accountId: account.id,
+                }),
+              }
+              : { checkpoint };
+            try {
+              dispatchDaemonCompaction({
+                accountId: account.id,
+                event: {
+                  type: "agent-session.compact.requested",
+                  data: {
+                    jobId,
+                    target: {
+                      agentId,
+                      agentSessionId: current.id,
+                      fromGeneration: current.generation,
+                      mode: target.mode,
+                    },
+                    account: { id: account.id, name: account.name, ownerAgentId: account.ownerAgentId },
+                    input,
+                  },
+                },
+              });
+              return await result;
+            } finally {
+              daemonResults.get(resultKey)?.cancel?.();
+              daemonResults.delete(resultKey);
+            }
+          }
           job = updateContextCompactionTarget(store, {
             jobId,
             agentId,
@@ -147,5 +196,21 @@ export function createContextCompactionService({ store, hub, config }) {
     return store.find("agentSessions", agentSession.id);
   }
 
-  return { enqueue, compactAgent, getJob: (jobId) => getContextCompactionJob(store, jobId) };
+  function submitDaemonResult({ job, target, input }) {
+    const updated = updateContextCompactionTarget(store, {
+      jobId: job.id,
+      agentId: target.agentId,
+      ...input,
+    });
+    publish(updated, target.agentSessionId);
+    daemonResults.get(`${job.id}:${target.agentId}`)?.resolve(updated);
+    return updated;
+  }
+
+  return {
+    enqueue,
+    compactAgent,
+    submitDaemonResult,
+    getJob: (jobId) => getContextCompactionJob(store, jobId),
+  };
 }

@@ -16,8 +16,7 @@ function stripInternal({ _seq, ...rest }) {
   return rest;
 }
 
-// 提权申请：由 run-controller 包一层 ctx.requestApproval 调用。
-export function requestApproval({ store, hub, spaceId, spaceSessionId, runId, agentId, req }) {
+export function createApprovalRequest({ store, hub, spaceId, spaceSessionId, runId, agentId, req }) {
   const approval = {
     id: newApprovalId(),
     spaceId,
@@ -32,9 +31,15 @@ export function requestApproval({ store, hub, spaceId, spaceSessionId, runId, ag
   };
   const stored = store.insert("approvals", approval);
   hub.publish("approval.requested", { approval: stripInternal(stored) });
-  return new Promise((resolve) => {
+  const answer = new Promise((resolve) => {
     resolvers.set(stored.id, resolve);
   });
+  return { approval: stripInternal(stored), answer };
+}
+
+// 提权申请：由 run-controller 包一层 ctx.requestApproval 调用。
+export function requestApproval(input) {
+  return createApprovalRequest(input).answer;
 }
 
 // POST /api/approvals/:id/answer。幂等；非 pending 返回 409 conflict。

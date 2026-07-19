@@ -104,7 +104,8 @@ export async function run(ctx) {
         "seat should carry Account identity only",
       );
 
-      // session-states 键重映射：post 消息后 mock 计数器应从 7 续到 8
+      // Phase 5.5 runtime：迁移只保留历史绑定，不伪造在线daemon。
+      // 未重新授权的Account保持offline，广播消息不会在gateway本地执行。
       const post = await httpRequest(
         "POST",
         `/api/spaces/${SPACE_ID}/messages`,
@@ -112,27 +113,7 @@ export async function run(ctx) {
         migPort,
       );
       assertEqual(post.status, 201);
-      assert(Array.isArray(post.json.runs) && post.json.runs.length === 1);
-
-      let legacyMsg = null;
-      const deadline = Date.now() + 10000;
-      while (Date.now() < deadline) {
-        const tl = await httpRequest("GET", `/api/spaces/${SPACE_ID}/timeline?limit=50`, undefined, migPort);
-        const found = tl.json.items.find(
-          (i) => i.itemType === "message" && i.runId === post.json.runs[0].id
-            && i.author?.type === "account" && /\u56de\u58f0\u7b2c/.test(i.content),
-        );
-        if (found && found.status === "completed") {
-          legacyMsg = found;
-          break;
-        }
-        await sleep(100);
-      }
-      assert(legacyMsg, "legacy run did not complete in time");
-      assert(
-        /回声第 8 次/.test(legacyMsg.content),
-        `expected mock counter to continue from 7 -> 8 after remap, got: ${legacyMsg.content}`,
-      );
+      assert(Array.isArray(post.json.runs) && post.json.runs.length === 0);
 
       // 旧 store.json 应已改名 .legacy（分文件形态已就位）
       const legacyStill = await fileExistsAt(legacyStorePath);
@@ -228,24 +209,7 @@ export async function run(ctx) {
         migPort,
       );
       assertEqual(post.status, 201);
-      assert(post.json.runs.length === 1);
-
-      let legacyMsg = null;
-      const deadline = Date.now() + 10000;
-      while (Date.now() < deadline) {
-        const tl = await httpRequest("GET", `/api/spaces/${SPACE_ID}/timeline?limit=50`, undefined, migPort);
-        const found = tl.json.items.find(
-          (i) => i.itemType === "message" && i.runId === post.json.runs[0].id
-            && i.author?.type === "account" && /\u56de\u58f0\u7b2c/.test(i.content),
-        );
-        if (found && found.status === "completed") {
-          legacyMsg = found;
-          break;
-        }
-        await sleep(100);
-      }
-      assert(legacyMsg, "split legacy run did not complete in time");
-      assert(/回声第 4 次/.test(legacyMsg.content), `expected counter continue 3 -> 4; got: ${legacyMsg.content}`);
+      assert(post.json.runs.length === 0);
     } finally {
       await killChild(migChild);
       await rm(migDir, { recursive: true, force: true });

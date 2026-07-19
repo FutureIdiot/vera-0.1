@@ -27,6 +27,7 @@ import {
   createHttpClient,
   createBinaryHttpClient,
   createOnlineMockAccount,
+  stopMockDaemons,
   connectSse,
   startGateway,
 } from "../test/checks/_helpers.mjs";
@@ -79,6 +80,7 @@ async function startPrimaryGateway() {
 }
 
 async function stopPrimaryGateway() {
+  await stopMockDaemons();
   for (const handle of openSseHandles) {
     try {
       handle.close();

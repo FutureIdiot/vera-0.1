@@ -145,7 +145,7 @@ export function createControlService({ store, config, memoryConfigService = null
     const identity = await credentials.verify(token);
     if (!identity) throw new ApiError("unauthorized", "Agent Token is not recognized");
     const agent = requireAgent(store, identity.agentId);
-    return { token, identity, agent };
+    return { identity, agent };
   }
 
   function accountOwnerOrDelegation(account, agentId) {
@@ -341,6 +341,26 @@ export function createControlService({ store, config, memoryConfigService = null
     return { account, agent, session };
   }
 
+  async function authenticateCurrentAccountSession(headers) {
+    if (headerValue(headers, "x-vera-account-key")) {
+      invalid("Account Key is not accepted on a Session-authenticated endpoint");
+    }
+    const { identity, agent } = await authenticateAgent(headers);
+    const current = sessions.getAgentSession(agent.id);
+    if (!current) reauth();
+    const account = requireAccount(store, current.accountId);
+    accountOwnerOrDelegation(account, agent.id);
+    const sessionRecord = sessions.authenticate({
+      token: headerValue(headers, "x-vera-account-session"),
+      agentId: agent.id,
+      accountId: account.id,
+      agentTokenFingerprint: identity.fingerprint,
+      accessKeyVersion: account.accessKeyVersion,
+    });
+    const { tokenHash, ...session } = sessionRecord;
+    return { account, agent, session };
+  }
+
   async function registerWorkspace(body, headers) {
     const input = validateRegisterBody(body);
     return serialized(input.accountId, async () => {
@@ -448,7 +468,9 @@ export function createControlService({ store, config, memoryConfigService = null
     gatewayBootId: sessions.bootId,
     enroll,
     login,
+    authenticateAgent,
     authenticateAccountSession,
+    authenticateCurrentAccountSession,
     registerWorkspace,
     authorizeWorkspace,
     logout,

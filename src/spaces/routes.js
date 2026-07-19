@@ -30,8 +30,8 @@ function stripInternal({ _seq, ...rest }) {
 }
 
 export function registerSpaceRoutes(router, {
-  store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
-  contextCompaction, memory, files,
+  store, hub, config, daemonScheduler, memoryDigestScheduler,
+  daemonRuntime, daemonRunLifecycle, contextCompaction, memory, files,
 }) {
   router.get(
     "/api/spaces",
@@ -234,12 +234,8 @@ export function registerSpaceRoutes(router, {
       const result = postMessage({
         store,
         hub,
-        config,
-        resolveAdapter,
-        agentStates,
-        memoryRetrieval,
+        daemonScheduler,
         memoryDigestScheduler,
-        contextCompaction,
         files,
         spaceId: params.id,
         body,
@@ -253,7 +249,22 @@ export function registerSpaceRoutes(router, {
     asHandler(async ({ res, params }) => {
       const run = store.find("runs", params.id);
       if (!run) throw new ApiError("not_found", `run ${params.id} does not exist`);
-      if (["pending", "running"].includes(run.status)) cancelRun(params.id);
+      if (["pending", "running"].includes(run.status)) {
+        if (run.executionTransport === "daemon") {
+          if (run.status === "running") {
+            try {
+              daemonRuntime?.dispatchEvent({
+                accountId: run.accountId,
+                event: { type: "run.cancelled", data: { runId: run.id } },
+              });
+            } catch {
+              // Gateway cancellation remains authoritative even if the daemon
+              // channel vanished between the owner action and this write.
+            }
+          }
+          daemonRunLifecycle?.cancelRun(run.id);
+        } else cancelRun(params.id);
+      }
       const current = store.find("runs", params.id);
       sendJson(res, 200, { run: stripInternal(current) });
     }),

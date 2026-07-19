@@ -44,7 +44,12 @@ import { recoverInterruptedRuns } from "./spaces/run-controller.js";
 import { createFilesService } from "./memory/files-service.js";
 import { registerFilesRoutes } from "./memory/files-routes.js";
 import { createControlService } from "./agents/control-service.js";
+import { createDaemonRuntime } from "./agents/daemon-runtime.js";
 import { createRequestSecurity } from "./api/request-security.js";
+import { createDaemonRunLifecycle } from "./spaces/daemon-run-lifecycle.js";
+import { createDaemonRunScheduler } from "./spaces/daemon-run-scheduler.js";
+import { createMemoryTaskTransport } from "./memory/memory-task-transport.js";
+import { registerMemoryTaskRoutes } from "./memory/memory-task-routes.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
@@ -73,6 +78,10 @@ const files = await createFilesService({
   maxAttachmentsPerMessage: config.files.maxAttachmentsPerMessage,
 });
 const memoryTaskRuntime = createMemoryTaskRuntime({ store });
+const memoryTaskTransport = createMemoryTaskTransport({
+  taskRuntime: memoryTaskRuntime,
+  timeoutMs: config.memory.taskDaemonTimeoutMs,
+});
 const memoryConfig = createMemoryConfigService({
   store,
   settingsStore,
@@ -125,11 +134,12 @@ const memoryDigestAdapters = {
   codex: adapters.codex,
 };
 
-function resolveAdapter(agent) {
-  return adapters[agent.runtimeProfile?.provider] ?? null;
-}
-
-const contextCompaction = createContextCompactionService({ store, hub, config });
+const contextCompaction = createContextCompactionService({
+  store,
+  hub,
+  config,
+  dispatchDaemonCompaction: (request) => daemonRuntime.dispatchEvent(request),
+});
 
 function freezeMemoryTask({ ownerAgentId, kind }) {
   const record = memoryConfig.getConfig(ownerAgentId);
@@ -154,6 +164,16 @@ function validateMemoryTask({ memoryTaskSnapshot, memoryProviderSnapshot }) {
 async function executeMemoryDigest({ job, chunks, facts, proposalSchema, signal }) {
   const agent = store.find("agents", job.agentId);
   const { runtime, taskModel } = validateMemoryTask(job);
+  const payload = { agent: { id: agent?.id, name: agent?.name }, chunks, facts, proposalSchema };
+  if (config.memory.taskTransport === "daemon") {
+    return memoryTaskTransport.dispatch({
+      jobId: job.id,
+      kind: "digest",
+      memoryTaskSnapshot: job.memoryTaskSnapshot,
+      payload,
+      signal,
+    });
+  }
   const adapter = memoryDigestAdapters[runtime.provider] ?? null;
   if (!agent || !adapter?.digestMemory) {
     throw Object.assign(new Error("Memory digest executor is unavailable"), { code: "memory_task_unavailable" });
@@ -161,13 +181,22 @@ async function executeMemoryDigest({ job, chunks, facts, proposalSchema, signal 
   return adapter.digestMemory({
     runtime,
     taskModel,
-    payload: { agent: { id: agent.id, name: agent.name }, chunks, facts, proposalSchema },
+    payload,
     signal,
   });
 }
 
 async function executeMemoryDream({ job, payload, signal }) {
   const { runtime, taskModel } = validateMemoryTask(job);
+  if (config.memory.taskTransport === "daemon") {
+    return memoryTaskTransport.dispatch({
+      jobId: job.id,
+      kind: "dream",
+      memoryTaskSnapshot: job.memoryTaskSnapshot,
+      payload,
+      signal,
+    });
+  }
   const adapter = memoryDigestAdapters[runtime.provider] ?? null;
   if (!adapter?.dreamMemory) {
     throw Object.assign(new Error("Memory Dream executor is unavailable"), { code: "memory_task_unavailable" });
@@ -205,6 +234,34 @@ memoryDigestScheduler.start();
 memoryDreamService.start();
 memoryDreamScheduler.start();
 
+const daemonRunLifecycle = createDaemonRunLifecycle({
+  store,
+  hub,
+  config,
+  agentStates,
+  memoryDigestScheduler,
+  contextCompaction,
+});
+const daemonRuntime = createDaemonRuntime({
+  store,
+  hub,
+  agentStates,
+  controlService,
+  config,
+  runLifecycle: daemonRunLifecycle,
+});
+const daemonScheduler = createDaemonRunScheduler({
+  store,
+  hub,
+  config,
+  controlService,
+  daemonRuntime,
+  agentStates,
+  memoryRetrieval,
+  memoryDigestScheduler,
+  contextCompaction,
+});
+
 const router = createRouter();
 
 router.get("/api/health", ({ res }) => sendJson(res, 200, { app: "vera", ok: true }));
@@ -223,10 +280,21 @@ router.get("/api/events", ({ req, res }) => {
   handleSseRequest(hub, req, res, { pingIntervalMs: config.sse.pingIntervalMs });
 });
 
-registerAgentRoutes(router, { store, agentStates, memoryConfigService: memoryConfig, controlService });
+registerAgentRoutes(router, {
+  store,
+  agentStates,
+  memoryConfigService: memoryConfig,
+  controlService,
+  daemonRuntime,
+});
+registerMemoryTaskRoutes(router, {
+  controlService,
+  transport: memoryTaskTransport,
+  heartbeatIntervalMs: config.agentDaemon.heartbeatIntervalMs,
+});
 registerSpaceRoutes(router, {
-  store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
-  contextCompaction, memory, files,
+  store, hub, config, daemonScheduler, daemonRuntime, daemonRunLifecycle,
+  memoryDigestScheduler, contextCompaction, memory, files,
 });
 registerFilesRoutes(router, { files, hub });
 registerMemoryRoutes(router, {

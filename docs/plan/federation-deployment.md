@@ -16,6 +16,7 @@
 
 ## Memory placement
 
+- [ ] daemon链路启用后，新登记CLI Agent只在daemon宿主已验证可承载对应Memory Provider时首次原子绑定到daemon placement；此前已登记为gateway placement的Agent保持原位，不借login静默改挂。
 - [ ] CLI Agent默认`vera.markdown`可跟随daemon宿主；API Agent可绑定gateway宿主；remote Provider按自身服务位置登记。
 - [ ] gateway只保存active Provider binding、placement、版本与安全状态；daemon placement离线返回`memory_provider_unavailable`，不回退gateway副本。
 - [ ] placement迁移必须排空写入、复制、逐条验证并原子换绑；旧副本转冷备，不形成第二个可写真值。

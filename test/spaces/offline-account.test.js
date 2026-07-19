@@ -37,15 +37,6 @@ function captureEvents(hub) {
   return { events, unsubscribe };
 }
 
-async function waitForTerminalRun(store, runId) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const run = store.find("runs", runId);
-    if (run && !["pending", "running"].includes(run.status)) return run;
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  throw new Error(`run ${runId} did not finish`);
-}
-
 test("direct @ skips an offline Account, writes one error Activity, and is never replayed", async () => {
   const root = await mkdtemp(join(tmpdir(), "vera-offline-account-test-"));
   const store = await createStore({ dataPath: join(root, "data"), debounceMs: 5 });
@@ -79,18 +70,15 @@ test("direct @ skips an offline Account, writes one error Activity, and is never
       assertMessageFileIds() { return []; },
       projectMessage(message) { return message; },
     };
-    let adapterCalls = 0;
+    const scheduled = [];
     const dependencies = {
       store,
       hub,
-      config: CONFIG,
-      resolveAdapter() {
-        return {
-          async run() {
-            adapterCalls += 1;
-            return { content: "online reply" };
-          },
-        };
+      daemonScheduler: {
+        scheduleMainRun(input) {
+          scheduled.push(input);
+          return { id: `run_scheduled_${scheduled.length}`, status: "pending", triggerMessageId: input.triggerMessage.id };
+        },
       },
       files,
       spaceId: space.id,
@@ -107,7 +95,7 @@ test("direct @ skips an offline Account, writes one error Activity, and is never
 
     assert.equal(skipped.runs.length, 0);
     assert.equal(store.list("runs").length, 0);
-    assert.equal(adapterCalls, 0);
+    assert.equal(scheduled.length, 0);
     assert.equal(store.list("activities").length, 1);
     assert.deepEqual(
       (({ _seq, updatedAt, ...activity }) => activity)(store.list("activities")[0]),
@@ -143,10 +131,10 @@ test("direct @ skips an offline Account, writes one error Activity, and is never
       },
     });
     assert.equal(delivered.runs.length, 1);
-    const terminal = await waitForTerminalRun(store, delivered.runs[0].id);
-    assert.equal(terminal.status, "completed");
-    assert.equal(terminal.triggerMessageId, delivered.message.id);
-    assert.equal(adapterCalls, 1);
+    assert.equal(delivered.runs[0].triggerMessageId, delivered.message.id);
+    assert.equal(scheduled.length, 1);
+    assert.equal(scheduled[0].agent.id, agent.id);
+    assert.equal(scheduled[0].account.id, account.id);
     assert.equal(store.list("activities").length, 1);
   } finally {
     captured.unsubscribe();

@@ -6,9 +6,10 @@ import { join } from "node:path";
 
 import { createFakeCodex } from "../adapters/codex-cli-fixture.js";
 import { createCodexAdapter } from "../../src/adapters/codex-adapter.js";
-import { createHttpClient, startGateway } from "./_helpers.mjs";
+import { createHttpClient, enrollDaemonIdentity, startGateway, startTestDaemon } from "./_helpers.mjs";
 import { createStore } from "../../src/store/store.js";
 import { createMemoryTaskRuntime } from "../../src/memory/memory-task-runtime.js";
+import { loadConfig } from "../../src/core/config.js";
 
 async function verifyDigestTask(dataPath, agentId, model) {
   const store = await createStore({ dataPath, debounceMs: 5 });
@@ -61,6 +62,7 @@ export async function run(ctx) {
     const dataPath = join(dir, "data");
     const fake = await createFakeCodex();
     let gateway;
+    let daemon;
     try {
       gateway = await startGateway({
         repoRoot,
@@ -74,9 +76,16 @@ export async function run(ctx) {
         },
       });
       const request = createHttpClient(gateway.port);
-      const { agent, account, space } = await createScenario(request, {
-        name: "Codex black-box", command: fake.binary, model: "fake-proposal",
+      const identity = await enrollDaemonIdentity({
+        port: gateway.port,
+        name: "Codex black-box",
+        runtimeProfile: { schemaVersion: 1, kind: "cli", provider: "codex", model: "fake-proposal" },
       });
+      const { agent, account } = identity;
+      const madeSpace = await request("POST", "/api/spaces", {
+        name: "Codex black-box", seats: [{ accountId: account.id, responseMode: "default" }],
+      });
+      const space = madeSpace.json.space;
       assertEqual(agent.runtimeProfile.provider, "codex");
       await gateway.stop();
       gateway = null;
@@ -90,9 +99,56 @@ export async function run(ctx) {
           VERA_CODEX_BIN: fake.binary,
           VERA_CODEX_WATCHDOG_MS: "5000",
           VERA_CODEX_MEMORY_DIGEST_TIMEOUT_MS: "5000",
+          VERA_MEMORY_TASK_TRANSPORT: "daemon",
         },
       });
       const verifiedRequest = createHttpClient(gateway.port);
+      const runtime = {
+        hostId: `codex-${agent.id}`,
+        kind: "cli",
+        provider: "codex",
+        model: "fake-proposal",
+        revision: agent.runtimeRevision,
+        runtimeCapabilities: { tools: [] },
+        connection: { command: fake.binary, args: [], secretRef: null },
+      };
+      const adapter = createCodexAdapter({ config: loadConfig({
+        VERA_CODEX_BIN: fake.binary,
+        VERA_CODEX_WATCHDOG_MS: "5000",
+        VERA_CODEX_MEMORY_DIGEST_TIMEOUT_MS: "5000",
+      }).codex });
+      daemon = await startTestDaemon({
+        port: gateway.port,
+        agentId: agent.id,
+        accountId: account.id,
+        agentToken: identity.agentToken,
+        accountKey: identity.accountKey,
+        runtime,
+        workspace: { hostId: runtime.hostId, path: dir, status: "ready", policy: { allow: ["read", "write"] } },
+        executor: {
+          execute(context) {
+            return adapter.run({
+              runtime,
+              workspacePath: dir,
+              agent: context.agent,
+              account: context.account,
+              sessionMode: context.input.sessionMode,
+              prompt: { text: context.input.promptText },
+              providerBinding: context.input.providerBinding ?? null,
+              signal: context.signal,
+              onDelta: context.onDelta,
+              onActivity: context.onActivity,
+              requestApproval: context.requestApproval,
+              persistProviderBinding: context.persistProviderBinding,
+            });
+          },
+          shutdown: () => adapter.shutdown?.(),
+        },
+        memoryExecutor: {
+          digestMemory: (input) => adapter.digestMemory(input),
+          dreamMemory: (input) => adapter.dreamMemory(input),
+        },
+      });
       const posted = await verifiedRequest("POST", `/api/spaces/${space.id}/messages`, {
         author: { type: "user" }, target: { type: "broadcast" }, content: "Vera test port is 3210.",
       });
@@ -161,6 +217,7 @@ export async function run(ctx) {
       assertEqual(openJob.error.code, "memory_task_unavailable");
       assertEqual((await fake.readInvocations()).length, 3);
     } finally {
+      await daemon?.stop();
       if (gateway) await gateway.stop();
       await fake.close();
       await rm(dir, { recursive: true, force: true });

@@ -5,7 +5,6 @@ import { newActivityId, newMessageId } from "../core/id.js";
 import { ApiError } from "../core/errors.js";
 import { getAccountOrThrow } from "../agents/accounts.js";
 import { getSpaceOrThrow } from "./spaces.js";
-import { executeRun } from "./run-controller.js";
 import { ensureActiveSpaceSession, ensureAgentSession } from "./context-sessions.js";
 
 function stripInternal({ _seq, ...rest }) {
@@ -71,8 +70,7 @@ function publishOfflineActivity({ store, hub, space, spaceSession, account }) {
 }
 
 export function postMessage({
-  store, hub, config, resolveAdapter, agentStates, memoryRetrieval, memoryDigestScheduler,
-  contextCompaction, files, spaceId, body,
+  store, hub, daemonScheduler, memoryDigestScheduler, files, spaceId, body,
 }) {
   const space = getSpaceOrThrow(store, spaceId);
   const content = typeof body?.content === "string" ? body.content : "";
@@ -116,27 +114,21 @@ export function postMessage({
     const activeAgent = account.activeAgentId ? store.find("agents", account.activeAgentId) : null;
     const isOnlineOwner = account.presence === "online" && activeAgent &&
       activeAgent.id === account.ownerAgentId;
-    if (addressed && !isOnlineOwner) {
-      publishOfflineActivity({ store, hub, space, spaceSession, account });
+    if (!isOnlineOwner) {
+      if (addressed) publishOfflineActivity({ store, hub, space, spaceSession, account });
       continue;
     }
-    // federation-runtime 尚未切走 gateway-local adapter；广播仍沿用 owner
-    // 过渡链路。定向 @ 已严格要求当前 owner Account Session 在线。
-    const agent = addressed ? activeAgent : account.ownerAgentId ? store.find("agents", account.ownerAgentId) : null;
-    if (!agent) continue;
-
-    const adapter = resolveAdapter(agent);
-    if (!adapter) continue;
+    const agent = activeAgent;
     const agentSession = ensureAgentSession(store, {
       spaceSessionId: spaceSession.id,
       accountId: account.id,
       agentId: agent.id,
     });
-    const run = executeRun({
-      store, hub, config, agent, account, space, spaceSession, agentSession,
-      triggerMessage: storedMessage,
-      adapter, agentStates, memoryRetrieval, memoryDigestScheduler,
-      contextCompaction,
+    if (!daemonScheduler?.scheduleMainRun) {
+      throw new ApiError("adapter_unavailable", "daemon Run scheduler is unavailable");
+    }
+    const run = daemonScheduler.scheduleMainRun({
+      agent, account, space, spaceSession, agentSession, triggerMessage: storedMessage,
     });
     runs.push(run);
   }
