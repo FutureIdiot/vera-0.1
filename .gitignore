@@ -4,5 +4,7 @@ dist/
 *.apk
 *.log
 data/
+docs/
+AGENTS.md
 
 .claude/
