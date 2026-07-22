@@ -22,7 +22,7 @@ tailscaleInstalled\tyes
 tailscaleActive\tyes
 tailscaleServe\tabsent
 listenerScan\tavailable
-listener\t127.0.0.1:22
+listener\t127.0.0.53%lo:53
 role\tgateway
 path\tgatewayData|/var/lib/vera/data|missing|yes|no
 disk\tgatewayData|9000000
@@ -55,6 +55,7 @@ test("fixed preflight probe contains no deployment mutators", async () => {
     /tailscale\s+serve\s+(?!status)/u,
     /\b(?:ufw|iptables|nft)\b/u,
   ]) assert.doesNotMatch(script, pattern);
+  assert.match(script, /PATH=\/usr\/local\/bin:\/usr\/local\/sbin:\/usr\/sbin:\/usr\/bin:\/sbin:\/bin/u);
   const redirections = script.match(/[0-9]*>[^\s;)]+/gu) ?? [];
   assert.ok(redirections.every((value) => ["2>/dev/null", ">/dev/null", "2>&1"].includes(value)), redirections.join(", "));
   assert.match(script, /schema vera-preflight-v1/u);
@@ -74,6 +75,7 @@ test("preflight parser returns only typed allowlisted facts", () => {
   const facts = parsePreflightOutput(validOutput);
   assert.equal(facts.nodeVersion, "v20.19.0");
   assert.equal(facts.tailscale.active, true);
+  assert.deepEqual(facts.listeners, ["127.0.0.53:53"]);
   assert.deepEqual(facts.paths[0], {
     name: "gatewayData",
     path: "/var/lib/vera/data",
@@ -92,7 +94,8 @@ test("preflight parser fails closed on duplicate, unknown, truncated, or injecte
     validOutput.replace("os\tLinux", "os\tLinux\nvat_SUPER_SECRET"),
     validOutput.replace("disk\tfiles|8000000", "disk\tgatewayData|8000000"),
     validOutput.replace("node\tv20.19.0", "node\tv20.19.vat_SUPER_SECRET"),
-    validOutput.replace("listener\t127.0.0.1:22", "listener\tvat_SUPER_SECRET:3210"),
+    validOutput.replace("listener\t127.0.0.53%lo:53", "listener\tvat_SUPER_SECRET:3210"),
+    validOutput.replace("listener\t127.0.0.53%lo:53", "listener\t127.0.0.53%lo;id:53"),
   ]) assert.throws(() => parsePreflightOutput(output), { code: "preflight_invalid_output" });
 });
 

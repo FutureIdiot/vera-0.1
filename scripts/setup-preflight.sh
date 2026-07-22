@@ -3,7 +3,7 @@
 
 set +e
 set -f
-PATH=/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin
+PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
 emit() {

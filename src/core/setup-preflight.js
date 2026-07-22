@@ -137,12 +137,12 @@ function normalizeListener(value) {
     const port = validPort(match[1]);
     if (port) return `*:${port}`;
   }
-  match = /^((?:[0-9]{1,3}\.){3}[0-9]{1,3}):([0-9]+)$/u.exec(value);
+  match = /^((?:[0-9]{1,3}\.){3}[0-9]{1,3})(?:%[A-Za-z0-9_.-]{1,32})?:([0-9]+)$/u.exec(value);
   if (match && validIpv4(match[1])) {
     const port = validPort(match[2]);
     if (port) return `${match[1]}:${port}`;
   }
-  match = /^((?:[0-9]{1,3}\.){3}[0-9]{1,3})\.([0-9]+)$/u.exec(value);
+  match = /^((?:[0-9]{1,3}\.){3}[0-9]{1,3})(?:%[A-Za-z0-9_.-]{1,32})?\.([0-9]+)$/u.exec(value);
   if (match && validIpv4(match[1])) {
     const port = validPort(match[2]);
     if (port) return `${match[1]}:${port}`;
