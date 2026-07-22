@@ -27,10 +27,16 @@ function strictKeys(value, allowed, field) {
 
 function runtimeSnapshot(runtime) {
   strictKeys(runtime, new Set(["hostId", "kind", "provider", "model", "revision", "runtimeCapabilities"]), "runtime");
-  const capabilities = runtime.runtimeCapabilities === undefined
-    ? null
-    : object(runtime.runtimeCapabilities, "runtime.runtimeCapabilities");
-  const safeCapabilities = capabilities === null ? null : {
+  const capabilities = object(runtime.runtimeCapabilities, "runtime.runtimeCapabilities");
+  const models = Array.isArray(capabilities.models)
+    ? capabilities.models.map((model) => requiredText(model, "runtime model"))
+    : invalid("runtime.runtimeCapabilities.models must be a non-empty array");
+  if (!models.length) invalid("runtime.runtimeCapabilities.models must be a non-empty array");
+  if (new Set(models).size !== models.length) invalid("runtime.runtimeCapabilities.models must not contain duplicates");
+  if (models.includes("default")) invalid("runtime.runtimeCapabilities.models must contain effective model names");
+  models.sort();
+  const safeCapabilities = {
+    models,
     ...(Array.isArray(capabilities.tools) ? {
       tools: capabilities.tools.map((tool) => {
         const item = object(tool, "runtime.runtimeCapabilities.tools[]");
@@ -54,6 +60,9 @@ function runtimeSnapshot(runtime) {
     runtimeCapabilities: safeCapabilities,
   };
   if (snapshot.model === "default") invalid("runtime.model must be the effective model");
+  if (!snapshot.runtimeCapabilities.models.includes(snapshot.model)) {
+    invalid("runtime.model must be included in runtime.runtimeCapabilities.models");
+  }
   return snapshot;
 }
 

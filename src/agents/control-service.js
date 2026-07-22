@@ -36,6 +36,7 @@ import {
   deriveRuntimeRevision,
 } from "../store/migrations/federation-account.mjs";
 import { recordAccountLoginAudit } from "./login-audit.js";
+import { updateAccountModel as changeAccountModel } from "./account-models.js";
 
 function reauth() {
   throw new ApiError("account_reauthentication_required", "Account Session requires reauthentication");
@@ -159,6 +160,11 @@ export function createControlService({ store, config, memoryConfigService = null
     const currentBinding = agent.runtimeBinding && typeof agent.runtimeBinding === "object"
       ? structuredClone(agent.runtimeBinding)
       : { connection: {} };
+    const priorModels = currentBinding.runtimeSnapshot?.runtimeCapabilities?.models;
+    if (agent.runtimeRevision === runtime.revision && Array.isArray(priorModels) &&
+        JSON.stringify(priorModels) !== JSON.stringify(runtime.runtimeCapabilities.models)) {
+      throw new ApiError("workspace_unavailable", "Agent runtime models changed without a new revision");
+    }
     currentBinding.runtimeSnapshot = {
       hostId: runtime.hostId,
       runtimeCapabilities: runtime.runtimeCapabilities,
@@ -214,6 +220,8 @@ export function createControlService({ store, config, memoryConfigService = null
         try {
           const updatedAccount = store.update("accounts", account.id, {
             ownerAgentId: agent.id,
+            model: input.runtimeProfile.model,
+            modelVersion: 1,
             updatedAt: now,
           });
           token = await credentials.issue(agent.id);
@@ -222,7 +230,12 @@ export function createControlService({ store, config, memoryConfigService = null
           memoryConfigService?.ensureAgentConfig?.(agent.id);
           return { agent: projectAgent(agent), agentToken: token.token, account: projectAccount(updatedAccount) };
         } catch (error) {
-          store.update("accounts", account.id, { ownerAgentId: null, updatedAt: now });
+          store.update("accounts", account.id, {
+            ownerAgentId: null,
+            model: null,
+            modelVersion: 0,
+            updatedAt: now,
+          });
           store.remove("agents", agent.id);
           attempt.agentId = null;
           try {
@@ -476,6 +489,9 @@ export function createControlService({ store, config, memoryConfigService = null
     logout,
     rotateAccessKey,
     revokeAccessKey,
+    updateAccountModel(accountId, body) {
+      return serialized(accountId, () => changeAccountModel(store, accountId, body, { hub }));
+    },
     invalidateAccountSessions(accountId, { reasonCode = null } = {}) {
       if (reasonCode !== null && reasonCode !== "security_revoked") {
         throw new TypeError("internal Account Session revocation reason is invalid");

@@ -160,6 +160,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.vera-account-model-control {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--vera-space-sm);
+  min-width: 0;
+  white-space: normal;
+}
+.vera-account-model-control select {
+  background: var(--vera-color-bg);
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  border-radius: var(--vera-control-radius);
+  color: var(--vera-color-text);
+  flex: 1 1 auto;
+  min-height: var(--vera-touch-target);
+  min-width: 0;
+  padding: var(--vera-space-sm);
+}
 
 /* Directory entry disabled state */
 .vera-settings-row.is-disabled {

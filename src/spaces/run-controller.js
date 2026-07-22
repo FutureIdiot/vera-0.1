@@ -75,6 +75,7 @@ export function executeRun({
 }) {
   const runtime = {
     ...(agent.runtimeProfile ?? {}),
+    model: account.model ?? agent.runtimeProfile?.model,
     connection: agent.runtimeBinding?.connection ?? {},
   };
   let activeSpaceSession = spaceSession;
@@ -97,6 +98,7 @@ export function executeRun({
     contextGeneration: activeAgentSession.generation,
     runtimeRevision: agent.runtimeRevision ?? null,
     effectiveModel: runtime.model ?? "",
+    modelVersion: account.modelVersion ?? 0,
     delegated: agent.id !== account.ownerAgentId,
     triggerMessageId: triggerMessage.id,
     replyMessageIds: [],

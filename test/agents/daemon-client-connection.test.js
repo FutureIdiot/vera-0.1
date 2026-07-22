@@ -22,6 +22,7 @@ function requested(input, overrides = {}) {
       run: {
         id: "run_a", agentId: "agt_a", accountId: "acc_a", accountSessionId: "acs_a",
         runtimeRevision: "rev_a", executionLeaseId: "lease_a", workspaceHostId: "host_a", delegated: false,
+        effectiveModel: "model_a", modelVersion: 1,
         spaceSessionId: "sps_a", agentSessionId: input.sessionMode === "main" ? "ags_a" : null,
         contextGeneration: input.sessionMode === "main" ? 2 : null,
         ...overrides,
@@ -100,6 +101,7 @@ test("initial login uses persistent credentials once and SSE/reports use only pr
   assert.equal(login.headers["X-Vera-Account-Key"], KEY);
   assert.equal(login.body.daemonBootId, "boot_a");
   assert.equal("connection" in login.body.runtime, false);
+  assert.deepEqual(login.body.runtime.runtimeCapabilities.models, ["model_a"]);
   const sessionCalls = calls.filter((call) =>
     !call.url.endsWith("/login") && !call.url.includes("/memory-tasks/"));
   assert.ok(sessionCalls.every((call) => call.headers["X-Vera-Account-Session"] === "session-secret"));

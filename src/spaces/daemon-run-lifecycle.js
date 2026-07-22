@@ -132,6 +132,7 @@ export function createDaemonRunLifecycle({
       contextGeneration: null,
       runtimeRevision: parent.runtimeRevision,
       effectiveModel: parent.effectiveModel,
+      modelVersion: parent.modelVersion,
       delegated: false,
       triggerMessageId: parent.triggerMessageId,
       replyMessageIds: [],

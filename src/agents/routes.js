@@ -15,6 +15,7 @@ import {
 } from "./accounts.js";
 import { listAccountLoginAudits, recordAccountLoginAudit } from "./login-audit.js";
 import { listUnitBindings, updateUnitBinding } from "./unit-bindings.js";
+import { accountModelOptions, updateAccountModel } from "./account-models.js";
 
 export function registerAgentRoutes(router, {
   store,
@@ -231,6 +232,7 @@ export function registerAgentRoutes(router, {
         account,
         ownerAgent: owner ? projectAgent(owner) : null,
         activeAgent: active ? projectAgent(active) : null,
+        modelOptions: accountModelOptions(store, account),
         recentLogins: listAccountLoginAudits(store, account.id, { limit: 20 }),
       });
     }),
@@ -293,6 +295,17 @@ export function registerAgentRoutes(router, {
     asHandler(async ({ req, res, params }) => {
       const body = await readJsonBody(req);
       const account = updateAccount(store, params.id, body);
+      sendJson(res, 200, { account });
+    }),
+  );
+
+  router.put(
+    "/api/accounts/:id/model",
+    asHandler(async ({ req, res, params }) => {
+      const body = await readJsonBody(req);
+      const account = controlService?.updateAccountModel
+        ? await controlService.updateAccountModel(params.id, body)
+        : updateAccountModel(store, params.id, body);
       sendJson(res, 200, { account });
     }),
   );

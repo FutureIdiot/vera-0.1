@@ -64,6 +64,7 @@ function requestedApiRun() {
       run: {
         id: "run_a", agentId: "agt_a", accountId: "acc_a", accountSessionId: "acs_a",
         runtimeRevision: "rev_a", executionLeaseId: "lease_a", workspaceHostId: "host_a", delegated: false,
+        effectiveModel: "m", modelVersion: 1,
         spaceSessionId: "sps_a", agentSessionId: "ags_a", contextGeneration: 2,
       },
       triggerMessage: { id: "msg_trigger" },

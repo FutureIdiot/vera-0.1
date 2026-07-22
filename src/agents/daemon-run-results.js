@@ -85,7 +85,11 @@ export function createDaemonRunResults({
     if (runLifecycle.saveProviderBinding) {
       return invoke("saveProviderBinding", { ...authority, run, agentSessionId, input: structuredClone(body) });
     }
-    const runtime = { ...authority.agent.runtimeProfile, connection: authority.agent.runtimeBinding?.connection ?? {} };
+    const runtime = {
+      ...authority.agent.runtimeProfile,
+      model: run.effectiveModel,
+      connection: authority.agent.runtimeBinding?.connection ?? {},
+    };
     return compareAndSetProviderBinding(store, {
       agentSessionId,
       generation: body.generation,

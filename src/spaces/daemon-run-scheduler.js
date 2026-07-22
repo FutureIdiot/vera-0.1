@@ -6,6 +6,7 @@ import { newRunId } from "../core/id.js";
 import { ApiError } from "../core/errors.js";
 import { projectAgent } from "../agents/agents.js";
 import { projectAccount } from "../agents/accounts.js";
+import { listAgentModels } from "../agents/account-models.js";
 import { authorizeDaemonExecution } from "./execution-control.js";
 import { compilePrompt } from "./view-compiler.js";
 import {
@@ -73,6 +74,10 @@ export function createDaemonRunScheduler({
 
   async function prepareAndDispatch({ runId, agent, account, space, agentSession, triggerMessage }) {
     try {
+      const frozenRun = store.find("runs", runId);
+      if (!frozenRun || frozenRun.modelVersion !== account.modelVersion || frozenRun.effectiveModel !== account.model) {
+        throw new ApiError("history_conflict", "Account model selection changed before Run start");
+      }
       let currentSession = store.find("agentSessions", agentSession.id);
       if (!currentSession || currentSession.status !== "active" ||
           currentSession.generation !== agentSession.generation) {
@@ -95,6 +100,7 @@ export function createDaemonRunScheduler({
       }
       const runtime = {
         ...(agent.runtimeProfile ?? {}),
+        model: frozenRun.effectiveModel,
         connection: structuredClone(agent.runtimeBinding?.connection ?? {}),
       };
       const session = controlService.getSession(account.id);
@@ -209,7 +215,10 @@ export function createDaemonRunScheduler({
     if (!session || session.agentId !== agent.id) {
       throw new ApiError("account_reauthentication_required", "Account Session requires reauthentication");
     }
-    const runtime = agent.runtimeProfile ?? {};
+    const models = listAgentModels(agent);
+    if (typeof account.model !== "string" || !account.model || !models.includes(account.model)) {
+      throw new ApiError("model_unavailable", "Account model is unavailable on its owner Agent");
+    }
     const run = store.insert("runs", {
       id: newRunId(),
       agentId: agent.id,
@@ -222,7 +231,8 @@ export function createDaemonRunScheduler({
       agentSessionId: agentSession.id,
       contextGeneration: agentSession.generation,
       runtimeRevision: agent.runtimeRevision ?? null,
-      effectiveModel: runtime.model ?? "",
+      effectiveModel: account.model,
+      modelVersion: account.modelVersion,
       delegated: false,
       triggerMessageId: triggerMessage.id,
       replyMessageIds: [],

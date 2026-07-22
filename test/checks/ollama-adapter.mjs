@@ -127,7 +127,7 @@ export async function run(ctx) {
         provider: "ollama",
         model: "gemma4:e4b",
         revision: agent.runtimeRevision,
-        runtimeCapabilities: { tools: [] },
+        runtimeCapabilities: { models: ["gemma4:e4b"], tools: [] },
         connection: { baseUrl: ollama.baseUrl, secretRef: null },
       };
       const adapter = createOllamaAdapter({ config: loadConfig({

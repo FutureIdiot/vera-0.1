@@ -32,9 +32,12 @@ function validateRunEvent(data, current) {
   const workspace = object(data?.workspace, "workspace");
   const input = object(data?.input, "input");
   const mode = input.sessionMode;
+  const models = current.runtime.runtimeCapabilities?.models ?? [current.runtime.model];
   if (!text(run.id, "run.id") || run.agentId !== current.agentId || run.accountId !== current.accountId ||
       agent.id !== current.agentId || account.id !== current.accountId || account.ownerAgentId !== current.agentId ||
       run.accountSessionId !== current.accountSessionId || run.runtimeRevision !== current.runtime.revision ||
+      !text(run.effectiveModel, "run.effectiveModel") || !models.includes(run.effectiveModel) ||
+      !Number.isInteger(run.modelVersion) || run.modelVersion < 1 ||
       run.delegated !== false || !text(run.executionLeaseId, "run.executionLeaseId") ||
       workspace.hostId !== current.workspace.hostId || run.workspaceHostId !== current.workspace.hostId ||
       !["main", "isolated"].includes(mode)) {

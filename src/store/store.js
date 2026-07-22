@@ -49,6 +49,11 @@ import {
   preflightFederationAccountMigration,
   migrateFederationAccounts,
 } from "./migrations/federation-account.mjs";
+import {
+  migrateAccountModelSelection,
+  needsAccountModelSelectionMigration,
+  planAccountModelSelection,
+} from "./migrations/account-model-selection.mjs";
 import { planWorkspaceBindings } from "./migrations/workspace-bindings.mjs";
 
 const COLLECTIONS = [
@@ -73,6 +78,7 @@ function emptyData() {
     // A brand-new store is born on the current identity shape. Legacy readers
     // explicitly overwrite this with 0 from missing metadata before migration.
     federationAccountMigrationVersion: 1,
+    accountModelSelectionMigrationVersion: 1,
   };
   for (const name of COLLECTIONS) data[name] = [];
   return data;
@@ -120,6 +126,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
       eventSeqWatermark: data.eventSeqWatermark,
       contextSessionsMigrationVersion: data.contextSessionsMigrationVersion,
       federationAccountMigrationVersion: data.federationAccountMigrationVersion,
+      accountModelSelectionMigrationVersion: data.accountModelSelectionMigrationVersion,
     };
     return data[key];
   }
@@ -161,7 +168,11 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     }
     if (needsFederationAccountMigration({ data: preview })) {
       const federationPlan = preflightFederationAccountMigration({ data: preview });
+      preview.agents = federationPlan.agents;
       preview.accounts = federationPlan.accounts;
+    }
+    if (needsAccountModelSelectionMigration({ data: preview })) {
+      preview.accounts = planAccountModelSelection({ data: preview });
     }
     planWorkspaceBindings(preview.accounts);
   }
@@ -183,6 +194,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
       : {};
     preview.contextSessionsMigrationVersion = parsed.contextSessionsMigrationVersion ?? 0;
     preview.federationAccountMigrationVersion = parsed.federationAccountMigrationVersion ?? 0;
+    preview.accountModelSelectionMigrationVersion = parsed.accountModelSelectionMigrationVersion ?? 0;
     await preflightFinalFederationShape(preview);
   }
 
@@ -214,6 +226,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     adoptLegacyIntoData(data, parsed, COLLECTIONS);
     data.contextSessionsMigrationVersion = parsed.contextSessionsMigrationVersion ?? 0;
     data.federationAccountMigrationVersion = parsed.federationAccountMigrationVersion ?? 0;
+    data.accountModelSelectionMigrationVersion = parsed.accountModelSelectionMigrationVersion ?? 0;
     data.sessionStates = parsed.sessionStates && typeof parsed.sessionStates === "object"
       ? parsed.sessionStates
       : {};
@@ -227,6 +240,9 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     if (needsFederationAccountMigration({ data })) {
       const plan = preflightFederationAccountMigration({ data });
       await migrateFederationAccounts({ data, markDirty, flush, plan });
+    }
+    if (needsAccountModelSelectionMigration({ data })) {
+      await migrateAccountModelSelection({ data, markDirty, flush });
     }
     normalizeAccountWorkspaceBindings();
     normalizeRunExecutionFields(data, markDirty);
@@ -287,6 +303,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
       data.eventSeqWatermark = meta.eventSeqWatermark ?? 0;
       data.contextSessionsMigrationVersion = meta.contextSessionsMigrationVersion ?? 0;
       data.federationAccountMigrationVersion = meta.federationAccountMigrationVersion ?? 0;
+      data.accountModelSelectionMigrationVersion = meta.accountModelSelectionMigrationVersion ?? 0;
     }
     // Existing Phase 4/5 split stores are already in the legacy Account
     // shape expected by the federation planner. Validate that complete graph
@@ -348,6 +365,9 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
         ],
       });
       await migrateFederationAccounts({ data, markDirty, flush, plan });
+    }
+    if (needsAccountModelSelectionMigration({ data })) {
+      await migrateAccountModelSelection({ data, markDirty, flush });
     }
     normalizeAccountWorkspaceBindings();
     const runsNormalized = normalizeRunExecutionFields(data, markDirty);

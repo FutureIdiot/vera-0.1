@@ -1,5 +1,6 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createAccountsClient } from "../api/accounts-client.js";
+import { createAccountModelControl } from "../components/account-model-control.js";
 import { createNotice, field, input, setBusy } from "../components/management-ui.js";
 
 function infoRow(label, value) {
@@ -118,11 +119,27 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
     }
     accountName.value = account.name ?? "";
     shell?.setManagementHeader({ title: account.name, backHref: "#/settings/accounts", backLabel: "返回" });
-    const owner = detail?.ownerAgent ?? findAgent(account.ownerAgentId);
-    const active = detail?.activeAgent ?? findAgent(account.activeAgentId);
+    const owner = detail ? detail.ownerAgent ?? null : findAgent(account.ownerAgentId);
     identityFacts.replaceChildren(
       infoRow("所属 Agent", agentLink(owner, account.ownerAgentId ? "未知 Agent" : "等待首次接入")),
-      infoRow("当前 Agent", agentLink(active, account.presence === "online" ? "在线，身份待同步" : "—")),
+      infoRow("模型", createAccountModelControl({
+        account,
+        ownerAgent: owner,
+        modelOptions: detail?.modelOptions,
+        updateModel: (body) => accountsClient.updateModel(account.id, body),
+        onSaved(nextAccount) {
+          account = nextAccount;
+          detail = { ...detail, account };
+          runtime.mergeAccount(account);
+          feedback.textContent = "Model 已保存；后续聊天将使用新模型，聊天上下文已轮换。";
+          feedback.dataset.tone = "success";
+          render();
+        },
+        onError(error) {
+          feedback.textContent = error.message;
+          feedback.dataset.tone = "danger";
+        },
+      })),
       infoRow("状态", account.presence ?? "offline"),
       infoRow("最近在线", formatTime(account.lastSeenAt)),
     );
@@ -269,7 +286,7 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
     }
     if (envelope.type === "account.presence.updated" && envelope.data?.accountId === accountId) {
       account = runtime.getBootstrap().accounts.find((item) => item.id === accountId) ?? account;
-      render();
+      void load();
     }
   });
   return () => {

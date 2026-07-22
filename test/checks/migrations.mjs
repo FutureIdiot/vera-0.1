@@ -94,7 +94,9 @@ export async function run(ctx) {
       const account = bs.json.accounts[0];
       assertEqual(account.ownerAgentId, AGENT_ID);
       assertEqual(account.activeAgentId, null);
-      assert(!("provider" in account) && !("model" in account) && !("kind" in account));
+      assertEqual(account.model, "mock-v1");
+      assertEqual(account.modelVersion, 1);
+      assert(!("provider" in account) && !("kind" in account));
 
       // Phase 5.5：Space 成员身份固定为 Account。
       const space = bs.json.spaces[0];

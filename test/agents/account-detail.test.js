@@ -57,7 +57,14 @@ function insertOwner(store) {
     id: "agt_account_detail",
     name: "Detail Agent",
     runtimeProfile: { schemaVersion: 1, kind: "cli", provider: "mock", model: "mock-v1" },
-    runtimeBinding: { connection: { secretRef: "must-not-project" } },
+    runtimeBinding: {
+      connection: { secretRef: "must-not-project" },
+      runtimeSnapshot: {
+        hostId: "host-detail",
+        runtimeCapabilities: { models: ["mock-v1", "mock-v2"] },
+        updatedAt: "2026-07-18T00:00:00.000Z",
+      },
+    },
     runtimeRevision: "sha256:detail",
     createdAt: "2026-07-18T00:00:00.000Z",
     updatedAt: "2026-07-18T00:00:00.000Z",
@@ -95,7 +102,10 @@ test("Account detail is a strict safe projection with the latest 20 login audits
 
     const response = await request(router, "GET", `/api/accounts/${created.account.id}`);
     assert.equal(response.status, 200);
-    assert.deepEqual(Object.keys(response.json).sort(), ["account", "activeAgent", "ownerAgent", "recentLogins"]);
+    assert.deepEqual(Object.keys(response.json).sort(), [
+      "account", "activeAgent", "modelOptions", "ownerAgent", "recentLogins",
+    ]);
+    assert.deepEqual(response.json.modelOptions, ["mock-v1", "mock-v2"]);
     assert.deepEqual(response.json.account.workspace, {
       accountId: created.account.id,
       hostId: "host-detail",

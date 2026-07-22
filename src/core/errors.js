@@ -20,6 +20,7 @@ export const STATUS_BY_CODE = {
   memory_retrieval_unavailable: 503,
   memory_job_active: 409,
   memory_task_unavailable: 409,
+  model_unavailable: 409,
   file_too_large: 413,
   unsupported_file_type: 415,
   invalid_file: 422,

@@ -36,7 +36,10 @@ async function fixture(kind, fn) {
     id: `agt_${kind}`,
     name: `${kind} agent`,
     runtimeProfile: { schemaVersion: 1, kind, provider: kind === "api" ? "ollama" : "codex", model: "model-a" },
-    runtimeBinding: { connection: { secretCanary: "must-not-cross-wire" } },
+    runtimeBinding: {
+      connection: { secretCanary: "must-not-cross-wire" },
+      runtimeSnapshot: { runtimeCapabilities: { models: ["model-a", "model-b"] } },
+    },
     runtimeRevision: "sha256:runtime-a",
     createdAt: "2026-07-19T00:00:00.000Z",
     updatedAt: "2026-07-19T00:00:00.000Z",
@@ -47,7 +50,9 @@ async function fixture(kind, fn) {
     activeAgentId: agent.id,
     name: `${kind} account`,
     presence: "online",
-    runtimeCapabilities: { tools: [] },
+    model: "model-b",
+    modelVersion: 2,
+    runtimeCapabilities: { tools: [], models: ["model-a", "model-b"] },
     workspace: { hostId: "host-a", path: "/srv/project", status: "ready", policy: { allow: ["read"] } },
     createdAt: "2026-07-19T00:00:00.000Z",
     updatedAt: "2026-07-19T00:00:00.000Z",
@@ -120,6 +125,8 @@ for (const kind of ["cli", "api"]) {
       assert.equal(run.status, "pending");
       assert.equal(run.executionTransport, "daemon");
       assert.equal(run.accountSessionId, "acs_runtime");
+      assert.equal(run.effectiveModel, "model-b");
+      assert.equal(run.modelVersion, 2);
 
       const dispatch = await dispatched.promise;
       const running = store.find("runs", run.id);
@@ -143,6 +150,31 @@ for (const kind of ["cli", "api"]) {
     });
   });
 }
+
+test("daemon scheduler refuses an Account model outside its owner Agent inventory", async () => {
+  await fixture("cli", async ({ store, hub, agent, account, space, spaceSession, agentSession, triggerMessage }) => {
+    store.update("accounts", account.id, { model: "retired-model" });
+    const scheduler = createDaemonRunScheduler({
+      store,
+      hub,
+      config: CONFIG,
+      controlService: { getSession: () => ({ id: "acs_runtime", agentId: agent.id }) },
+      daemonRuntime: { dispatchRun() { throw new Error("must not dispatch"); } },
+    });
+    assert.throws(
+      () => scheduler.scheduleMainRun({
+        agent,
+        account: store.find("accounts", account.id),
+        space,
+        spaceSession,
+        agentSession,
+        triggerMessage,
+      }),
+      (error) => error?.code === "model_unavailable",
+    );
+    assert.equal(store.list("runs").length, 0);
+  });
+});
 
 test("daemon scheduler terminalizes a pending Run when no active Account Session remains", async () => {
   await fixture("cli", async ({ store, hub, agent, account, space, spaceSession, agentSession, triggerMessage }) => {

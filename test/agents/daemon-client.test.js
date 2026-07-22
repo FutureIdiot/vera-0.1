@@ -50,7 +50,10 @@ function fixture({ envelopes = [], memoryEnvelopes = [], executor, memoryExecuto
     gatewayUrl: "https://gateway.test",
     agentId: "agt_a",
     accountId: "acc_a",
-    runtime: { hostId: "host_a", kind: "api", provider: "ollama", model: "model_a", revision: "rev_a" },
+    runtime: {
+      hostId: "host_a", kind: "api", provider: "ollama", model: "model_a", revision: "rev_a",
+      runtimeCapabilities: { models: ["model_a", "model_b"] },
+    },
     workspace: { hostId: "host_a", path: "/workspace", status: "ready", policy: {} },
     credentialStore: { load: async () => ({ agentToken: TOKEN, accountKey: KEY }) },
     executor: executor ?? (async () => ({ content: "reply" })),
@@ -71,6 +74,7 @@ function requested(input, overrides = {}) {
       run: {
         id: "run_a", agentId: "agt_a", accountId: "acc_a", accountSessionId: "acs_a",
         runtimeRevision: "rev_a", executionLeaseId: "lease_a", workspaceHostId: "host_a", delegated: false,
+        effectiveModel: "model_a", modelVersion: 1,
         spaceSessionId: "sps_a", agentSessionId: input.sessionMode === "main" ? "ags_a" : null,
         contextGeneration: input.sessionMode === "main" ? 2 : null,
         ...overrides,
@@ -91,8 +95,8 @@ async function settle() {
 test("CLI isolated input stays isolated and does not submit API history", async () => {
   const input = { kind: "cli", sessionMode: "isolated", promptText: "bounded prompt" };
   let received;
-  const { client, calls } = fixture({ envelopes: [requested(input)], executor: async (context) => {
-    received = context.input;
+  const { client, calls } = fixture({ envelopes: [requested(input, { effectiveModel: "model_b" })], executor: async (context) => {
+    received = { input: context.input, effectiveModel: context.run.effectiveModel };
     await context.onDelta("done", { paragraphEnd: true });
     return { content: "done" };
   } });
@@ -100,7 +104,7 @@ test("CLI isolated input stays isolated and does not submit API history", async 
   await client.wait();
   await settle();
 
-  assert.deepEqual(received, input);
+  assert.deepEqual(received, { input, effectiveModel: "model_b" });
   assert.equal(calls.some((call) => call.url.endsWith("/api-result")), false);
   assert.equal(calls.find((call) => call.url.endsWith("/delta")).body.paragraphEnd, true);
   assert.equal(calls.find((call) => call.method === "PATCH" && call.body?.status === "completed")?.body.status, "completed");
@@ -125,7 +129,10 @@ test("requestApproval posts once and resolves only its approval.answered event",
       return new Response(new ReadableStream({
         start(controller) {
           accountController = controller;
-          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(requested({ kind: "cli", sessionMode: "isolated", promptText: "approve" }))}\n\n`));
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(requested(
+            { kind: "cli", sessionMode: "isolated", promptText: "approve" },
+            { effectiveModel: "m" },
+          ))}\n\n`));
         },
       }), { status: 200 });
     }
@@ -175,8 +182,27 @@ test("invalid mixed wire input never reaches executor and fails the Run", async 
   assert.deepEqual(patch.body, { status: "failed", error: { code: "internal", message: "daemon execution failed" } });
 });
 
+test("a Run model outside the daemon inventory never reaches the executor", async () => {
+  let executed = false;
+  const event = requested(
+    { kind: "api", sessionMode: "main", messages: [], historyVersion: 0 },
+    { effectiveModel: "retired-model" },
+  );
+  const { client, calls } = fixture({ envelopes: [event], executor: async () => { executed = true; } });
+  await client.start();
+  await client.wait();
+  await settle();
+
+  assert.equal(executed, false);
+  assert.equal(calls.some((call) => call.method === "PATCH" && call.body?.status === "failed"), true);
+  assert.equal(calls.some((call) => call.url.endsWith("/messages")), false);
+});
+
 test("a rejected output report prevents a completed terminal", async () => {
-  const event = requested({ kind: "cli", sessionMode: "isolated", promptText: "work" });
+  const event = requested(
+    { kind: "cli", sessionMode: "isolated", promptText: "work" },
+    { effectiveModel: "m" },
+  );
   const calls = [];
   let loginCount = 0;
   let eventCount = 0;

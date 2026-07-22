@@ -53,7 +53,7 @@ function loginBody(accountId, daemonBootId = "daemon-a", hostId = "host-a", revi
       provider: "mock",
       model: "mock-v1",
       revision,
-      runtimeCapabilities: { tools: [] },
+      runtimeCapabilities: { models: ["mock-v1", "mock-v2"], tools: [] },
     },
     workspace: {
       hostId,
@@ -141,6 +141,8 @@ test("Control Service closes the owner credential, Workspace, Session, and Execu
     assert.equal(store.list("unitBindings").filter((binding) => binding.agentId === enrolled.json.agent.id).length, 3);
     assert.equal("accessKeyHash" in enrolled.json.account, false);
     assert.equal(enrolled.json.account.workspace, null);
+    assert.equal(enrolled.json.account.model, "mock-v1");
+    assert.equal(enrolled.json.account.modelVersion, 1);
 
     const agentToken = enrolled.json.agentToken;
     const accountId = created.account.id;
@@ -729,6 +731,100 @@ test("Account login reconnect publishes the exact online presence event", async 
         lastSeenAt: account.lastSeenAt,
         activeAgentId: enrolled.json.agent.id,
       }]);
+    } finally {
+      unsubscribe();
+    }
+  });
+});
+
+test("runtime model capabilities normalize safely and cannot drift within one revision", async () => {
+  await daemonFixture(async ({ created, enrolled, login, store, router }) => {
+    assert.deepEqual(
+      store.find("agents", enrolled.json.agent.id).runtimeBinding.runtimeSnapshot.runtimeCapabilities.models,
+      ["mock-v1", "mock-v2"],
+    );
+    const reordered = loginBody(created.account.id);
+    reordered.runtime.runtimeCapabilities.models = ["mock-v2", "mock-v1"];
+    const normalized = await request(router, "POST", "/api/agent/login", reordered, {
+      authorization: `Bearer ${enrolled.json.agentToken}`,
+      "x-vera-account-session": login.json.accountSession.token,
+    });
+    assert.equal(normalized.status, 200);
+
+    const duplicated = loginBody(created.account.id);
+    duplicated.runtime.runtimeCapabilities.models = ["mock-v1", " mock-v1 "];
+    const duplicateRejected = await request(router, "POST", "/api/agent/login", duplicated, {
+      authorization: `Bearer ${enrolled.json.agentToken}`,
+      "x-vera-account-session": login.json.accountSession.token,
+    });
+    assert.equal(duplicateRejected.status, 400);
+    assert.equal(duplicateRejected.json.error.code, "invalid_request");
+
+    const placeholder = loginBody(created.account.id);
+    placeholder.runtime.runtimeCapabilities.models = ["mock-v1", "default"];
+    const placeholderRejected = await request(router, "POST", "/api/agent/login", placeholder, {
+      authorization: `Bearer ${enrolled.json.agentToken}`,
+      "x-vera-account-session": login.json.accountSession.token,
+    });
+    assert.equal(placeholderRejected.status, 400);
+    assert.equal(placeholderRejected.json.error.code, "invalid_request");
+
+    const drifted = loginBody(created.account.id);
+    drifted.runtime.runtimeCapabilities.models = ["mock-v1", "mock-v3"];
+    const rejected = await request(router, "POST", "/api/agent/login", drifted, {
+      authorization: `Bearer ${enrolled.json.agentToken}`,
+      "x-vera-account-session": login.json.accountSession.token,
+    });
+    assert.equal(rejected.status, 409);
+    assert.equal(rejected.json.error.code, "workspace_unavailable");
+    assert.deepEqual(
+      store.find("agents", enrolled.json.agent.id).runtimeBinding.runtimeSnapshot.runtimeCapabilities.models,
+      ["mock-v1", "mock-v2"],
+    );
+
+    const missingDefault = loginBody(created.account.id);
+    missingDefault.runtime.runtimeCapabilities.models = ["mock-v2"];
+    const invalid = await request(router, "POST", "/api/agent/login", missingDefault, {
+      authorization: `Bearer ${enrolled.json.agentToken}`,
+      "x-vera-account-session": login.json.accountSession.token,
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(invalid.json.error.code, "invalid_request");
+  });
+});
+
+test("Account model route exposes owner options and applies CAS with one upsert", async () => {
+  await daemonFixture(async ({ created, store, router, hub }) => {
+    const detail = await request(router, "GET", `/api/accounts/${created.account.id}`);
+    assert.equal(detail.status, 200);
+    assert.deepEqual(detail.json.modelOptions, ["mock-v1", "mock-v2"]);
+    const events = [];
+    const unsubscribe = hub.subscribe({
+      write(frame) {
+        const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
+        if (dataLine) events.push(JSON.parse(dataLine.slice("data: ".length)));
+      },
+    });
+    try {
+      const changed = await request(router, "PUT", `/api/accounts/${created.account.id}/model`, {
+        model: "mock-v2",
+        ifVersion: 1,
+      });
+      assert.equal(changed.status, 200);
+      assert.equal(changed.json.account.model, "mock-v2");
+      assert.equal(changed.json.account.modelVersion, 2);
+      const replay = await request(router, "PUT", `/api/accounts/${created.account.id}/model`, {
+        model: "mock-v2",
+        ifVersion: 1,
+      });
+      assert.equal(replay.status, 200);
+      assert.equal(events.filter((event) => event.type === "account.upserted").length, 1);
+      const unavailable = await request(router, "PUT", `/api/accounts/${created.account.id}/model`, {
+        model: "mock-v3",
+        ifVersion: 2,
+      });
+      assert.equal(unavailable.status, 409);
+      assert.equal(unavailable.json.error.code, "model_unavailable");
     } finally {
       unsubscribe();
     }

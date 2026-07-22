@@ -94,7 +94,10 @@ test("Memory worker uses Agent Token only, freezes execution metadata, and abort
   };
   const client = createDaemonClient({
     gatewayUrl: "https://gateway.test", agentId: "agt_a", accountId: "acc_a",
-    runtime: { hostId: "host_a", kind: "api", provider: "ollama", model: "chat-model", revision: "rev_a" },
+    runtime: {
+      hostId: "host_a", kind: "api", provider: "ollama", model: "chat-model", revision: "rev_a",
+      runtimeCapabilities: { models: ["chat-model", "task-model"] },
+    },
     workspace: { hostId: "host_a" }, credentialStore: { load: async () => ({ agentToken: TOKEN, accountKey: KEY }) },
     executor: async () => ({ content: "unused" }), memoryExecutor,
     fetchImpl, daemonBootId: "boot_a", maxConnectionFailures: 1,

@@ -36,8 +36,9 @@ export async function main({ env = process.env, fetchImpl = globalThis.fetch, ex
   const daemonExecutor = executor ?? {
     execute(context) {
       const { input, run } = context;
+      const executionRuntime = { ...runtime, model: run.effectiveModel };
       return adapter.run({
-        runtime,
+        runtime: executionRuntime,
         workspacePath: workspace.path,
         agent: context.agent,
         account: context.account,

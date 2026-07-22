@@ -97,9 +97,11 @@ test("Phase 5.5 migration atomically moves runtime identity to Agent and Account
 
     const account = store.find("accounts", "acc_a");
     assert.equal(account.ownerAgentId, "agt_a");
-    for (const legacy of ["owningAgentId", "kind", "provider", "connection", "model", "authorizedAgentIds"]) {
+    for (const legacy of ["owningAgentId", "kind", "provider", "connection", "authorizedAgentIds"]) {
       assert.equal(legacy in account, false, `${legacy} is removed from Account`);
     }
+    assert.equal(account.model, "gpt-a");
+    assert.equal(account.modelVersion, 1);
     assert.equal(account.activeAgentId, null);
     assert.equal(account.runtimeCapabilities, null);
     assert.equal(account.accessKeyState, "revoked");
@@ -131,6 +133,7 @@ test("Phase 5.5 migration atomically moves runtime identity to Agent and Account
 
     const meta = JSON.parse(await readFile(join(dataPath, "meta.json"), "utf8"));
     assert.equal(meta.federationAccountMigrationVersion, 1);
+    assert.equal(meta.accountModelSelectionMigrationVersion, 1);
 
     const reopened = await createStore({ dataPath, debounceMs: 5 });
     assert.equal(reopened.list("agents").length, 2);
@@ -190,6 +193,8 @@ test("transitional Agent create bridge persists one portable runtime and rejects
     assert.equal("runtimeBinding" in created.agent, false);
     assert.equal(JSON.stringify(created.agent).includes("local-only"), false);
     assert.equal(created.account.ownerAgentId, created.agent.id);
+    assert.equal(created.account.model, "gpt-test");
+    assert.equal(created.account.modelVersion, 1);
     assert.throws(
       () => createAccount(store, created.agent.id, { name: "Second" }),
       (error) => error.code === "conflict",
@@ -216,6 +221,8 @@ test("Account access keys are one-time values backed only by salted scrypt mater
     const first = createUnownedAccount(store, { name: "Ready to enroll" });
     assert.match(first.accessKey, /^vak_[A-Za-z0-9_-]{43}$/u);
     assert.equal(first.account.ownerAgentId, null);
+    assert.equal(first.account.model, null);
+    assert.equal(first.account.modelVersion, 0);
     assert.equal(first.account.accessKeyState, "active");
     assert.equal(first.account.accessKeyVersion, 1);
     assert.equal("accessKeyHash" in first.account, false);

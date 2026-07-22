@@ -109,7 +109,7 @@ export async function run(ctx) {
         provider: "codex",
         model: "fake-proposal",
         revision: agent.runtimeRevision,
-        runtimeCapabilities: { tools: [] },
+        runtimeCapabilities: { models: ["fake-proposal"], tools: [] },
         connection: { command: fake.binary, args: [], secretRef: null },
       };
       const adapter = createCodexAdapter({ config: loadConfig({

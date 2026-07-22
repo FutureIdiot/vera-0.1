@@ -194,7 +194,7 @@ export async function createOnlineMockAccount({ port, name }) {
     provider: "mock",
     model: "mock-v1",
     revision: `sha256:${hostId}`,
-    runtimeCapabilities: { tools: [] },
+    runtimeCapabilities: { models: ["mock-v1"], tools: [] },
   };
   const workspace = {
     hostId,

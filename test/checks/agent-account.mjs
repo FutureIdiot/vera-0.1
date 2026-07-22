@@ -24,9 +24,11 @@ export async function run(ctx) {
     assertEqual(json.agent.name, "VerifyMock");
     assert(json.account?.id?.startsWith("acc_"), "account id should have acc_ prefix");
     assertEqual(json.account.ownerAgentId, json.agent.id);
-    for (const key of ["kind", "provider", "connection", "model", "authorizedAgentIds"]) {
+    for (const key of ["kind", "provider", "connection", "authorizedAgentIds"]) {
       assert(!(key in json.account), `Account must not expose legacy ${key}`);
     }
+    assertEqual(json.account.model, "mock-v1");
+    assertEqual(json.account.modelVersion, 1);
     ctx.agent = json.agent;
     ctx.owningAccount = json.account;
   });

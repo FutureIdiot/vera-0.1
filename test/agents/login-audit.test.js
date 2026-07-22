@@ -24,7 +24,7 @@ function loginBody(accountId, daemonBootId = "daemon-a") {
       provider: "mock",
       model: "mock-v1",
       revision: "sha256:runtime-a",
-      runtimeCapabilities: { tools: [] },
+      runtimeCapabilities: { models: ["mock-v1"], tools: [] },
     },
     workspace: {
       hostId: "host-a",

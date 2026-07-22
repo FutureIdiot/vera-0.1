@@ -55,6 +55,7 @@ function validateRequest(data, identity) {
   const snapshotKeys = [
     "ownerAgentId", "executorAgentId", "runtimeRevision", "kind", "provider", "modelMode", "taskModel", "verificationId",
   ];
+  const models = identity.runtime.runtimeCapabilities?.models ?? [identity.runtime.model];
   if (Object.keys(snapshot).sort().join(",") !== [...snapshotKeys].sort().join(",") ||
       !text(data.dispatchId, "dispatchId") || !text(data.jobId, "jobId") ||
       !Number.isInteger(data.attempt) || data.attempt < 1 || !["digest", "dream"].includes(data.kind) ||
@@ -66,6 +67,7 @@ function validateRequest(data, identity) {
       !text(snapshot.verificationId, "memoryTaskSnapshot.verificationId") ||
       snapshot.executorAgentId !== identity.agentId || snapshot.runtimeRevision !== identity.runtime.revision ||
       snapshot.kind !== identity.runtime.kind || snapshot.provider !== identity.runtime.provider ||
+      !models.includes(snapshot.taskModel) ||
       !data.payload || typeof data.payload !== "object" || Array.isArray(data.payload)) {
     throw new MemoryTaskWorkerError("invalid_event", "Memory task snapshot does not match this worker");
   }

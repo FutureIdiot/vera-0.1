@@ -43,6 +43,27 @@ function object(value, field) {
   return value;
 }
 
+function normalizedRuntime(value) {
+  const runtime = object(value, "runtime");
+  const model = requiredText(runtime.model, "runtime.model");
+  const capabilities = runtime.runtimeCapabilities == null
+    ? {}
+    : object(runtime.runtimeCapabilities, "runtime.runtimeCapabilities");
+  const source = capabilities.models === undefined ? [model] : capabilities.models;
+  if (!Array.isArray(source) || source.length === 0) {
+    throw new DaemonClientError("invalid_config", "runtime models are required");
+  }
+  const models = source.map((item) => requiredText(item, "runtime model"));
+  if (models.includes("default") || new Set(models).size !== models.length || !models.includes(model)) {
+    throw new DaemonClientError("invalid_config", "runtime models must be unique and include the default model");
+  }
+  return {
+    ...runtime,
+    model,
+    runtimeCapabilities: { ...capabilities, models },
+  };
+}
+
 async function responseJson(response) {
   try { return await response.json(); } catch { return null; }
 }
@@ -78,7 +99,7 @@ export function createDaemonClient({
   const baseUrl = gatewayBase(gatewayUrl);
   const identity = {
     agentId: requiredText(agentId, "agentId"), accountId: requiredText(accountId, "accountId"),
-    runtime: object(runtime, "runtime"), workspace: object(workspace, "workspace"),
+    runtime: normalizedRuntime(runtime), workspace: object(workspace, "workspace"),
   };
   requiredText(identity.runtime.revision, "runtime.revision");
   requiredText(identity.workspace.hostId, "workspace.hostId");

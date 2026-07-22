@@ -49,7 +49,7 @@ async function fixture(run) {
       daemonBootId: "daemon-runtime",
       runtime: {
         hostId: "host-runtime", kind: "cli", provider: "mock", model: "mock-v1",
-        revision: "sha256:runtime", runtimeCapabilities: { tools: [] },
+        revision: "sha256:runtime", runtimeCapabilities: { models: ["mock-v1"], tools: [] },
       },
       workspace: {
         hostId: "host-runtime", path: "/srv/runtime", status: "ready", policy: { allow: ["read"] },
@@ -77,7 +77,7 @@ async function fixture(run) {
     store.insert("runs", {
       id: "run_runtime", role: "main", parentRunId: null, spaceId: "spc_runtime",
       spaceSessionId: "sps_runtime", agentSessionId: "ags_runtime", contextGeneration: 1,
-      accountId, agentId, runtimeRevision: "sha256:runtime", effectiveModel: "mock-v1",
+      accountId, agentId, runtimeRevision: "sha256:runtime", effectiveModel: "mock-v1", modelVersion: 1,
       delegated: false, triggerMessageId: "msg_trigger", replyMessageIds: [], status: "running",
       executionTransport: "daemon", accountSessionId: session.id, executionLeaseId: "exl_runtime",
       workspaceHostId: "host-runtime", leaseAcquiredAt: "2026-07-19T00:00:00.000Z",

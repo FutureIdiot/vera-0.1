@@ -33,7 +33,7 @@
 | [`memory-ui.md`](memory-ui.md) | Data → Memory完成记录入口；当前无未完成事项 |
 | [`files.md`](files.md) | Files完成记录入口；当前无未完成事项 |
 | [`phase-5-closeout.md`](phase-5-closeout.md) | Phase 5冻结记录入口；当前无未完成事项 |
-| [`federation-account.md`](federation-account.md) | Account详情、Memory配置与Session安全完成记录入口；当前无未完成事项 |
+| [`federation-account.md`](federation-account.md) | Account所属Agent与模型选择、详情、Memory配置及Session安全完成记录入口；当前无未完成事项 |
 | [`federation-security.md`](federation-security.md) | AgentState、Account presence、owner Tailscale identity与入口边界完成记录入口；当前无未完成事项 |
 | [`federation-runtime.md`](federation-runtime.md) | `/api/agent/*`、调度器、daemon、mock daemon完成记录入口；当前无未完成事项 |
 | [`federation-deployment.md`](federation-deployment.md) | 先完成自用gateway/daemon/Workspace/Memory直接部署、Tailscale Serve、备份与真实模型复验；后置开源部署引导适配 |
