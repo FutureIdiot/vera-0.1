@@ -17,13 +17,14 @@
 
 ## 当前依赖顺序
 
-1. [~] [VPS 私网部署与旧链路清理](federation-deployment.md)
-2. [ ] [原生客户端](native-clients.md)
-3. [ ] [运行时能力真实闭环（阶段C）](runtime-capabilities.md)
-4. [ ] [Extension 体系](extensions.md)
-5. [ ] [原生发布与三端回归](native-release.md)
+1. [~] [自用私网直接部署与 Vera 投入使用](federation-deployment.md#自用直接部署与投入使用)
+2. [ ] [开源友好的部署引导适配](federation-deployment.md#后置开源友好的部署引导适配)
+3. [ ] [原生客户端](native-clients.md)
+4. [ ] [运行时能力真实闭环（阶段C）](runtime-capabilities.md)
+5. [ ] [Extension 体系](extensions.md)
+6. [ ] [原生发布与三端回归](native-release.md)
 
-不得从前项未完成处跳过依赖直接生成原生工程。某一文件内部若有更细依赖，以该文件为准。
+当前先完成我们自己的直接部署并让 Vera 进入日常使用；`npm run setup`、全新环境引导、从零tailnet流程与开源User体验不再阻塞自用上线。自用链路稳定后再把真实流程收口成第2项的开源友好适配。不得从前项未完成处跳过依赖直接生成原生工程；某一文件内部若有更细依赖，以该文件为准。
 
 ## 执行文件
 
@@ -35,7 +36,7 @@
 | [`federation-account.md`](federation-account.md) | Account详情、Memory配置与Session安全完成记录入口；当前无未完成事项 |
 | [`federation-security.md`](federation-security.md) | AgentState、Account presence、owner Tailscale identity与入口边界完成记录入口；当前无未完成事项 |
 | [`federation-runtime.md`](federation-runtime.md) | `/api/agent/*`、调度器、daemon、mock daemon完成记录入口；当前无未完成事项 |
-| [`federation-deployment.md`](federation-deployment.md) | gateway/daemon/Workspace/Memory跨宿主部署、Tailscale Serve、备份与真实模型复验 |
+| [`federation-deployment.md`](federation-deployment.md) | 先完成自用gateway/daemon/Workspace/Memory直接部署、Tailscale Serve、备份与真实模型复验；后置开源部署引导适配 |
 | [`native-clients.md`](native-clients.md) | Capacitor共享平台、Android壳与iOS壳 |
 | [`runtime-capabilities.md`](runtime-capabilities.md) | Skills / Hooks / MCP / Data运行时闭环，以及未来`vera.workspace` MCP与代上线开发路径 |
 | [`extensions.md`](extensions.md) | Extension Package、Agent Plugin、Space Module与Memory Provider扩展 |

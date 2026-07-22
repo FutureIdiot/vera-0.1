@@ -1,17 +1,90 @@
-# VPS 私网部署与旧链路清理
+# VPS 私网直接部署与后续引导适配
 
 ## 开始条件
 
 [`federation-runtime.md`](federation-runtime.md) 已完成；本文件现为进行中。
 
-## 开源引导式部署
+## 阶段边界
+
+- 当前唯一目标是完成我们自己的私网直接部署，让Vera以真实gateway、daemon、Workspace、Memory和客户端链路进入日常使用。
+- 直接部署允许由Codex与User按已确认的主机事实逐步执行明确命令，不等待完整`npm run setup`、全新环境向导、从零tailnet引导或开源文案；不得为绕过向导而降低备份、secret、私网入口、逐步验证和可恢复性要求。
+- 已实现的setup只读preflight、计划指纹、角色/路径校验与operation接口保留为可复用基础，但当前不继续扩展交互确认或通用apply编排。缺少向导能力不得被报告为自用部署阻塞项。
+- 自用链路通过并实际投入使用后，再恢复开源友好的安装、幂等重跑、通用宿主适配和恢复体验；这些工作移到本文件最后的后置里程碑。
+
+## 自用直接部署与投入使用
+
+### 直接部署顺序
+
+1. [~] 核对实际gateway、daemon、Workspace与Memory宿主、路径、稳定`hostId`、tailnet与owner login；可复用现有setup只读preflight，但以逐宿主复核后的事实为准。
+2. [ ] 对将替换、迁移或停用的Vera数据、配置、service和旧公网链路完成可定位冷备份，并验证备份可读；未知或不属于Vera的对象保持不动。
+3. [ ] 在选定VPS直接配置gateway数据路径与systemd service，使gateway只监听`127.0.0.1:3210`；逐项验证回环health、重启恢复和日志无secret。
+4. [ ] 直接配置Tailscale Serve、ACL与精确owner login，验证私网HTTPS、owner身份、SSE逐帧及since恢复；确认未启用Funnel、公网IP与公网443/3210均无Vera入口。
+5. [ ] 直接接入至少一个独立daemon宿主及其Workspace/Memory路径，完成凭证落盘、自动重连、离线失败、gateway停止后daemon约45秒退出和重启恢复验收。
+6. [ ] 按placement边界完成必要的Memory首次绑定或显式迁移；既有gateway placement不因daemon login静默改挂，迁移失败不形成第二个可写真值。
+7. [ ] 配置并实测各宿主一致性备份与恢复入口，排除secrets、运行锁、临时文件和`.vera-index/`；私有GitHub副本只作冷恢复来源。
+8. [ ] 用真实daemon重跑`gemma4:e4b`固定raw语义夹具，并完成PC、手机蜂窝网络、在线流式回复、离线Agent错误Activity及端到端重启验收。
+9. [ ] 将客户端日常入口切换到gateway私网URL，停止旧Mac gateway与cloudflared自启；连续实际使用Vera并处理阻塞性部署问题后，确认自用部署里程碑完成。
+
+直接部署可以使用逐条确认的终端操作；临时探针或实验输出只放系统临时目录，不为本次自用部署在repo中维护另一套一次性安装器。每一步都必须先解析精确目标，再执行并立即验证；涉及停用、替换、迁移或网络收紧时，必须先有可读备份和仍可用的管理连接。
+
+### 自用投入使用完成标准
+
+- [ ] gateway、至少一个独立daemon、Workspace与对应Memory placement在真实宿主运行，重启后自动恢复，客户端统一使用gateway私网入口。
+- [ ] owner私网HTTPS、真实SSE流、PC与手机蜂窝网络均通过；公网IP、3210和443均没有Vera公网入口。
+- [ ] 在线Agent正常回复，离线Agent只产生错误Activity且不创建Run；gateway停止后daemon约45秒内退出且不反复撞网关。
+- [ ] Memory binding、迁移和离线失败符合契约，备份与恢复入口已实测，secret未进入repo、日志、命令参数或部署摘要。
+- [ ] 旧Mac gateway与cloudflared自启已停止并保留冷备；Vera已切换为实际日常使用入口，而不只是完成一次部署演示。
+
+达到以上标准后，[`index.md`](index.md) 的第1项即可完成，Vera已可日常使用；随后再进入下列开源引导适配。
+
+### VPS部署边界
+
+- [ ] 在选定的小VPS直接部署gateway控制面与gateway placement数据；不要求Workspace、CLI daemon或全部Memory与gateway同机。
+- [ ] gateway由systemd常驻，只监听`127.0.0.1:3210`。
+- [ ] gateway VPS、PC与其他daemon VPS都加入tailnet并登记稳定`hostId`；用Tailscale Serve提供gateway私网HTTPS。
+- [ ] 配置ACL与owner login；未加入tailnet的设备不能访问Vera。
+- [ ] 不安装公网反向代理，不启用Funnel，不开放公网Vera端口。
+- [ ] PC可运行轻量Agent，较大VPS可运行项目Workspace与能力较强的CLI Agent；当前每个owner Workspace必须与自己的daemon同`hostId`。
+- [ ] 手机蜂窝网络、不同宿主daemon、SSE逐帧与since恢复通过真实验收。
+
+### Memory placement
+
+- [ ] daemon链路启用后，新登记CLI Agent只在daemon宿主已验证可承载对应Memory Provider时首次原子绑定到daemon placement；此前已登记为gateway placement的Agent保持原位，不借login静默改挂。
+- [ ] CLI Agent默认`vera.markdown`可跟随daemon宿主；API Agent可绑定gateway宿主；remote Provider按自身服务位置登记。
+- [ ] gateway只保存active Provider binding、placement、版本与安全状态；daemon placement离线返回`memory_provider_unavailable`，不回退gateway副本。
+- [ ] placement迁移必须排空写入、复制、逐条验证并原子换绑；旧副本转冷备，不形成第二个可写真值。
+
+### 备份
+
+- [ ] 每个Memory Provider宿主与Workspace宿主按自身数据边界生成一致性快照，排除secrets、运行锁与临时文件，并推送到gateway VPS的备份入口。
+- [ ] gateway VPS定期把可版本化快照推送到私有GitHub仓库；GitHub副本只用于恢复，不参与在线读取或写入。
+- [ ] `.vera-index/`不进入Git，恢复后从Markdown重建。
+- [ ] rsync/推送缓存只作为冷备份传输，不形成第二个可写真值；恢复时按`agentId/accountId/hostId`明确选择来源。
+
+### 真实模型复验
+
+- [ ] 在VPS gateway与真实daemon部署完成后，用同一`gemma4:e4b` runtime/model/tag重跑固定raw语义夹具。
+- [ ] 通过前不得登记为已验证Digest executor。
+- [ ] 失败继续保持`invalid_proposal`与vault零变化；不得用prompt特判、adapter猜测或放宽validator换取通过。
+
+### 本机清理
+
+- [ ] 停止旧Mac gateway与cloudflared自启。
+- [ ] 旧数据与cloudflared配置只保留冷备份。
+- [ ] 验证Mac/PC可只运行daemon、Workspace和其daemon placement Memory；客户端统一访问gateway VPS私网入口。
+
+## 后置：开源友好的部署引导适配
+
+本里程碑在自用部署完成并投入使用后再启动。目标是把已经真实运行、反复验证过的部署事实收口成面向其他User的通用体验，不反过来让尚未验证的抽象阻塞我们自己的上线。
+
+### 开源引导式部署
 
 - [ ] 仓库根目录提供单一`npm run setup`入口；User在控制端clone仓库后即可选择本机或SSH可达宿主并完成部署，不要求手工编辑repo文件、systemd unit或JSON配置。
 - [ ] setup先做只读preflight并展示执行计划，再等待User确认：检查本机与目标宿主的Node、SSH、Tailscale、Linux/systemd、端口、目录权限、既有Vera/代理service及公网监听；明确列出节点、角色、路径、备份、宿主准备、将安装或停止的service及网络变更，失败项不得自动绕过。
 - [ ] Tailscale分为“使用已有tailnet”和“从零搭建”两条引导路径。已有网络检测登录状态、目标设备、MagicDNS/HTTPS、ACL与owner login；从零路径引导User完成官方安装、登录、设备加入和管理台授权，Vera不接管Tailscale账号凭证、不把auth key写入repo、日志或命令输出。
 - [ ] User为每个宿主确认角色；gateway宿主只询问gateway data、附件与gateway placement Memory路径，daemon宿主只询问该宿主的Workspace与daemon placement Memory路径，纯客户端不询问服务端路径。每个Vera宿主生成并持久化稳定`hostId`，重跑不得因进程、SSH连接或Tailscale设备名变化而改号。
 - [ ] 部署顺序固定为只读preflight与计划确认 → 备份 → VPS宿主准备 → tailnet前置确认 → 网络固化 → gateway安装 → Tailscale Serve与owner私网访问验收 → daemon/Workspace/Memory宿主接入 → 端到端验收与备份；gateway未通过私网入口验收时不得继续签发或接入daemon。
-- [ ] 交互向导与可单独验证、可重复执行的底层部署操作共用实现；首次真实VPS部署允许用半交互流程逐步确认，但不得维护一份独立的手工部署逻辑。真实链路通过后再收口完整提示、错误定位与恢复体验。
+- [ ] 交互向导与可单独验证、可重复执行的底层部署操作共用实现；以已经通过的自用直接部署步骤、故障和验收为输入，不维护另一份与真实链路分叉的部署逻辑。
 - [ ] setup重跑必须幂等：已正确完成的步骤只验证，不重复创建service、Serve入口、Agent身份或凭证；配置漂移显示精确差异并重新确认，失败明确停在哪一步及安全重试方式，不把半完成状态报告为成功。
 - [ ] setup输出不含secret的部署摘要、gateway私网URL、节点角色/`hostId`、已确认路径、验收结果和后续重跑入口；Agent Token、Account Key与Account Session不得进入终端回显、进程参数、部署摘要或repo。
 
@@ -49,49 +122,13 @@
 - 网络固化必须晚于`tailnet_ready`：先实测新的SSH或Tailscale管理连接，再关闭旧公网Vera入口、收紧相关防火墙规则并重新连接验证。任何可能切断唯一管理连接的计划均为`blocked`。
 - 每个底层操作统一实现`detect → diff → apply → verify`；重跑时`detect`已命中目标状态则只执行`verify`。破坏性操作还必须声明备份、恢复动作和精确目标，不能依赖模糊进程名、未解析变量或宽泛路径。
 
-## 实施顺序
+## 引导适配实施顺序
 
-1. [~] 按本文件已冻结的状态机实现setup入口、只读preflight、计划确认、节点角色/路径输入及`detect → diff → apply → verify`底层操作接口。当前单目标CLI已使用可扩为多目标的数据形状，完成本机/SSH固定只读探针、白名单事实解析、角色/路径校验、计划指纹、`planned`安全摘要与底层operation接口；CLI明确停在`planned + applied:false`。尚缺基于事实快照的交互确认、首批真实backup/apply/verify操作及多目标一次编排，不得把当前结果报告为已部署。
-2. [ ] 用同一setup入口和底层操作完成首个真实gateway VPS及至少一个独立daemon宿主的半交互部署，不另写一次性手工脚本。
-3. [ ] 真实部署与故障恢复通过后补齐从零tailnet引导、重跑/漂移提示和面向开源User的最终交互文案。
+1. [ ] 自用部署里程碑完成并投入使用后，重新审计已经验证的宿主事实、命令、故障与恢复边界，再恢复setup实现。当前单目标CLI已使用可扩为多目标的数据形状，完成本机/SSH固定只读探针、白名单事实解析、角色/路径校验、计划指纹、`planned`安全摘要与底层operation接口；CLI明确停在`planned + applied:false`。
+2. [ ] 补齐基于事实快照的交互确认、真实backup/apply/verify操作与多目标一次编排，并在全新受支持环境重演gateway及至少一个独立daemon部署。
+3. [ ] 完成已有tailnet与从零tailnet两条路径、幂等重跑、漂移提示、错误定位、恢复体验和面向开源User的最终交互文案。
 
-## VPS部署
-
-- [ ] 通过setup在选定的小VPS部署gateway控制面与gateway placement数据；不要求Workspace、CLI daemon或全部Memory与gateway同机。
-- [ ] gateway由systemd常驻，只监听`127.0.0.1:3210`。
-- [ ] gateway VPS、PC与其他daemon VPS都加入tailnet并登记稳定`hostId`；用Tailscale Serve提供gateway私网HTTPS。
-- [ ] 配置ACL与owner login；未加入tailnet的设备不能访问Vera。
-- [ ] 不安装公网反向代理，不启用Funnel，不开放公网Vera端口。
-- [ ] PC可运行轻量Agent，较大VPS可运行项目Workspace与能力较强的CLI Agent；当前每个owner Workspace必须与自己的daemon同`hostId`。
-- [ ] 手机蜂窝网络、不同宿主daemon、SSE逐帧与since恢复通过真实验收。
-
-## Memory placement
-
-- [ ] daemon链路启用后，新登记CLI Agent只在daemon宿主已验证可承载对应Memory Provider时首次原子绑定到daemon placement；此前已登记为gateway placement的Agent保持原位，不借login静默改挂。
-- [ ] CLI Agent默认`vera.markdown`可跟随daemon宿主；API Agent可绑定gateway宿主；remote Provider按自身服务位置登记。
-- [ ] gateway只保存active Provider binding、placement、版本与安全状态；daemon placement离线返回`memory_provider_unavailable`，不回退gateway副本。
-- [ ] placement迁移必须排空写入、复制、逐条验证并原子换绑；旧副本转冷备，不形成第二个可写真值。
-
-## 备份
-
-- [ ] 每个Memory Provider宿主与Workspace宿主按自身数据边界生成一致性快照，排除secrets、运行锁与临时文件，并推送到gateway VPS的备份入口。
-- [ ] gateway VPS定期把可版本化快照推送到私有GitHub仓库；GitHub副本只用于恢复，不参与在线读取或写入。
-- [ ] `.vera-index/`不进入Git，恢复后从Markdown重建。
-- [ ] rsync/推送缓存只作为冷备份传输，不形成第二个可写真值；恢复时按`agentId/accountId/hostId`明确选择来源。
-
-## 真实模型复验
-
-- [ ] 在VPS gateway与真实daemon部署完成后，用同一`gemma4:e4b` runtime/model/tag重跑固定raw语义夹具。
-- [ ] 通过前不得登记为已验证Digest executor。
-- [ ] 失败继续保持`invalid_proposal`与vault零变化；不得用prompt特判、adapter猜测或放宽validator换取通过。
-
-## 本机清理
-
-- [ ] 停止旧Mac gateway与cloudflared自启。
-- [ ] 旧数据与cloudflared配置只保留冷备份。
-- [ ] 验证Mac/PC可只运行daemon、Workspace和其daemon placement Memory；客户端统一访问gateway VPS私网入口。
-
-## 完成标准
+## 开源引导适配完成标准
 
 - [ ] 在全新受支持环境中，从clone仓库到gateway与daemon可用只需运行`npm run setup`并完成明确的外部Tailscale授权；无需复制隐藏命令或手改目标宿主文件。
 - [ ] 已有tailnet与从零tailnet两条路径均完成真实演练；setup重跑不产生重复service、Serve入口、Agent身份、凭证或`hostId`。
