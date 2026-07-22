@@ -338,8 +338,8 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(config.port, () => {
-  console.log(`vera gateway listening on :${config.port}`);
+server.listen(config.port, config.host, () => {
+  console.log(`vera gateway listening on ${config.host}:${config.port}`);
 });
 
 async function shutdown() {

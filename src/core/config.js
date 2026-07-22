@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const DEFAULTS = {
+  host: "127.0.0.1", // security invariant: gateway is reached only through loopback Tailscale Serve
   port: 3000,
   dataPath: "./data", // 目录：store 按集合分文件存放于此（见 src/store/store.js）
   sse: {
@@ -193,6 +194,7 @@ export function loadConfig(env = process.env) {
     throw new TypeError("VERA_ALLOW_LOOPBACK_DEVELOPMENT cannot be enabled in production");
   }
   return {
+    host: DEFAULTS.host,
     port: num(env.PORT, DEFAULTS.port),
     dataPath: env.VERA_DATA_PATH || DEFAULTS.dataPath,
     sse: {

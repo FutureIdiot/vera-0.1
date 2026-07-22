@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -5,6 +6,8 @@ import { loadConfig } from "../../src/core/config.js";
 
 test("security config defaults closed and parses exact deployment lists", () => {
   const defaults = loadConfig({});
+  assert.equal(defaults.host, "127.0.0.1");
+  assert.equal(loadConfig({ HOST: "0.0.0.0" }).host, "127.0.0.1");
   assert.deepEqual(defaults.security, {
     ownerTailscaleLogins: [],
     cors: { allowedOrigins: [] },
@@ -20,6 +23,12 @@ test("security config defaults closed and parses exact deployment lists", () => 
   assert.deepEqual(configured.security.cors.allowedOrigins, ["capacitor://localhost", "https://vera.example"]);
   assert.equal(configured.security.allowLoopbackDevelopment, true);
   assert.equal(loadConfig({ VERA_ALLOW_LOOPBACK_DEVELOPMENT: "1" }).security.allowLoopbackDevelopment, false);
+});
+
+test("gateway listener consumes the fixed loopback host", async () => {
+  const source = await readFile(new URL("../../src/server.js", import.meta.url), "utf8");
+  assert.match(source, /server\.listen\(config\.port, config\.host,/u);
+  assert.doesNotMatch(source, /server\.listen\(config\.port,\s*\(\)/u);
 });
 
 test("security config rejects unsafe Origins and production development bypass", () => {
