@@ -11,6 +11,12 @@
 - 已实现的setup只读preflight、计划指纹、角色/路径校验与operation接口保留为可复用基础，但当前不继续扩展交互确认或通用apply编排。缺少向导能力不得被报告为自用部署阻塞项。
 - 自用链路通过并实际投入使用后，再恢复开源友好的安装、幂等重跑、通用宿主适配和恢复体验；这些工作移到本文件最后的后置里程碑。
 
+## 当前自用控制端约定
+
+- 本机到当前Gateway VPS只使用SSH别名`vera-gateway`；HostName、端口与密钥选择只保存在本机`~/.ssh/config`，不得写入repo、部署摘要或对话命令。新窗口先用`ssh vera-gateway`做只读health与release核对，不从聊天历史还原连接参数。
+- 前后端源码仍以本机repo为开发事实来源。UI与gateway改动先在本机完成、验证并提交，再把精确commit部署到Gateway的`/opt/vera/releases/<commit>`，原子切换`/opt/vera/current`并重启`vera-gateway.service`；不得在VPS release内直接编辑源码。
+- 真实私网URL只用于发布后手机/Mac回归。前端问题先用当前真实Account/Agent链路复现，修复按commit成批发布，避免每改一处就SSH热改生产文件。
+
 ## 自用直接部署与投入使用
 
 ### 直接部署顺序
