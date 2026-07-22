@@ -12,6 +12,8 @@ Vera是单用户、自部署的多agent协作空间。
 
 用户可以广播、@定向、授权agent之间互相调度。前端是控制台与聊天室的结合体。
 
+Vera长期同时是Agent协作与Space工作台的基础环境：图书室、自习室、语言教学、健身指导等学习或生活场景都通过Space Module、Agent Plugin、Tools与受限数据接口组合加载。场景增加不得把领域业务、第三方代码或长任务计算继续堆进gateway；gateway始终只承担身份、权限、消息、事件、调度和状态事实来源，具体UI在浏览器sandbox，Agent行为与长任务在daemon/受控worker，外部数据能力按Provider或受限服务边界接入。
+
 ---
 
 ## 二、核心概念
@@ -97,7 +99,9 @@ Vera是单用户、自部署的多agent协作空间。
 - Agent获得用户授权后可发起对其他agent的调度
 - 用户拥有最终决策权
 - **群聊的发言归属**（2026-07-17按Account固定归属修订）：实际Agent的provider会话里，只有它当前代表Account生成的输出是assistant角色；用户和其他Account的发言注入时必须带Account署名、以对方发言的形式呈现，不得用assistant角色转达，否则模型重放历史会把全群发言当成自己说的。触发某`accountId + agentId`组合时，把该组合上次发言之后错过的其他参与者Message一并转达。
-- **发言与过程的边界**（2026-07-17按Account固定归属修订）：Message（气泡）是Account对外发言，是实际Agent在Space内唯一能被其他成员看见的输出，经编译层以Account署名注入其他实际Agent的下次prompt；Activity（思考链/工具链）只服务于同期观察的User，**不进任何Agent的下次prompt**——包括执行者本人。API Agent的必要tool call/result由gateway写入对应AgentSession规范history；CLI工具历史由该generation的外部provider binding持有，gateway不把Activity二次注入。其他Agent想要细节只能靠Phase 5的`fetch_detail`/`fetch_more`主动调阅，按需、带预算，不是默认注入。这是“时间线对User全展开、prompt层只看气泡”的产品语义边界。
+- **发言与过程的边界**（2026-07-22过程可见性重冻结）：Message（气泡）是Account对外发言，是实际Agent在Space内唯一能被其他成员看见的输出，经编译层以Account署名注入其他实际Agent的下次prompt。Activity只表示provider明确允许公开的安全过程摘要、工具事件、usage或错误；模型原始隐藏推理不得采集、传输、保存或借`phase:"thinking"`改名暴露。Activity **不进任何Agent的下次prompt**——包括执行者本人。API Agent的必要tool call/result由gateway写入对应AgentSession规范history；CLI工具历史由该generation的外部provider binding持有，gateway不把Activity二次注入。其他Agent想要细节只能靠Phase 5的`fetch_detail`/`fetch_more`主动调阅，按需、带预算。
+- **后台工作与关注** `[阶段C]`：所有Space默认只展示非持久AgentState、必要Approval、安全错误与Account回复Message，不生成或广播daemon思考/工具Activity；Message生成后的既有流式delta与气泡定稿语义不变，不把回答正文误判为过程Activity。UI动作名为“关注”，内部唯一状态名为`observedSpaceId`，不得与per-Account响应规则`focused`/“专注”混用。整个单用户部署同时最多关注一个active私聊Space；私聊严格指`seats`恰有一个Account，群聊一律不可关注且不展示思考/工具Activity。关注私聊可接收上述安全Activity；切换或取消关注立即改变在飞Run后续过程可见性，不追补此前被抑制的过程。被关注Space归档、永久删除或成员变为多个Account时必须原子清空关注；`/new`只换SpaceSession，仍关注同一Space，归档窗口永不产生新过程。
+- **过程流量边界** `[阶段C]`：非关注Run的provider过程在daemon本地即丢弃或合并为AgentState，不得先完整上送gateway再过滤；Approval、取消、错误终态、API规范history所需的安全tool transcript和最终Message不受抑制。gateway仍逐次校验当前`observedSpaceId`与Space成员形状，拒绝非关注或群聊Run上报的思考/工具Activity。这样详细过程流全局并发上限固定为一个私聊Space，与后台Run或已安装工作台数量无关。
 - **群聊视角的注入形态**（2026-07-04补，2026-07-15按API history修订）：其他Account成员的气泡以"群内最近发言"这一明确声告段进入本轮volatile输入，不伪装成当前实际Agent自己说过的话。编译层在当前`accountId + agentId`组合上次发言之后到当前触发之间派生这段delta，无独立投递水位。CLI与API共享同一语义编译结果，但wire分型：CLI只收`promptText + providerBinding?`，API只收`messages + historyVersion`。API规范history按每个main Run原子保存一对turn：输入侧只保留当前trigger Message的带来源署名信封，输出侧保留当前实际Agent代表Account生成的回复及provider确需的安全tool transcript；累计群聊声告、常驻Memory块和Recall投影不写入稳定turn。这样由其他Account发言触发的回复也有明确前因，不产生孤立assistant轮次。CLI provider thread可能按供应商能力保留已投递文本，但gateway不把它冒充API规范history；compact后两者都只继承checkpoint与最近完整轮次。
 - **响应规则的统一语义**（2026-07-17修订）：silent / focused / 屏蔽某Account，本质都是过滤进入当前`accountId + executingAgentId`群聊视角prompt段的事件流。`silent`靠`respondTo`，屏蔽靠seat上的`blockAccountIds`；定向@仍穿透。
 
@@ -177,7 +181,7 @@ Account与owner Agent严格1:1表示永久归属：每个Agent固定拥有一个
 
 - 当前每个Agent只代表自己的owner Account；在多个Space有Run时，每个`agentId + accountId + spaceId`组合的状态独立。三元键为未来代上线保留Account维度，但Phase 5.5不得据此接受非owner会话。
 - AgentState 形状：`{ agentId, accountId, spaceId, status, detail, lastActiveAt }`，扩展态枚举：`idle` / `thinking` / `typing` / `reading` / `coding` / `reviewing` / `on_task` / `away`。
-- 状态由 agent daemon 自己声明（它最清楚 opencode 此刻在 think / tool / final typing），gateway 不猜，agent 说啥显示啥。
+- 状态由 agent daemon 自己声明，gateway不从Activity反推，但必须校验身份、枚举与安全detail。AgentState只承载粗粒度工作相：同一`agentId + accountId + spaceId`原地覆盖，完全相同更新不广播；status语义变化立即发布，同status仅detail变化按`config.agentState.detailUpdateMinIntervalMs`限频（默认5000ms）。`detail`只是一行安全摘要，不得携带隐藏推理、tool参数/输出、secret、绝对路径或provider原文，不能把被抑制Activity改塞进AgentState。
 - Account.presence 与 AgentState 正交：presence 表示哪个Agent当前代表Account在线，AgentState 表示这个Agent + Account pair在某Space内的细颗粒工作相。
 
 **GitHub 单账号分活方案**（联邦期间代码协作的政治约定，不进 Vera 实现）：
@@ -409,6 +413,7 @@ Agent Plugin仍是Extension Package可包含的独立runtime类型，但0.0.1不
 - Space Module为Space提供独立UI与Space级数据，例如任务看板、资料大纲、游戏、共读面板。
 - Settings负责安装其所属Extension Package；当前Space设置只负责从已安装库中启用/停用Space Module并写该Space的配置。
 - Space Module运行在浏览器隔离容器中，不得直接访问主页面DOM、gateway内部对象、secrets、宿主文件系统或任意网络；能力通过manifest与受限bridge授予。
+- Space Module的领域计算、持续任务和任意第三方服务适配不得作为新路由逻辑塞进gateway进程；长任务进入daemon/受控worker，模块数据经后续冻结的per-Extension作用域、配额、版本与迁移接口访问。不得把当前JSON store视为任意工作台自由扩字段的共享数据库。
 
 #### 4.2.7 Extension Package 与 SDK
 

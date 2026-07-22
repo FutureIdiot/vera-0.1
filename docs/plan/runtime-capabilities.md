@@ -16,6 +16,15 @@
 - [ ] 不增加第五个Agent Plugin目录，也不把Agent Plugin混入Skills。
 - [ ] Skills、Hooks、MCP的绑定与状态是独立资源，不嵌进Agent身份字段。
 
+## 阶段C：后台工作与过程关注
+
+- [ ] gateway实现不持久化的全局`observedSpaceId + revision`事实来源、CAS更新和`observation.updated`；只允许一个active单Account私聊Space，群聊固定拒绝。
+- [ ] `run.requested`下发`activityVisibility`，关注切换只向受影响的在飞Run发送`run.activity-visibility.updated`；切换不重启Run、不改变Tool/Approval权限，也不补发此前过程。
+- [ ] daemon在`status-only`时只合并并上报AgentState，不把provider思考/工具/usage过程发送到gateway；gateway二次拒绝非关注或群聊Run的过程Activity并保持零写入。
+- [ ] AgentState按`agentId + accountId + spaceId`覆盖、完全去重并对detail-only更新限频；安全detail不得成为隐藏推理、tool参数/输出、secret、路径或provider原文的旁路。
+- [ ] `thinking`只接受provider明确允许公开的安全过程摘要，模型原始隐藏推理永不采集、传输、保存或显示；Approval、安全错误、最终Message与API规范history所需tool transcript保持独立。
+- [ ] 用并发后台Run验收详细Activity流全局最多来自一个私聊Space，群聊与其他Space只有AgentState/Approval/错误/Message；关注切换、多端revision冲突、SSE重连和gateway重启归零均通过。
+
 ## Hooks
 
 - [ ] Hooks是通用事件自动化目录，不被Memory两项穷举。

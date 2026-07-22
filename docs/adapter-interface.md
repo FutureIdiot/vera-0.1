@@ -106,6 +106,7 @@ Phase 5.5先建立gateway内的`Vera Control Service`作为上述权限判断的
 - transport与已实测provider/runtime版本；
 - 会话连续性能力（CLI外部thread/resume binding，或gateway-owned `gateway_history`）；adapter本身不得拥有API history；
 - stream事件到`onDelta/onActivity`的映射；
+- `onActivity`只映射provider明确允许公开的安全过程摘要与工具事件，绝不映射模型原始隐藏推理；阶段C还必须在daemon侧按gateway下发的`activityVisibility`于网络上报前过滤；
 - tool/Approval能力，或明确“无tool loop”；
 - structured-output能力与需要下沉/禁用的JSON Schema关键字；
 - provider/model的已验证上下文容量、容量配置方式与确定性history裁剪策略；
@@ -294,7 +295,8 @@ Accept: text/event-stream
 | 事件 | data | daemon 处理 |
 |---|---|---|
 | `agent.heartbeat` | `{ ts }` | 收到即更新本地"上次心跳时间"；连续 3 次未收到（默认 45s） → 触发自杀 |
-| `run.requested` | `{run,triggerMessage,agent,account,workspace,input}` | 校验Run的`agentId === account.ownerAgentId`，并与当前双凭证会话、runtime revision、workspace host及租约完全匹配 |
+| `run.requested` | `{run,triggerMessage,agent,account,workspace,input,activityVisibility?}` | 校验Run的`agentId === account.ownerAgentId`，并与当前双凭证会话、runtime revision、workspace host及租约完全匹配；阶段C前该字段缺失，落地后只允许`status-only/observed` |
+| `run.activity-visibility.updated` `[阶段C]` | `{runId,activityVisibility}` | 只更新对应在飞Run后续过程上报策略；不重启provider、不追补被抑制过程，也不改变Tools/Approval权限 |
 | `agent-session.compact.requested` | `{jobId,target:{agentId,agentSessionId,fromGeneration,mode},account,input}` | 校验target/account/租约与当前generation；按native或隔离checkpoint模式执行，禁止产生聊天输出，再调用专用compaction result端点 |
 | `account.upserted` / `space.updated` / `agent.updated` | 同 `/api/events` 一致 | 更新本地Account seat、Agent runtime摘要与配置 |
 | `account.presence.updated` | `{ accountId, presence, lastSeenAt, activeAgentId }` | 知悉Account当前由谁代表上线 |
@@ -306,6 +308,7 @@ Accept: text/event-stream
 - gateway可信注入“自己是谁、自己的Account与当前Space/Workspace”；Phase 5.5不下发`delegationContext`或切换原因，`delegated`恒为`false`。
 - CLI型只接收`input.kind="cli"`的`promptText + providerBinding?`；main只允许resume当前AgentSession generation，isolated subagent必须开临时thread且不得回传binding。
 - API型只接收`input.kind="api"`的`messages + historyVersion?`；main必须带historyVersion，isolated subagent不得带。daemon不得自行从opaque state派生、追加或同步history。
+- 阶段C的`activityVisibility`是展示与传输预算，不是provider prompt、Tool权限或Execution授权。`status-only`时provider过程在daemon本地丢弃或合并为AgentState；AgentState必须同三元键覆盖、完全去重并按API契约限频，detail不得承载隐藏推理、tool参数/输出、secret、绝对路径或provider原文。Approval、安全错误、最终Message与API规范history所需tool transcript仍走各自通道。
 
 ### 2.3 Run 生命周期
 
@@ -322,7 +325,7 @@ gateway先创建`pending` Run；取得目标Account租约后原子改为`running
 | 派生subagent | 父Run调用`POST /api/agent/runs/:id/subagents` body `{ task, context? }` | 沿用父Run冻结的`agentId + accountId`，创建`agentSessionId/contextGeneration:null`的pending子Run；下发`sessionMode:"isolated"`，取得同一Account租约后广播`run.started`并发`run.requested` |
 | 流式增量 | `POST /api/agent/runs/:id/delta` body `{ delta }` | 转 `message.delta` SSE（gateway 按段落边界切气泡，daemon 不切） |
 | 气泡定稿 | `POST /api/agent/runs/:id/messages` body `{content,target?,fileIds?}` | 已有delta时以完整content作权威定稿信号且不重复正文；零delta时作为fallback创建并定稿。gateway返回Message id并广播`message.completed` |
-| Activity | `POST /api/agent/runs/:id/activities` body `{ phase, label, detail, toolStatus?, callId? }` | 同 callId 合并同一条；广播 `activity.created` / `activity.updated` |
+| Activity | `POST /api/agent/runs/:id/activities` body `{ phase, label, detail, toolStatus?, callId? }` | 同 callId 合并同一条；广播 `activity.created` / `activity.updated`。阶段C只允许当前`activityVisibility:"observed"`且属于唯一被关注私聊的Run；否则daemon不得调用，gateway收到也固定拒绝且零写入 |
 | Approval | `POST /api/agent/runs/:id/approvals` body `{ prompt, options }` | 落地 Approval、广播 `approval.requested`；用户答复后 gateway 通过 SSE `approval.answered` 推给 daemon |
 | API结果提交 | API main Run在气泡定稿后调用`PUT /api/agent/runs/:id/api-result` body `{agentSessionId,generation,baseHistoryVersion,assistantMessageIds,toolTranscript?,usage?}` | 从权威Message构造assistant，与trigger署名input作为完整turn做CAS；成功返回新historyVersion。409 `history_conflict`时history不变且Run必须failed，不重调provider |
 | 结束 | `PATCH /api/agent/runs/:id` body `{ status, error?, agentState? }` | CLI main、isolated subagent可在输出完成后结束；API main只有`api-result`成功后才接受completed。落地结束状态、广播 `run.ended` |
