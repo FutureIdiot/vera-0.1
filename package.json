@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
+    "setup": "node scripts/setup.mjs",
     "test": "node --test",
     "dev:web": "vite --config frontend/vite.config.js",
     "build:web": "vite build --config frontend/vite.config.js",

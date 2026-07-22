@@ -17,7 +17,7 @@
 
 ## 当前依赖顺序
 
-1. [ ] [VPS 私网部署与旧链路清理](federation-deployment.md)
+1. [~] [VPS 私网部署与旧链路清理](federation-deployment.md)
 2. [ ] [原生客户端](native-clients.md)
 3. [ ] [运行时能力真实闭环（阶段C）](runtime-capabilities.md)
 4. [ ] [Extension 体系](extensions.md)

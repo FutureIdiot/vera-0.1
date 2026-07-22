@@ -2,7 +2,7 @@
 
 ## 开始条件
 
-- [ ] [`federation-runtime.md`](federation-runtime.md) 已完成
+[`federation-runtime.md`](federation-runtime.md) 已完成；本文件现为进行中。
 
 ## 开源引导式部署
 
@@ -51,7 +51,7 @@
 
 ## 实施顺序
 
-1. [ ] 按本文件已冻结的状态机实现setup入口、只读preflight、计划确认、节点角色/路径输入及`detect → diff → apply → verify`底层操作接口。
+1. [~] 按本文件已冻结的状态机实现setup入口、只读preflight、计划确认、节点角色/路径输入及`detect → diff → apply → verify`底层操作接口。当前单目标CLI已使用可扩为多目标的数据形状，完成本机/SSH固定只读探针、白名单事实解析、角色/路径校验、计划指纹、`planned`安全摘要与底层operation接口；CLI明确停在`planned + applied:false`。尚缺基于事实快照的交互确认、首批真实backup/apply/verify操作及多目标一次编排，不得把当前结果报告为已部署。
 2. [ ] 用同一setup入口和底层操作完成首个真实gateway VPS及至少一个独立daemon宿主的半交互部署，不另写一次性手工脚本。
 3. [ ] 真实部署与故障恢复通过后补齐从零tailnet引导、重跑/漂移提示和面向开源User的最终交互文案。
 
