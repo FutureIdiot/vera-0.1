@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cp, mkdir, readFile, readlink, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readlink, stat, symlink, writeFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -165,13 +165,19 @@ test("changed apply target fails before npm, service, or data mutation", async (
 test("successful apply builds a release, preserves a cold backup, and switches atomically", async () => {
   const value = await applyFixture();
   const commands = releaseExec(value);
-  await runGatewayUpdate(value.env, {
-    exec: commands.exec,
-    fetchImpl: async () => new Response(JSON.stringify({ app: "vera", ok: true }), { status: 200 }),
-    sleep: async () => {},
-    now: () => new Date("2026-07-23T01:02:03.000Z"),
-  });
+  const previousUmask = process.umask(0o027);
+  try {
+    await runGatewayUpdate(value.env, {
+      exec: commands.exec,
+      fetchImpl: async () => new Response(JSON.stringify({ app: "vera", ok: true }), { status: 200 }),
+      sleep: async () => {},
+      now: () => new Date("2026-07-23T01:02:03.000Z"),
+    });
+  } finally {
+    process.umask(previousUmask);
+  }
   assert.equal(await readlink(join(value.releaseRoot, "current")), join(value.releaseRoot, "releases", TARGET));
+  assert.equal((await stat(join(value.releaseRoot, "releases", TARGET))).mode & 0o777, 0o755);
   const marker = JSON.parse(await readFile(join(value.releaseRoot, "releases", TARGET, ".vera-release.json"), "utf8"));
   assert.equal(marker.commit, TARGET);
   const status = JSON.parse(await readFile(join(value.updateRoot, "status", "status.json"), "utf8"));

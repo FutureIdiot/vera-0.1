@@ -121,6 +121,7 @@ async function prepareRelease(config, commit, version, exec, now) {
     await exec("npm", ["run", "build:web"], { cwd: stagingPath, env: { ...process.env, NODE_ENV: "production", NPM_CONFIG_CACHE: join(config.updateRoot, "npm-cache") } });
     await exec("node", ["--check", join(stagingPath, "src", "server.js")]);
     await writeFile(join(stagingPath, ".vera-release.json"), `${JSON.stringify({ schemaVersion: 1, commit, version, deployedAt: now().toISOString() })}\n`, { mode: 0o644, flag: "wx" });
+    await chmod(stagingPath, 0o755);
     await rename(stagingPath, releasePath);
     return releasePath;
   } catch {
