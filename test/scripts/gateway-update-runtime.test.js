@@ -178,6 +178,7 @@ test("successful apply builds a release, preserves a cold backup, and switches a
   }
   assert.equal(await readlink(join(value.releaseRoot, "current")), join(value.releaseRoot, "releases", TARGET));
   assert.equal((await stat(join(value.releaseRoot, "releases", TARGET))).mode & 0o777, 0o755);
+  assert.equal((await stat(join(value.releaseRoot, "releases", TARGET, ".vera-release.json"))).mode & 0o777, 0o644);
   const marker = JSON.parse(await readFile(join(value.releaseRoot, "releases", TARGET, ".vera-release.json"), "utf8"));
   assert.equal(marker.commit, TARGET);
   const status = JSON.parse(await readFile(join(value.updateRoot, "status", "status.json"), "utf8"));
