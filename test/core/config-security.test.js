@@ -13,6 +13,8 @@ test("security config defaults closed and parses exact deployment lists", () => 
     cors: { allowedOrigins: [] },
     allowLoopbackDevelopment: false,
   });
+  assert.equal(defaults.updates.controlPath, null);
+  assert.match(defaults.updates.releaseMetadataPath, /\.vera-release\.json$/u);
 
   const configured = loadConfig({
     VERA_OWNER_TAILSCALE_LOGINS: " owner@example.com,Owner@example.com,owner@example.com, ",
@@ -23,6 +25,19 @@ test("security config defaults closed and parses exact deployment lists", () => 
   assert.deepEqual(configured.security.cors.allowedOrigins, ["capacitor://localhost", "https://vera.example"]);
   assert.equal(configured.security.allowLoopbackDevelopment, true);
   assert.equal(loadConfig({ VERA_ALLOW_LOOPBACK_DEVELOPMENT: "1" }).security.allowLoopbackDevelopment, false);
+});
+
+test("update control paths require absolute deployment paths", () => {
+  const configured = loadConfig({
+    VERA_UPDATE_CONTROL_PATH: "/var/lib/vera-updater",
+    VERA_RELEASE_METADATA_PATH: "/opt/vera/current/.vera-release.json",
+  });
+  assert.deepEqual(configured.updates, {
+    controlPath: "/var/lib/vera-updater",
+    releaseMetadataPath: "/opt/vera/current/.vera-release.json",
+  });
+  assert.throws(() => loadConfig({ VERA_UPDATE_CONTROL_PATH: "relative" }), /must be an absolute path/u);
+  assert.throws(() => loadConfig({ VERA_RELEASE_METADATA_PATH: "relative" }), /must be an absolute path/u);
 });
 
 test("gateway listener consumes the fixed loopback host", async () => {

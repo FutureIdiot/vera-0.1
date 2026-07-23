@@ -50,12 +50,15 @@ import { createDaemonRunLifecycle } from "./spaces/daemon-run-lifecycle.js";
 import { createDaemonRunScheduler } from "./spaces/daemon-run-scheduler.js";
 import { createMemoryTaskTransport } from "./memory/memory-task-transport.js";
 import { registerMemoryTaskRoutes } from "./memory/memory-task-routes.js";
+import { createGatewayUpdateControl } from "./core/gateway-updates.js";
+import { registerSystemUpdateRoutes } from "./api/system-update-routes.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
 
 const config = loadConfig(process.env);
 const enforceRequestSecurity = createRequestSecurity({ config });
+const updateControl = createGatewayUpdateControl({ config: config.updates });
 const bootPaths = await applyBootPathOverrides(config);
 const store = await createStore({ dataPath: config.dataPath, debounceMs: config.store.debounceMs });
 recoverInterruptedRuns(store);
@@ -316,6 +319,7 @@ registerSettingsRoutes(router, {
     applyRuntimeSettings({ settings, config, memoryRetrieval });
   },
 });
+registerSystemUpdateRoutes(router, { updateControl });
 
 const statusTracker = createStatusTracker({ config });
 registerStatusRoutes(router, { statusTracker, store, hub, config, memory, settingsStore });

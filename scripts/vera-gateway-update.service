@@ -1,0 +1,17 @@
+[Unit]
+Description=Vera Gateway atomic release updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/vera/gateway-update.env
+ExecStart=/usr/bin/flock -n /run/vera-gateway-update.lock /opt/vera/current/scripts/gateway-update-runner.js
+UMask=0027
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/vera /var/lib/vera /var/lib/vera-updater /run
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+TimeoutStartSec=15min

@@ -2,7 +2,7 @@
 // （AGENTS.md 配置纪律 / ground-truth.md 第四节）。
 
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 const DEFAULTS = {
   host: "127.0.0.1", // security invariant: gateway is reached only through loopback Tailscale Serve
@@ -116,6 +116,10 @@ const DEFAULTS = {
     cors: { allowedOrigins: [] },
     allowLoopbackDevelopment: false,
   },
+  updates: {
+    controlPath: null,
+    releaseMetadataPath: join(process.cwd(), ".vera-release.json"),
+  },
 };
 
 function num(value, fallback) {
@@ -175,6 +179,14 @@ function strictOrigins(value, fallback) {
 
 function explicitTrue(value) {
   return typeof value === "string" && value.toLowerCase() === "true";
+}
+
+function absolutePath(value, name, fallback = null) {
+  const candidate = value || fallback;
+  if (candidate === null) return null;
+  const expanded = expandHome(candidate);
+  if (!isAbsolute(expanded)) throw new TypeError(`${name} must be an absolute path`);
+  return expanded;
 }
 
 // `~` 前缀展开为用户主目录，其余路径原样返回（config 唯一负责展开的地方，
@@ -338,6 +350,18 @@ export function loadConfig(env = process.env) {
         ),
       },
       allowLoopbackDevelopment,
+    },
+    updates: {
+      controlPath: absolutePath(
+        env.VERA_UPDATE_CONTROL_PATH,
+        "VERA_UPDATE_CONTROL_PATH",
+        DEFAULTS.updates.controlPath,
+      ),
+      releaseMetadataPath: absolutePath(
+        env.VERA_RELEASE_METADATA_PATH,
+        "VERA_RELEASE_METADATA_PATH",
+        DEFAULTS.updates.releaseMetadataPath,
+      ),
     },
   };
 }
