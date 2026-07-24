@@ -217,8 +217,8 @@ export async function run(ctx) {
       assertEqual(openJob.error.code, "memory_task_unavailable");
       assertEqual((await fake.readInvocations()).length, 3);
     } finally {
-      await daemon?.stop();
       if (gateway) await gateway.stop();
+      await daemon?.stop();
       await fake.close();
       await rm(dir, { recursive: true, force: true });
     }

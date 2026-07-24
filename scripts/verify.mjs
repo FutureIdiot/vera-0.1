@@ -80,7 +80,6 @@ async function startPrimaryGateway() {
 }
 
 async function stopPrimaryGateway() {
-  await stopMockDaemons();
   for (const handle of openSseHandles) {
     try {
       handle.close();
@@ -89,6 +88,7 @@ async function stopPrimaryGateway() {
     }
   }
   if (primaryGateway) await primaryGateway.stop();
+  await stopMockDaemons();
   if (dataDir) await rm(dataDir, { recursive: true, force: true });
 }
 

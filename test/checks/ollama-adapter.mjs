@@ -211,8 +211,8 @@ export async function run(ctx) {
       assertEqual(history.turns[0].assistant[0].content, "OLLAMA_GATEWAY_STUB_OK");
       assertEqual("providerState" in history, false);
     } finally {
-      await daemon?.stop();
       if (gateway) await gateway.stop();
+      await daemon?.stop();
       await ollama.close();
       await rm(dir, { recursive: true, force: true });
     }
