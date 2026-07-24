@@ -101,15 +101,26 @@
   border-radius: var(--vera-bubble-radius);
 }
 
+.vera-bubble--agent.vera-bubble--has-tail .vera-bubble__surface::before,
 .vera-bubble--agent.vera-bubble--has-tail .vera-bubble__surface::after {
-  background: var(--vera-color-bubble-agent-bg);
   bottom: 0;
-  clip-path: polygon(100% 0, 100% 100%, 0 100%);
   content: "";
   height: var(--vera-bubble-tail-size);
-  left: calc((var(--vera-bubble-tail-size) - var(--vera-bubble-tail-overlap)) * -1);
   position: absolute;
+}
+
+.vera-bubble--agent.vera-bubble--has-tail .vera-bubble__surface::before {
+  background: var(--vera-color-bubble-agent-bg);
+  border-bottom-right-radius: var(--vera-bubble-tail-radius);
+  left: calc(var(--vera-bubble-tail-extension) * -1);
   width: var(--vera-bubble-tail-size);
+}
+
+.vera-bubble--agent.vera-bubble--has-tail .vera-bubble__surface::after {
+  background: var(--vera-color-background);
+  border-bottom-right-radius: var(--vera-bubble-tail-radius);
+  left: calc(var(--vera-bubble-tail-cutout-width) * -1);
+  width: var(--vera-bubble-tail-cutout-width);
 }
 
 .vera-bubble--user .vera-bubble__surface {
@@ -118,15 +129,26 @@
   color: var(--vera-color-bubble-user-text);
 }
 
+.vera-bubble--user.vera-bubble--has-tail .vera-bubble__surface::before,
 .vera-bubble--user.vera-bubble--has-tail .vera-bubble__surface::after {
-  background: var(--vera-color-bubble-user-end);
   bottom: 0;
-  clip-path: polygon(0 0, 100% 100%, 0 100%);
   content: "";
   height: var(--vera-bubble-tail-size);
   position: absolute;
-  right: calc((var(--vera-bubble-tail-size) - var(--vera-bubble-tail-overlap)) * -1);
+}
+
+.vera-bubble--user.vera-bubble--has-tail .vera-bubble__surface::before {
+  background: var(--vera-color-bubble-user-end);
+  border-bottom-left-radius: var(--vera-bubble-tail-radius);
+  right: calc(var(--vera-bubble-tail-extension) * -1);
   width: var(--vera-bubble-tail-size);
+}
+
+.vera-bubble--user.vera-bubble--has-tail .vera-bubble__surface::after {
+  background: var(--vera-color-background);
+  border-bottom-left-radius: var(--vera-bubble-tail-radius);
+  right: calc(var(--vera-bubble-tail-cutout-width) * -1);
+  width: var(--vera-bubble-tail-cutout-width);
 }
 
 .vera-bubble--streaming .vera-bubble__surface {
