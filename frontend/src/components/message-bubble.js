@@ -139,16 +139,19 @@ function ensureStructure(el) {
   surface.className = "vera-bubble__surface";
   const content = document.createElement("div");
   content.className = "vera-bubble__content";
+  const text = document.createElement("span");
+  text.className = "vera-bubble__text";
   const attachments = document.createElement("div");
   attachments.className = "vera-bubble__attachments";
-  const meta = document.createElement("div");
+  const meta = document.createElement("span");
   meta.className = "vera-bubble__meta";
   const time = document.createElement("time");
   time.className = "vera-bubble__time";
   const status = document.createElement("span");
   status.className = "vera-bubble__status";
   meta.append(time, status);
-  surface.append(content, attachments, meta);
+  content.append(text, meta);
+  surface.append(content, attachments);
   const actions = document.createElement("div");
   actions.className = "vera-bubble__actions";
   actions.setAttribute("aria-label", "消息操作");
@@ -174,7 +177,7 @@ export function applyMessageBubble(el, item, ctx = {}) {
     `vera-bubble--${isUser ? "user" : "agent"}`,
     `vera-bubble--group-${grouping.position}`,
     streaming ? "vera-bubble--streaming" : "",
-    !isUser && grouping.showTail ? "vera-bubble--has-tail" : "",
+    isUser || grouping.showTail ? "vera-bubble--has-tail" : "",
   ].filter(Boolean).join(" ");
   el.dataset.messageId = item.id;
   el.dataset.groupPosition = grouping.position;
@@ -186,7 +189,9 @@ export function applyMessageBubble(el, item, ctx = {}) {
   const avatarEl = el.querySelector(".vera-bubble__avatar");
   const authorEl = el.querySelector(".vera-bubble__author");
   const contentEl = el.querySelector(".vera-bubble__content");
+  const textEl = el.querySelector(".vera-bubble__text");
   const attachmentsEl = el.querySelector(".vera-bubble__attachments");
+  const metaEl = el.querySelector(".vera-bubble__meta");
   const timeEl = el.querySelector(".vera-bubble__time");
   const statusEl = el.querySelector(".vera-bubble__status");
 
@@ -213,7 +218,8 @@ export function applyMessageBubble(el, item, ctx = {}) {
   }
   authorEl.textContent = authorName;
   authorEl.hidden = !authorName;
-  contentEl.textContent = item.content ?? "";
+  textEl.textContent = item.content ?? "";
+  contentEl.classList.toggle("is-empty", !textEl.textContent);
 
   attachmentsEl.replaceChildren();
   for (const attachment of item.attachments ?? []) {
@@ -236,6 +242,7 @@ export function applyMessageBubble(el, item, ctx = {}) {
   timeEl.hidden = !timeText;
   statusEl.textContent = streaming ? "生成中" : item.status === "failed" ? "失败" : "";
   statusEl.hidden = !statusEl.textContent;
+  metaEl.hidden = !timeText && !statusEl.textContent;
 
   for (const button of el.querySelectorAll(".vera-bubble__action")) {
     const action = button.dataset.action;

@@ -103,20 +103,30 @@
 
 .vera-bubble--agent.vera-bubble--has-tail .vera-bubble__surface::after {
   background: var(--vera-color-bubble-agent-bg);
-  bottom: calc(var(--vera-border-width) * -1);
+  bottom: 0;
   clip-path: polygon(100% 0, 100% 100%, 0 100%);
   content: "";
   height: var(--vera-bubble-tail-size);
-  left: calc((var(--vera-bubble-tail-size) - var(--vera-border-width)) * -1);
+  left: calc((var(--vera-bubble-tail-size) - var(--vera-bubble-tail-overlap)) * -1);
   position: absolute;
   width: var(--vera-bubble-tail-size);
 }
 
 .vera-bubble--user .vera-bubble__surface {
   background: linear-gradient(135deg, var(--vera-color-bubble-user-bg), var(--vera-color-bubble-user-end));
-  border-top-left-radius: var(--vera-bubble-radius);
-  border-top-right-radius: var(--vera-bubble-corner-tight);
+  border-radius: var(--vera-bubble-radius);
   color: var(--vera-color-bubble-user-text);
+}
+
+.vera-bubble--user.vera-bubble--has-tail .vera-bubble__surface::after {
+  background: var(--vera-color-bubble-user-end);
+  bottom: 0;
+  clip-path: polygon(0 0, 100% 100%, 0 100%);
+  content: "";
+  height: var(--vera-bubble-tail-size);
+  position: absolute;
+  right: calc((var(--vera-bubble-tail-size) - var(--vera-bubble-tail-overlap)) * -1);
+  width: var(--vera-bubble-tail-size);
 }
 
 .vera-bubble--streaming .vera-bubble__surface {
@@ -176,6 +186,10 @@
   white-space: pre-wrap;
 }
 
+.vera-bubble__text {
+  white-space: inherit;
+}
+
 .vera-bubble__attachments {
   display: grid;
   gap: var(--vera-space-xs);
@@ -194,11 +208,16 @@
 .vera-bubble__meta {
   align-items: center;
   color: color-mix(in srgb, currentColor, transparent 52%);
-  display: flex;
+  display: inline-flex;
   font-size: var(--vera-font-size-tiny);
   gap: var(--vera-space-xs);
-  justify-content: flex-end;
-  margin-top: var(--vera-space-xs);
+  line-height: 1;
+  margin-inline-start: var(--vera-space-sm);
+  white-space: nowrap;
+}
+
+.vera-bubble__content.is-empty .vera-bubble__meta {
+  margin-inline-start: 0;
 }
 
 .vera-bubble__status {

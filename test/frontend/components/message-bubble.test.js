@@ -215,6 +215,7 @@ test("user messages do not expose an Agent avatar link", () => {
     const avatar = bubble.querySelector(".vera-bubble__avatar");
     assert.equal(avatar.hidden, true);
     assert.equal(avatar.href, "");
+    assert.equal(bubble.classList.contains("vera-bubble--has-tail"), true);
   } finally {
     globalThis.document = previousDocument;
   }
@@ -273,7 +274,13 @@ test("message time appears only inside the bubble and flat action interfaces sta
       content: "hello",
     }, { onCopy() {} });
 
+    const content = bubble.querySelector(".vera-bubble__content");
+    const text = bubble.querySelector(".vera-bubble__text");
+    const meta = bubble.querySelector(".vera-bubble__meta");
     assert.equal(bubble.querySelectorAll(".vera-bubble__time").length, 1);
+    assert.equal(text.textContent, "hello");
+    assert.equal(content.children.at(-1), meta);
+    assert.equal(meta.hidden, false);
     const actions = bubble.querySelectorAll(".vera-bubble__action");
     assert.equal(actions.length, 4);
     assert.deepEqual(actions.map((button) => button.dataset.action), ["retry", "branch", "save", "copy"]);
