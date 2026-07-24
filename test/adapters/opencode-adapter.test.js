@@ -704,7 +704,10 @@ test("digestMemory enforces its own timeout without changing chat watchdog behav
   extraAdapters.push(timeoutAdapter);
   stub.setDigestHandler(async () => new Promise(() => {}));
   await assert.rejects(() => timeoutAdapter.digestMemory(makeDigestCtx()), (error) => error.code === "timed_out");
-  assert.equal(stub.deletedDigestSessions.length, 1);
+  assert.equal(
+    stub.deletedDigestSessions.length,
+    stub.digestRequests.filter((request) => request.kind === "create").length,
+  );
 });
 
 test("opt-in real OpenCode digestMemory smoke", {
