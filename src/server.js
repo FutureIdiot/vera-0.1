@@ -44,6 +44,7 @@ import { recoverInterruptedRuns } from "./spaces/run-controller.js";
 import { createFilesService } from "./memory/files-service.js";
 import { registerFilesRoutes } from "./memory/files-routes.js";
 import { createControlService } from "./agents/control-service.js";
+import { recoverAccountPresence } from "./agents/account-presence.js";
 import { createDaemonRuntime } from "./agents/daemon-runtime.js";
 import { createRequestSecurity } from "./api/request-security.js";
 import { createDaemonRunLifecycle } from "./spaces/daemon-run-lifecycle.js";
@@ -61,6 +62,7 @@ const enforceRequestSecurity = createRequestSecurity({ config });
 const updateControl = createGatewayUpdateControl({ config: config.updates });
 const bootPaths = await applyBootPathOverrides(config);
 const store = await createStore({ dataPath: config.dataPath, debounceMs: config.store.debounceMs });
+recoverAccountPresence(store);
 recoverInterruptedRuns(store);
 // seq 跨重启单调（api-contract.md）：从持久化水位 + 缓冲长度跳跃续增，
 // 保证客户端带上一世的 since 重连必然触发 stream.reset 而不是静默漏事件。
