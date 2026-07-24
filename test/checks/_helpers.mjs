@@ -114,6 +114,7 @@ export function createHttpClient(defaultPort) {
     return new Promise((resolve, reject) => {
       const usePort = portOverride ?? defaultPort;
       const payload = body !== undefined ? JSON.stringify(body) : null;
+      const timeoutMs = 8000;
       const req = http.request(
         {
           host: "127.0.0.1",
@@ -142,6 +143,9 @@ export function createHttpClient(defaultPort) {
         },
       );
       req.on("error", reject);
+      req.setTimeout(timeoutMs, () => {
+        req.destroy(new Error(`${method} ${path} timed out after ${timeoutMs}ms`));
+      });
       if (payload) req.write(payload);
       req.end();
     });
