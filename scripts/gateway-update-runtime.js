@@ -5,6 +5,7 @@ import {
   lstat,
   mkdir,
   open,
+  readdir,
   readFile,
   readlink,
   rename,
@@ -106,6 +107,22 @@ async function targetVersion(config, commit, exec) {
   } catch { return null; }
 }
 
+async function normalizeReleasePermissions(path) {
+  await chmod(path, 0o755);
+  const entries = await readdir(path, { withFileTypes: true });
+  for (const entry of entries) {
+    const childPath = join(path, entry.name);
+    if (entry.isDirectory()) {
+      await normalizeReleasePermissions(childPath);
+    } else if (entry.isFile()) {
+      const file = await lstat(childPath);
+      await chmod(childPath, file.mode & 0o111 ? 0o755 : 0o644);
+    } else if (!entry.isSymbolicLink()) {
+      throw new UpdateFailure("release_failed", "The new release could not be prepared");
+    }
+  }
+}
+
 async function prepareRelease(config, commit, version, exec, now) {
   const releasePath = join(config.releasesPath, commit);
   const existing = await releaseMarker(releasePath);
@@ -123,8 +140,7 @@ async function prepareRelease(config, commit, version, exec, now) {
     await exec("node", ["--check", join(stagingPath, "src", "server.js")]);
     const markerPath = join(stagingPath, ".vera-release.json");
     await writeFile(markerPath, `${JSON.stringify({ schemaVersion: 1, commit, version, deployedAt: now().toISOString() })}\n`, { mode: 0o644, flag: "wx" });
-    await chmod(markerPath, 0o644);
-    await chmod(stagingPath, 0o755);
+    await normalizeReleasePermissions(stagingPath);
     await rename(stagingPath, releasePath);
     return releasePath;
   } catch {

@@ -71,12 +71,15 @@ function releaseExec(fixtureValue, { mutateOnNewStart = false, failTests = false
       const destination = args[args.indexOf("-C") + 1];
       await mkdir(join(destination, "src"), { recursive: true });
       await writeFile(join(destination, "src", "server.js"), "export {};\n");
+      await mkdir(join(destination, "scripts"), { recursive: true });
+      await writeFile(join(destination, "scripts", "gateway-update-runner.js"), "#!/usr/bin/env node\n", { mode: 0o755 });
       await writeFile(join(destination, "package.json"), JSON.stringify({ name: "vera", version: "0.1.0" }));
       return { code: 0, stdout: "", stderr: "" };
     }
     if (command === "npm" && args[0] === "run") {
-      await mkdir(join(options.cwd, "dist"), { recursive: true });
-      await writeFile(join(options.cwd, "dist", "index.html"), "ok");
+      await mkdir(join(options.cwd, "frontend", "dist", "assets"), { recursive: true });
+      await writeFile(join(options.cwd, "frontend", "dist", "index.html"), "ok");
+      await writeFile(join(options.cwd, "frontend", "dist", "assets", "app.js"), "export {};\n");
       return { code: 0, stdout: "", stderr: "" };
     }
     if (command === "npm" && args[0] === "test" && failTests) throw new Error("tests failed");
@@ -178,8 +181,13 @@ test("successful apply builds a release, preserves a cold backup, and switches a
     process.umask(previousUmask);
   }
   assert.equal(await readlink(join(value.releaseRoot, "current")), join(value.releaseRoot, "releases", TARGET));
-  assert.equal((await stat(join(value.releaseRoot, "releases", TARGET))).mode & 0o777, 0o755);
-  assert.equal((await stat(join(value.releaseRoot, "releases", TARGET, ".vera-release.json"))).mode & 0o777, 0o644);
+  const releasePath = join(value.releaseRoot, "releases", TARGET);
+  assert.equal((await stat(releasePath)).mode & 0o777, 0o755);
+  assert.equal((await stat(join(releasePath, ".vera-release.json"))).mode & 0o777, 0o644);
+  assert.equal((await stat(join(releasePath, "frontend", "dist"))).mode & 0o777, 0o755);
+  assert.equal((await stat(join(releasePath, "frontend", "dist", "index.html"))).mode & 0o777, 0o644);
+  assert.equal((await stat(join(releasePath, "frontend", "dist", "assets", "app.js"))).mode & 0o777, 0o644);
+  assert.equal((await stat(join(releasePath, "scripts", "gateway-update-runner.js"))).mode & 0o777, 0o755);
   const marker = JSON.parse(await readFile(join(value.releaseRoot, "releases", TARGET, ".vera-release.json"), "utf8"));
   assert.equal(marker.commit, TARGET);
   const status = JSON.parse(await readFile(join(value.updateRoot, "status", "status.json"), "utf8"));
