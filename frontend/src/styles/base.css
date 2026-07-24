@@ -2,18 +2,28 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
-  background: var(--vera-color-bg);
+  background: var(--vera-color-background);
   color: var(--vera-color-text);
   font-family: var(--vera-font-family);
   font-size: var(--vera-font-size-base);
   line-height: var(--vera-line-height-base);
+}
+
+::selection {
+  background: var(--vera-color-selection);
+  color: var(--vera-color-text);
 }
 
 button,
@@ -26,4 +36,30 @@ textarea {
 :where(a, button, input, select, textarea):focus-visible {
   outline: calc(var(--vera-border-width) * 2) solid var(--vera-color-accent);
   outline-offset: calc(var(--vera-border-width) * 2);
+}
+
+.vera-visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: var(--vera-border-width);
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: var(--vera-border-width);
+}
+
+.vera-vector-icon {
+  fill: none;
+  flex: 0 0 auto;
+  height: var(--vera-icon-size);
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: var(--vera-icon-size);
+}
+
+.vera-vector-icon[data-icon="stop"] rect {
+  fill: currentColor;
+  stroke: none;
 }

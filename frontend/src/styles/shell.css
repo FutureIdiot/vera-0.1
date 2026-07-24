@@ -1,4 +1,5 @@
 #app {
+  background: var(--vera-color-background);
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -17,9 +18,9 @@
 }
 
 .vera-shell {
-  font-size: var(--vera-font-size-base);
   display: grid;
   flex: 1;
+  font-size: var(--vera-font-size-base);
   grid-template-areas: "header" "main";
   grid-template-rows: var(--vera-topbar-height) minmax(0, 1fr);
   min-height: 0;
@@ -29,21 +30,66 @@
 
 .vera-shell__header {
   align-items: center;
-  background: var(--vera-color-bg);
-  border-bottom: var(--vera-border-width) solid var(--vera-color-border);
+  backdrop-filter: blur(var(--vera-backdrop-blur));
+  background: var(--vera-color-header);
+  border-bottom: var(--vera-border-width) solid color-mix(in srgb, var(--vera-color-border), transparent 40%);
   display: grid;
+  gap: var(--vera-space-sm);
   grid-area: header;
-  grid-template-columns: minmax(var(--vera-touch-target), auto) minmax(0, 1fr) minmax(var(--vera-touch-target), auto);
+  grid-template-columns: var(--vera-touch-target) auto minmax(0, 1fr) var(--vera-touch-target);
   min-width: 0;
-  padding: 0 var(--vera-window-margin);
+  padding: 0 var(--vera-space-md);
   position: relative;
   z-index: 4;
 }
 
 .vera-shell__main {
+  background: var(--vera-color-background);
   display: flex;
   grid-area: main;
   min-height: 0;
+  min-width: 0;
+}
+
+.vera-shell__leading,
+.vera-shell__settings {
+  justify-content: center;
+}
+
+.vera-shell__participants {
+  align-items: center;
+  display: flex;
+  padding-left: var(--vera-space-sm);
+}
+
+.vera-shell__participant {
+  align-items: center;
+  background: var(--vera-color-accent-soft);
+  border: calc(var(--vera-border-width) * 2) solid var(--vera-color-header);
+  border-radius: 50%;
+  color: var(--vera-color-accent);
+  display: inline-flex;
+  font-size: var(--vera-font-size-small);
+  font-weight: 700;
+  height: var(--vera-header-avatar-size);
+  justify-content: center;
+  margin-left: calc(var(--vera-space-sm) * -1);
+  user-select: none;
+  width: var(--vera-header-avatar-size);
+}
+
+.vera-shell__participant:first-child {
+  margin-left: 0;
+}
+
+.vera-shell__participant--more {
+  background: var(--vera-color-surface-strong);
+  color: var(--vera-color-muted-text);
+  font-size: var(--vera-font-size-tiny);
+}
+
+.vera-shell__identity {
+  display: grid;
   min-width: 0;
 }
 
@@ -57,48 +103,125 @@
 }
 
 .vera-shell__title {
-  align-items: center;
   background: transparent;
   border: 0;
-  display: flex;
+  font-size: var(--vera-font-size-base);
   font-weight: 600;
-  justify-content: center;
-  min-height: var(--vera-touch-target);
+  line-height: var(--vera-line-height-base);
+  min-width: 0;
   overflow: hidden;
   text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.vera-shell[data-route-scope="management"] .vera-shell__title { cursor: default; }
+
+.vera-shell__subtitle {
+  color: var(--vera-color-muted-text);
+  font-size: var(--vera-font-size-tiny);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vera-shell[data-route-scope="management"] .vera-shell__identity {
+  justify-self: center;
+  text-align: center;
+}
+
+.vera-shell[data-route-scope="management"] .vera-shell__title {
+  cursor: default;
+}
 
 .vera-icon-button {
   align-items: center;
   background: transparent;
   border: 0;
+  border-radius: var(--vera-control-radius);
   display: inline-flex;
   min-height: var(--vera-touch-target);
+  min-width: var(--vera-touch-target);
   text-decoration: none;
+  transition: background var(--vera-transition-fast), color var(--vera-transition-fast);
 }
 
-.vera-shell__header > .vera-icon-button:last-of-type { justify-self: end; }
-.vera-shell__connection { color: var(--vera-color-text-muted); font-size: var(--vera-font-size-small); position: absolute; right: var(--vera-space-sm); top: 100%; }
-.vera-shell__connection[data-tone="danger"] { color: var(--vera-color-danger); }
+.vera-icon-button:hover {
+  background: var(--vera-color-surface-strong);
+}
+
+.vera-shell__connection {
+  background: var(--vera-color-surface);
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  border-radius: var(--vera-control-radius);
+  color: var(--vera-color-muted-text);
+  font-size: var(--vera-font-size-small);
+  padding: var(--vera-space-xs) var(--vera-space-sm);
+  position: absolute;
+  right: var(--vera-space-md);
+  top: calc(100% + var(--vera-space-xs));
+}
+
+.vera-shell__connection[data-tone="danger"] {
+  color: var(--vera-color-error);
+}
 
 .vera-route-hint {
-  color: var(--vera-color-text-muted);
+  color: var(--vera-color-muted-text);
   margin: auto;
 }
 
-.vera-boot-error { align-self: center; display: grid; gap: var(--vera-space-md); margin: auto; max-width: var(--vera-content-max-width); padding: var(--vera-window-margin); text-align: center; }
-.vera-boot-error h1, .vera-boot-error p { margin: 0; }
-.vera-boot-error p { color: var(--vera-color-text-muted); }
+.vera-boot-error {
+  align-self: center;
+  display: grid;
+  gap: var(--vera-space-md);
+  margin: auto;
+  max-width: var(--vera-content-max-width);
+  padding: var(--vera-window-margin);
+  text-align: center;
+}
+
+.vera-boot-error h1,
+.vera-boot-error p {
+  margin: 0;
+}
+
+.vera-boot-error p {
+  color: var(--vera-color-muted-text);
+}
 
 .vera-status-bar,
 .vera-route-error {
-  color: var(--vera-color-text-muted);
+  border-bottom: var(--vera-border-width) solid var(--vera-color-border);
+  color: var(--vera-color-muted-text);
   font-size: var(--vera-font-size-small);
   padding: var(--vera-space-xs) var(--vera-window-margin);
-  border-bottom: var(--vera-border-width) solid var(--vera-color-border);
 }
-.vera-route-error { align-content: center; display: grid; gap: var(--vera-space-md); justify-items: center; margin: auto; text-align: center; }
-.vera-route-error p { margin: 0; }
+
+.vera-route-error {
+  align-content: center;
+  display: grid;
+  gap: var(--vera-space-md);
+  justify-items: center;
+  margin: auto;
+  text-align: center;
+}
+
+.vera-route-error p {
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .vera-shell__header {
+    gap: var(--vera-space-xs);
+    grid-template-columns: var(--vera-touch-target) auto minmax(0, 1fr) var(--vera-touch-target);
+    padding-inline: var(--vera-space-xs);
+  }
+
+  .vera-shell__participants {
+    padding-left: 0;
+  }
+
+  .vera-shell__participant:nth-child(n + 3) {
+    display: none;
+  }
+}

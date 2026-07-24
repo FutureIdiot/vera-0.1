@@ -11,13 +11,13 @@
 .vera-space-form { display: grid; gap: var(--vera-space-lg); overflow-y: auto; padding: var(--vera-space-md) var(--vera-window-margin) var(--vera-space-lg); }
 .vera-space-form fieldset { border: 0; display: grid; gap: var(--vera-space-md); margin: 0; min-width: 0; padding: 0; }
 .vera-space-form legend { font-weight: 600; margin-bottom: var(--vera-space-sm); }
-.vera-space-form input[type="text"], .vera-space-form input:not([type]), .vera-space-form textarea, .vera-space-form select { background: var(--vera-color-bg); border: var(--vera-border-width) solid var(--vera-color-border); border-radius: var(--vera-control-radius); color: var(--vera-color-text); min-height: var(--vera-touch-target); min-width: 0; padding: var(--vera-space-sm); width: 100%; }
+.vera-space-form input[type="text"], .vera-space-form input:not([type]), .vera-space-form textarea, .vera-space-form select { background: var(--vera-color-background); border: var(--vera-border-width) solid var(--vera-color-border); border-radius: var(--vera-control-radius); color: var(--vera-color-text); min-height: var(--vera-touch-target); min-width: 0; padding: var(--vera-space-sm); width: 100%; }
 .vera-space-form textarea { min-height: calc(var(--vera-touch-target) * 2); resize: vertical; }
 .vera-agent-rule { background: var(--vera-color-surface); border-radius: var(--vera-control-radius); display: grid; gap: var(--vera-space-sm); padding: var(--vera-space-md); }
 .vera-agent-rule__details { display: flex; flex-wrap: wrap; gap: var(--vera-space-sm) var(--vera-space-lg); }
 .vera-check { align-items: center; display: flex; gap: var(--vera-space-sm); min-height: var(--vera-touch-target); }
 .vera-primary-button { background: var(--vera-color-accent); border: 0; border-radius: var(--vera-control-radius); color: var(--vera-color-accent-text); min-height: var(--vera-touch-target); padding: var(--vera-space-sm) var(--vera-space-lg); }
-.vera-management-empty { color: var(--vera-color-text-muted); padding: var(--vera-window-margin); }
+.vera-management-empty { color: var(--vera-color-muted-text); padding: var(--vera-window-margin); }
 
 .vera-settings-index,
 .vera-management-content,
@@ -35,7 +35,7 @@
 .vera-account-row > span:first-child { display: grid; gap: var(--vera-space-xs); min-width: 0; }
 .vera-settings-row small,
 .vera-account-row small,
-.vera-field small { color: var(--vera-color-text-muted); }
+.vera-field small { color: var(--vera-color-muted-text); }
 
 .vera-management-form fieldset,
 .vera-management-section,
@@ -47,15 +47,15 @@
 .vera-field select,
 .vera-field textarea,
 .vera-import-row input,
-.vera-import-row select { background: var(--vera-color-bg); border: var(--vera-border-width) solid var(--vera-color-border); border-radius: var(--vera-control-radius); color: var(--vera-color-text); min-height: var(--vera-touch-target); min-width: 0; padding: var(--vera-space-sm); width: 100%; }
+.vera-import-row select { background: var(--vera-color-background); border: var(--vera-border-width) solid var(--vera-color-border); border-radius: var(--vera-control-radius); color: var(--vera-color-text); min-height: var(--vera-touch-target); min-width: 0; padding: var(--vera-space-sm); width: 100%; }
 .vera-field textarea { resize: vertical; }
-.vera-management-notice { color: var(--vera-color-text-muted); margin: 0; overflow-wrap: anywhere; }
-.vera-management-notice[data-tone="danger"] { color: var(--vera-color-danger); }
+.vera-management-notice { color: var(--vera-color-muted-text); margin: 0; overflow-wrap: anywhere; }
+.vera-management-notice[data-tone="danger"] { color: var(--vera-color-error); }
 .vera-management-notice[data-tone="success"] { color: var(--vera-color-success); }
 .vera-secondary-button,
 .vera-danger-button,
 .vera-memory-row { background: transparent; border: var(--vera-border-width) solid var(--vera-color-border); border-radius: var(--vera-control-radius); color: var(--vera-color-text); min-height: var(--vera-touch-target); padding: var(--vera-space-sm) var(--vera-space-md); }
-.vera-danger-button { border-color: var(--vera-color-danger); color: var(--vera-color-danger); }
+.vera-danger-button { border-color: var(--vera-color-error); color: var(--vera-color-error); }
 .vera-button-link { align-items: center; display: inline-flex; justify-content: center; text-decoration: none; }
 .vera-inline-form,
 .vera-form-actions,
@@ -71,11 +71,11 @@
 .vera-memory-row { display: grid; gap: var(--vera-space-xs); text-align: start; }
 .vera-memory-row.is-active { border-color: var(--vera-color-accent); }
 .vera-status-row { align-items: start; display: flex; gap: var(--vera-space-md); justify-content: space-between; overflow-wrap: anywhere; }
-.vera-status-row span { color: var(--vera-color-text-muted); }
+.vera-status-row span { color: var(--vera-color-muted-text); }
 .vera-file-list { display: grid; gap: var(--vera-space-sm); }
 .vera-file-row { background: var(--vera-color-surface); border-radius: var(--vera-control-radius); display: grid; gap: var(--vera-space-sm); padding: var(--vera-space-md); }
 .vera-file-row__summary { display: grid; gap: var(--vera-space-xs); min-width: 0; overflow-wrap: anywhere; }
-.vera-file-row__summary small { color: var(--vera-color-text-muted); }
+.vera-file-row__summary small { color: var(--vera-color-muted-text); }
 .vera-file-sharing { display: grid; gap: var(--vera-space-sm); }
 .vera-file-sharing summary { cursor: pointer; font-weight: 600; min-height: var(--vera-touch-target); padding-block: var(--vera-space-sm); }
 
@@ -150,7 +150,7 @@
   min-height: var(--vera-touch-target);
 }
 .vera-agent-info-row__label {
-  color: var(--vera-color-text-muted);
+  color: var(--vera-color-muted-text);
   flex: 0 0 auto;
   min-width: 3.5em;
 }
@@ -169,7 +169,7 @@
   white-space: normal;
 }
 .vera-account-model-control select {
-  background: var(--vera-color-bg);
+  background: var(--vera-color-background);
   border: var(--vera-border-width) solid var(--vera-color-border);
   border-radius: var(--vera-control-radius);
   color: var(--vera-color-text);
@@ -181,7 +181,7 @@
 
 /* Directory entry disabled state */
 .vera-settings-row.is-disabled {
-  color: var(--vera-color-text-muted);
+  color: var(--vera-color-muted-text);
   cursor: not-allowed;
   opacity: 0.7;
   pointer-events: none;

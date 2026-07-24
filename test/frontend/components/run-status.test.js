@@ -12,11 +12,23 @@ class FakeElement {
     this.disabled = false;
     this.textContent = "";
     this.listeners = new Map();
+    this.attributes = {};
+    this.dataset = {};
+    this.classList = {
+      add: (...names) => {
+        const classes = new Set(this.className.split(" ").filter(Boolean));
+        for (const name of names) classes.add(name);
+        this.className = [...classes].join(" ");
+      },
+    };
   }
 
   append(...children) { this.children.push(...children); }
+  appendChild(child) { this.children.push(child); }
+  replaceChildren(...children) { this.children = [...children]; }
 
   addEventListener(type, listener) { this.listeners.set(type, listener); }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
 }
 
 function state(accountId, status, detail = "") {
@@ -37,7 +49,10 @@ function state(accountId, status, detail = "") {
 
 test("Space run status keeps per-Account states and preserves daemon status text", () => {
   const previousDocument = globalThis.document;
-  globalThis.document = { createElement: (tagName) => new FakeElement(tagName) };
+  globalThis.document = {
+    createElement: (tagName) => new FakeElement(tagName),
+    createElementNS: (_namespace, tagName) => new FakeElement(tagName),
+  };
   try {
     const status = createRunStatus();
     const text = status.element.children[0];
@@ -62,7 +77,10 @@ test("Space run status keeps per-Account states and preserves daemon status text
 
 test("Space run status ignores another Space and reset clears all cached triples", () => {
   const previousDocument = globalThis.document;
-  globalThis.document = { createElement: (tagName) => new FakeElement(tagName) };
+  globalThis.document = {
+    createElement: (tagName) => new FakeElement(tagName),
+    createElementNS: (_namespace, tagName) => new FakeElement(tagName),
+  };
   try {
     const status = createRunStatus();
     status.handleEvent({

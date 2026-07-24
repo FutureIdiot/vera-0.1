@@ -4,6 +4,10 @@
 import { ApiError } from "./errors.js";
 
 const COLOR_KEYS = ["background", "surface", "text", "mutedText", "border", "accent", "success", "warning", "error"];
+const CSS_COLOR_KEYS = new Map(COLOR_KEYS.map((key) => [
+  key === "mutedText" ? "muted-text" : key.toLowerCase(),
+  key,
+]));
 const TERM_KEYS = ["foreground", "background", "cursor", "selection"];
 
 const NAMED_COLORS = {
@@ -107,8 +111,9 @@ function parseVeraCss({ content, name }) {
       const prop = dm[1].toLowerCase();
       const value = dm[2].trim();
       if (prop.startsWith("--vera-color-")) {
-        const key = prop.slice("--vera-color-".length);
-        if (!COLOR_KEYS.includes(key)) {
+        const cssKey = prop.slice("--vera-color-".length);
+        const key = CSS_COLOR_KEYS.get(cssKey);
+        if (!key) {
           throw new ApiError("invalid_request", `unknown --vera-color-* var: ${prop}`);
         }
         theme.colors[key] = normalizeHex(value);
@@ -139,9 +144,12 @@ function parseVeraCss({ content, name }) {
     throw new ApiError("invalid_request", "no valid --vera-color-* declarations found");
   }
   const setKeys = new Set();
-  const declRe2 = /--vera-color-([a-z]+)\s*:/gi;
+  const declRe2 = /--vera-color-([a-z-]+)\s*:/gi;
   let d2;
-  while ((d2 = declRe2.exec(content)) !== null) setKeys.add(d2[1]);
+  while ((d2 = declRe2.exec(content)) !== null) {
+    const key = CSS_COLOR_KEYS.get(d2[1].toLowerCase());
+    if (key) setKeys.add(key);
+  }
   for (const key of COLOR_KEYS) {
     if (!setKeys.has(key)) warnings.push(`color '${key}' missing, using default ${DEFAULT_COLORS[key]}`);
   }

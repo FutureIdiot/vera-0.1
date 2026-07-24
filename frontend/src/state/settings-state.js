@@ -19,14 +19,15 @@ const COLOR_SETTING_MAP = {
 };
 
 const THEME_COLOR_MAP = {
-  background: "--vera-color-bg",
+  background: "--vera-color-background",
   surface: "--vera-color-surface",
   text: "--vera-color-text",
-  mutedText: "--vera-color-text-muted",
+  mutedText: "--vera-color-muted-text",
   border: "--vera-color-border",
   accent: "--vera-color-accent",
   success: "--vera-color-success",
-  error: "--vera-color-danger",
+  warning: "--vera-color-warning",
+  error: "--vera-color-error",
 };
 
 const SYSTEM_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';

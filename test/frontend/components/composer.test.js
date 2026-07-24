@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveMessageTarget } from "../../../frontend/src/components/composer.js";
+import { DEFAULT_COMMANDS, resolveMessageTarget } from "../../../frontend/src/components/composer.js";
 
 const targets = [
   { id: "acc_alpha", name: "Alpha" },
@@ -27,4 +27,15 @@ test("composer prefers the longest Account name at the same mention position", (
     type: "direct",
     accountIds: ["acc_alpha"],
   });
+});
+
+test("composer exposes real commands and keeps future command interfaces disabled", () => {
+  assert.deepEqual(
+    DEFAULT_COMMANDS.filter((item) => item.available).map((item) => item.command),
+    ["/new", "/compact"],
+  );
+  assert.deepEqual(
+    DEFAULT_COMMANDS.filter((item) => !item.available).map((item) => item.command),
+    ["/resume", "/forge", "/clear", "/export", "/theme", "/help"],
+  );
 });

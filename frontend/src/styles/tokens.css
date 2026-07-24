@@ -1,37 +1,55 @@
 :root {
   color-scheme: light dark;
-  --vera-color-bg: #ffffff;
-  --vera-color-surface: #f4f4f5;
-  --vera-color-border: #d9d9de;
-  --vera-color-text: #18181b;
-  --vera-color-text-muted: #6b6b73;
-  --vera-color-theme: #2f6fed;
-  --vera-color-accent: #2f6fed;
+
+  /* Theme Palette: the canonical names match Vera CSS import/export. */
+  --vera-color-background: #f8fafc;
+  --vera-color-surface: #ffffff;
+  --vera-color-text: #0f172a;
+  --vera-color-muted-text: #64748b;
+  --vera-color-border: #cbd5e1;
+  --vera-color-accent: #4f46e5;
+  --vera-color-success: #059669;
+  --vera-color-warning: #d97706;
+  --vera-color-error: #dc2626;
+
+  /* Shared semantic derivations: every page consumes the same palette. */
+  --vera-color-theme: var(--vera-color-accent);
   --vera-color-accent-text: #ffffff;
+  --vera-color-surface-soft: color-mix(in srgb, var(--vera-color-surface), var(--vera-color-text) 5%);
+  --vera-color-surface-strong: color-mix(in srgb, var(--vera-color-surface), var(--vera-color-text) 10%);
+  --vera-color-header: color-mix(in srgb, var(--vera-color-surface), transparent 6%);
+  --vera-color-overlay: color-mix(in srgb, var(--vera-color-text), transparent 62%);
+  --vera-color-selection: color-mix(in srgb, var(--vera-color-accent), transparent 70%);
+  --vera-color-accent-soft: color-mix(in srgb, var(--vera-color-accent), transparent 86%);
+  --vera-color-accent-strong: color-mix(in srgb, var(--vera-color-accent), #000000 14%);
+  --vera-color-error-soft: color-mix(in srgb, var(--vera-color-error), transparent 84%);
+  --vera-color-success-soft: color-mix(in srgb, var(--vera-color-success), transparent 84%);
+  --vera-color-warning-soft: color-mix(in srgb, var(--vera-color-warning), transparent 86%);
   --vera-color-bubble-user-bg: var(--vera-color-accent);
+  --vera-color-bubble-user-end: var(--vera-color-accent-strong);
   --vera-color-bubble-user-text: #ffffff;
-  --vera-color-bubble-agent-bg: #f4f4f5;
-  --vera-color-bubble-agent-text: #18181b;
-  --vera-color-bubble-author-text: #6b6b73;
+  --vera-color-bubble-agent-bg: var(--vera-color-surface-soft);
+  --vera-color-bubble-agent-text: var(--vera-color-text);
+  --vera-color-bubble-author-text: var(--vera-color-muted-text);
   --vera-color-bubble-streaming-border: var(--vera-color-accent);
-  --vera-color-activity-bg: #fbfbfc;
-  --vera-color-activity-text: #6b6b73;
-  --vera-color-activity-border: #e4e4e7;
-  --vera-color-approval-bg: #fff8e6;
-  --vera-color-approval-border: #f0c96a;
-  --vera-color-approval-answered-bg: #f4f4f5;
-  --vera-color-approval-answered-border: #d9d9de;
-  --vera-color-danger: #d1373f;
-  --vera-color-success: #2a9d5c;
+  --vera-color-activity-bg: var(--vera-color-surface-soft);
+  --vera-color-activity-text: var(--vera-color-muted-text);
+  --vera-color-activity-border: var(--vera-color-border);
+  --vera-color-approval-bg: var(--vera-color-warning-soft);
+  --vera-color-approval-border: var(--vera-color-warning);
+  --vera-color-approval-answered-bg: var(--vera-color-surface);
+  --vera-color-approval-answered-border: var(--vera-color-border);
 
   --vera-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --vera-font-family-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --vera-font-size-phone-chat: 14px;
   --vera-font-size-phone-management: 14px;
   --vera-font-size-desktop-chat: 16px;
   --vera-font-size-desktop-management: 16px;
   --vera-font-size-small: 12px;
+  --vera-font-size-tiny: 10px;
   --vera-font-size-large: 18px;
-  --vera-line-height-base: 1.45;
+  --vera-line-height-base: 1.55;
 
   --vera-bubble-radius-phone: 16px;
   --vera-bubble-radius-desktop: 16px;
@@ -46,22 +64,34 @@
   --vera-bubble-radius: var(--vera-bubble-radius-phone);
   --vera-bubble-gap: var(--vera-bubble-gap-phone);
   --vera-window-margin: var(--vera-window-margin-phone-chat);
+  --vera-space-2xs: 2px;
   --vera-space-xs: 4px;
   --vera-space-sm: 8px;
   --vera-space-md: 12px;
   --vera-space-lg: 20px;
+  --vera-space-xl: 28px;
   --vera-bubble-padding: 10px 14px;
   --vera-bubble-max-width: 80%;
-  --vera-composer-height: 56px;
-  --vera-topbar-height: 52px;
+  --vera-composer-height: 64px;
+  --vera-composer-input-max-height: 160px;
+  --vera-topbar-height: 64px;
   --vera-touch-target: 44px;
+  --vera-icon-size: 20px;
+  --vera-action-size: 30px;
+  --vera-avatar-size: 36px;
+  --vera-header-avatar-size: 32px;
   --vera-contact-rail-width: 68px;
   --vera-navigator-width: min(88vw, 520px);
-  --vera-overlay-color: rgb(0 0 0 / 38%);
-  --vera-control-radius: 10px;
+  --vera-control-radius: 12px;
+  --vera-bubble-corner-tight: 5px;
   --vera-content-max-width: 760px;
   --vera-border-width: 1px;
+  --vera-scrollbar-width: 4px;
+  --vera-backdrop-blur: 18px;
+  --vera-shadow-sm: 0 1px 2px color-mix(in srgb, var(--vera-color-text), transparent 92%);
+  --vera-shadow-lg: 0 16px 40px color-mix(in srgb, var(--vera-color-text), transparent 82%);
   --vera-transition-fast: 120ms ease;
+  --vera-transition-base: 180ms ease;
   --vera-safe-area-top: env(safe-area-inset-top, 0px);
   --vera-safe-area-right: env(safe-area-inset-right, 0px);
   --vera-safe-area-bottom: env(safe-area-inset-bottom, 0px);
@@ -89,50 +119,30 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --vera-color-bg: #17171a;
-    --vera-color-surface: #1f2023;
-    --vera-color-border: #303136;
-    --vera-color-text: #ececef;
-    --vera-color-text-muted: #9a9aa2;
-    --vera-color-theme: #5b8def;
-    --vera-color-accent: #5b8def;
-    --vera-color-accent-text: #0c0c0e;
-    --vera-color-bubble-user-text: #0c0c0e;
-    --vera-color-bubble-agent-bg: #26272b;
-    --vera-color-bubble-agent-text: #ececef;
-    --vera-color-bubble-author-text: #9a9aa2;
-    --vera-color-activity-bg: #1b1c1f;
-    --vera-color-activity-text: #9a9aa2;
-    --vera-color-activity-border: #303136;
-    --vera-color-approval-bg: #332a12;
-    --vera-color-approval-border: #a9822f;
-    --vera-color-approval-answered-bg: #1f2023;
-    --vera-color-approval-answered-border: #303136;
-    --vera-color-danger: #f0666d;
-    --vera-color-success: #63d296;
+    --vera-color-background: #020617;
+    --vera-color-surface: #0f172a;
+    --vera-color-text: #e2e8f0;
+    --vera-color-muted-text: #64748b;
+    --vera-color-border: #334155;
+    --vera-color-accent: #6366f1;
+    --vera-color-success: #34d399;
+    --vera-color-warning: #f59e0b;
+    --vera-color-error: #f87171;
+    --vera-color-accent-text: #ffffff;
+    --vera-color-bubble-user-text: #ffffff;
   }
 }
 
 :root[data-theme="dark"] {
-  --vera-color-bg: #17171a;
-  --vera-color-surface: #1f2023;
-  --vera-color-border: #303136;
-  --vera-color-text: #ececef;
-  --vera-color-text-muted: #9a9aa2;
-  --vera-color-theme: #5b8def;
-  --vera-color-accent: #5b8def;
-  --vera-color-accent-text: #0c0c0e;
-  --vera-color-bubble-user-text: #0c0c0e;
-  --vera-color-bubble-agent-bg: #26272b;
-  --vera-color-bubble-agent-text: #ececef;
-  --vera-color-bubble-author-text: #9a9aa2;
-  --vera-color-activity-bg: #1b1c1f;
-  --vera-color-activity-text: #9a9aa2;
-  --vera-color-activity-border: #303136;
-  --vera-color-approval-bg: #332a12;
-  --vera-color-approval-border: #a9822f;
-  --vera-color-approval-answered-bg: #1f2023;
-  --vera-color-approval-answered-border: #303136;
-  --vera-color-danger: #f0666d;
-  --vera-color-success: #63d296;
+  --vera-color-background: #020617;
+  --vera-color-surface: #0f172a;
+  --vera-color-text: #e2e8f0;
+  --vera-color-muted-text: #64748b;
+  --vera-color-border: #334155;
+  --vera-color-accent: #6366f1;
+  --vera-color-success: #34d399;
+  --vera-color-warning: #f59e0b;
+  --vera-color-error: #f87171;
+  --vera-color-accent-text: #ffffff;
+  --vera-color-bubble-user-text: #ffffff;
 }

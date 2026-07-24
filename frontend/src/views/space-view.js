@@ -11,6 +11,7 @@ import { createFilesClient, FILE_ACCEPT } from "../api/files-client.js";
 
 const TIMELINE_PAGE_SIZE = 50;
 const TIMELINE_DOM_LIMIT = 200;
+const IMAGE_ACCEPT = ".png,.jpg,.jpeg,.gif,.webp";
 
 function keyOf(item) {
   return `${item.itemType}:${item.id}`;
@@ -296,9 +297,9 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     : bootstrap.spaces[0];
   const composer = createComposer({
     targets: bootstrap.accounts.filter((account) => initialSpace?.seats.some((seat) => seat.accountId === account.id)),
-    onPickAttachment: async () => {
+    onPickAttachment: async (kind) => {
       if (!space) throw new Error("当前没有可上传附件的 Space");
-      const selection = await platform.pickFile({ accept: FILE_ACCEPT });
+      const selection = await platform.pickFile({ accept: kind === "image" ? IMAGE_ACCEPT : FILE_ACCEPT });
       if (selection?.unsupported) return null;
       const response = await files.upload(space.id, selection);
       return response.file;

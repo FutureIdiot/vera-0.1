@@ -1,4 +1,5 @@
 import { createSpaceNavigator } from "./space-navigator.js";
+import { setIconButtonContent } from "./vector-icon.js";
 
 const MANAGEMENT_ROUTES = new Set([
   "space-settings",
@@ -99,11 +100,21 @@ export function createAppShell({ root, platform, runtime } = {}) {
   const title = document.createElement("a");
   title.className = "vera-shell__title";
 
+  const participants = document.createElement("div");
+  participants.className = "vera-shell__participants";
+  participants.setAttribute("aria-hidden", "true");
+
+  const identity = document.createElement("div");
+  identity.className = "vera-shell__identity";
+  const subtitle = document.createElement("p");
+  subtitle.className = "vera-shell__subtitle";
+  identity.append(title, subtitle);
+
   const settings = document.createElement("a");
-  settings.className = "vera-icon-button";
+  settings.className = "vera-icon-button vera-shell__settings";
   settings.href = "#/settings";
-  settings.textContent = "设置";
   settings.setAttribute("aria-label", "全局 Settings");
+  setIconButtonContent(settings, "settings", "设置");
 
   const connection = document.createElement("span");
   connection.className = "vera-shell__connection";
@@ -120,7 +131,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
     currentSpaceId: currentSpace?.id,
   });
 
-  header.append(leading, title, settings, connection);
+  header.append(leading, participants, identity, settings, connection);
   shell.append(navigator.element, header, main);
   root.replaceChildren(shell);
 
@@ -130,7 +141,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
 
   function updateHeader() {
     const headerState = resolveShellHeader({ routeName: activeRouteName, currentSpace, navigatorOpen, managementHeader });
-    leading.textContent = headerState.leadingText;
+    setIconButtonContent(leading, isChatRoute() ? "menu" : "arrow-left", headerState.leadingText);
     leading.href = headerState.leadingHref;
     leading.setAttribute("aria-label", headerState.leadingLabel);
     title.textContent = headerState.title;
@@ -146,6 +157,37 @@ export function createAppShell({ root, platform, runtime } = {}) {
       title.removeAttribute("aria-level");
     }
     settings.hidden = !headerState.settingsVisible;
+    participants.hidden = !isChatRoute();
+    subtitle.hidden = !isChatRoute();
+    renderParticipants();
+  }
+
+  function renderParticipants() {
+    participants.replaceChildren();
+    const bootstrap = runtime.getBootstrap();
+    const accounts = bootstrap.accounts ?? [];
+    const seats = currentSpace?.seats ?? [];
+    const visible = seats.slice(0, 3);
+    for (const seat of visible) {
+      const account = accounts.find((candidate) => candidate.id === seat.accountId);
+      const avatar = document.createElement("span");
+      avatar.className = "vera-shell__participant";
+      avatar.textContent = (account?.name ?? seat.accountId ?? "?").charAt(0).toUpperCase();
+      avatar.title = account?.name ?? seat.accountId ?? "Account";
+      participants.appendChild(avatar);
+    }
+    if (seats.length > visible.length) {
+      const more = document.createElement("span");
+      more.className = "vera-shell__participant vera-shell__participant--more";
+      more.textContent = `+${seats.length - visible.length}`;
+      participants.appendChild(more);
+    }
+    const names = seats
+      .map((seat) => accounts.find((candidate) => candidate.id === seat.accountId)?.name ?? seat.accountId)
+      .filter(Boolean);
+    subtitle.textContent = names.length
+      ? `${names.length} 个 Account · ${names.join("、")}`
+      : "尚未添加 Account";
   }
 
   function setSpace(nextSpace) {

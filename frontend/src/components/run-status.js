@@ -1,3 +1,5 @@
+import { setIconButtonContent } from "./vector-icon.js";
+
 export function createRunStatus({ onCancel } = {}) {
   const activeRuns = new Map();
   const agentStates = new Map();
@@ -7,8 +9,10 @@ export function createRunStatus({ onCancel } = {}) {
   const text = document.createElement("span");
   const cancel = document.createElement("button");
   cancel.type = "button";
-  cancel.className = "vera-text-button";
-  cancel.textContent = "取消";
+  cancel.className = "vera-work-status__cancel";
+  cancel.setAttribute("aria-label", "停止运行");
+  cancel.title = "停止运行";
+  setIconButtonContent(cancel, "stop", "停止");
   element.append(text, cancel);
 
   function stateKey(state) {
