@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { renderMessageBubble } from "../../../frontend/src/components/message-bubble.js";
+import {
+  renderMessageBubble,
+  resolveMessageGrouping,
+} from "../../../frontend/src/components/message-bubble.js";
 
 class FakeElement {
   constructor(tagName) {
@@ -99,7 +102,7 @@ class FakeElement {
   }
 }
 
-test("Account message avatar keeps the Account identity and model snapshot", () => {
+test("group Account message uses top-level frozen identity and model fields", () => {
   const previousDocument = globalThis.document;
   globalThis.document = {
     createElement: (tagName) => new FakeElement(tagName),
@@ -113,12 +116,14 @@ test("Account message avatar keeps the Account identity and model snapshot", () 
       author: {
         type: "account",
         accountId: "acc one",
-        accountNameSnapshot: "Gemma",
-        executingAgentId: "agt one",
-        effectiveModel: "gemma-test",
-        delegated: false,
       },
+      accountNameSnapshot: "Gemma",
+      executingAgentId: "agt one",
+      effectiveModel: "gemma-test",
+      delegated: false,
       content: "hello",
+    }, {
+      grouping: { position: "solo", showAuthor: true, showAvatar: true, showTail: true },
     });
 
     const avatar = bubble.querySelector(".vera-bubble__avatar");
@@ -127,6 +132,66 @@ test("Account message avatar keeps the Account identity and model snapshot", () 
     assert.equal(avatar.textContent, "G");
     assert.equal(avatar.attributes["aria-label"], "打开 Gemma 设置");
     assert.equal(author.textContent, "Gemma · gemma-test");
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test("private Account message hides the repeated name and model", () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    createElement: (tagName) => new FakeElement(tagName),
+    createElementNS: (_namespace, tagName) => new FakeElement(tagName),
+  };
+  try {
+    const bubble = renderMessageBubble({
+      id: "msg_private",
+      itemType: "message",
+      status: "completed",
+      author: { type: "account", accountId: "acc_one" },
+      accountNameSnapshot: "Gemma",
+      effectiveModel: "gemma-test",
+      content: "hello",
+    }, {
+      grouping: { position: "solo", showAuthor: false, showAvatar: true, showTail: true },
+    });
+
+    assert.equal(bubble.querySelector(".vera-bubble__author").hidden, true);
+    assert.equal(bubble.querySelector(".vera-bubble__author").textContent, "");
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test("only the latest split bubble exposes the avatar and tail", () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    createElement: (tagName) => new FakeElement(tagName),
+    createElementNS: (_namespace, tagName) => new FakeElement(tagName),
+  };
+  try {
+    const item = {
+      id: "msg_split",
+      itemType: "message",
+      status: "completed",
+      author: { type: "account", accountId: "acc_one" },
+      accountNameSnapshot: "Gemma",
+      effectiveModel: "gemma-test",
+      content: "hello",
+    };
+    const first = renderMessageBubble(item, {
+      grouping: { position: "first", showAuthor: true, showAvatar: false, showTail: false },
+    });
+    const last = renderMessageBubble({ ...item, id: "msg_latest" }, {
+      grouping: { position: "last", showAuthor: false, showAvatar: true, showTail: true },
+    });
+
+    assert.equal(first.querySelector(".vera-bubble__avatar").classList.contains("is-placeholder"), true);
+    assert.equal(first.classList.contains("vera-bubble--has-tail"), false);
+    assert.equal(first.querySelector(".vera-bubble__author").textContent, "Gemma · gemma-test");
+    assert.equal(last.querySelector(".vera-bubble__avatar").classList.contains("is-placeholder"), false);
+    assert.equal(last.classList.contains("vera-bubble--has-tail"), true);
+    assert.equal(last.querySelector(".vera-bubble__author").hidden, true);
   } finally {
     globalThis.document = previousDocument;
   }
@@ -215,5 +280,67 @@ test("message time appears only inside the bubble and flat action interfaces sta
     assert.deepEqual(actions.map((button) => button.disabled), [true, true, true, false]);
   } finally {
     globalThis.document = previousDocument;
+  }
+});
+
+function accountMessage(id, runId, accountId = "acc_a") {
+  return {
+    id,
+    itemType: "message",
+    runId,
+    author: { type: "account", accountId },
+  };
+}
+
+test("same Account and run form first middle last bubbles in group chat", () => {
+  const items = [
+    accountMessage("msg_1", "run_1"),
+    accountMessage("msg_2", "run_1"),
+    accountMessage("msg_3", "run_1"),
+  ];
+
+  assert.deepEqual(resolveMessageGrouping(items, 0, { isGroupChat: true }), {
+    position: "first",
+    showAuthor: true,
+    showAvatar: false,
+    showTail: false,
+  });
+  assert.deepEqual(resolveMessageGrouping(items, 1, { isGroupChat: true }), {
+    position: "middle",
+    showAuthor: false,
+    showAvatar: false,
+    showTail: false,
+  });
+  assert.deepEqual(resolveMessageGrouping(items, 2, { isGroupChat: true }), {
+    position: "last",
+    showAuthor: false,
+    showAvatar: true,
+    showTail: true,
+  });
+});
+
+test("new split bubble moves the avatar from the former latest bubble", () => {
+  const first = accountMessage("msg_1", "run_1");
+  assert.equal(resolveMessageGrouping([first], 0, { isGroupChat: true }).showAvatar, true);
+
+  const items = [first, accountMessage("msg_2", "run_1")];
+  assert.equal(resolveMessageGrouping(items, 0, { isGroupChat: true }).showAvatar, false);
+  assert.equal(resolveMessageGrouping(items, 1, { isGroupChat: true }).showAvatar, true);
+  assert.equal(resolveMessageGrouping(items, 0, { isGroupChat: true }).showAuthor, true);
+});
+
+test("different runs, Accounts, user messages, and Activity break bubble groups", () => {
+  const accountA = accountMessage("msg_1", "run_1", "acc_a");
+  const cases = [
+    [accountA, accountMessage("msg_2", "run_2", "acc_a")],
+    [accountA, accountMessage("msg_2", "run_1", "acc_b")],
+    [accountA, { id: "msg_user", itemType: "message", author: { type: "user" } }],
+    [accountA, { id: "act_1", itemType: "activity" }],
+    [accountMessage("msg_legacy", null, "acc_a"), accountMessage("msg_2", null, "acc_a")],
+  ];
+
+  for (const items of cases) {
+    assert.equal(resolveMessageGrouping(items, 0, { isGroupChat: true }).position, "solo");
+    assert.equal(resolveMessageGrouping(items, 0, { isGroupChat: true }).showAvatar, true);
   }
 });

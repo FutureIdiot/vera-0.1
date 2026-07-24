@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveNavigatorState, resolveShellHeader } from "../../frontend/src/components/app-shell.js";
+import {
+  resolveChatIdentity,
+  resolveNavigatorState,
+  resolveShellHeader,
+} from "../../frontend/src/components/app-shell.js";
 
 const space = { id: "spc_one", name: "One" };
 
@@ -11,10 +15,33 @@ test("chat top bar uses the left control for the directory and the Space title f
     leadingHref: "#/spaces",
     leadingLabel: "打开 Space 目录",
     title: "One",
+    subtitle: "尚未添加 Account",
     titleHref: "#/spaces/spc_one/settings",
-    titleLabel: "打开 One 的设置",
+    titleLabel: "打开 One 的 Space 设置",
     titleIsHeading: false,
     settingsVisible: true,
+  });
+});
+
+test("private header shows Account name and current model while group header shows Space name", () => {
+  const accounts = [
+    { id: "acc_a", name: "Coder", model: "gpt-5.6-sol" },
+    { id: "acc_b", name: "Reviewer", model: "claude-sonnet" },
+  ];
+  const privateSpace = { id: "spc_private", name: "Implementation", seats: [{ accountId: "acc_a" }] };
+  const groupSpace = {
+    id: "spc_group",
+    name: "Release Room",
+    seats: [{ accountId: "acc_a" }, { accountId: "acc_b" }],
+  };
+
+  assert.deepEqual(resolveChatIdentity(privateSpace, accounts), {
+    title: "Coder",
+    subtitle: "gpt-5.6-sol",
+  });
+  assert.deepEqual(resolveChatIdentity(groupSpace, accounts), {
+    title: "Release Room",
+    subtitle: "2 个 Account · Coder、Reviewer",
   });
 });
 

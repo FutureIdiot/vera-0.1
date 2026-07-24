@@ -72,6 +72,8 @@
   --vera-space-xl: 28px;
   --vera-bubble-padding: 10px 14px;
   --vera-bubble-max-width: 80%;
+  --vera-bubble-group-gap: 2px;
+  --vera-bubble-tail-size: 7px;
   --vera-composer-height: 64px;
   --vera-composer-input-max-height: 160px;
   --vera-topbar-height: 64px;

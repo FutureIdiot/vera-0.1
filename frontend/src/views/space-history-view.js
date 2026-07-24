@@ -12,7 +12,7 @@ function historyItem(item, accounts) {
   const label = document.createElement("strong");
   if (item.itemType === "message") {
     label.textContent = item.author?.type === "account"
-      ? item.author.accountNameSnapshot ?? accounts.get(item.author.accountId) ?? "Account"
+      ? item.accountNameSnapshot ?? accounts.get(item.author.accountId) ?? "Account"
       : "用户";
   } else if (item.itemType === "activity") {
     label.textContent = `Activity · ${item.label ?? item.phase ?? "过程"}`;

@@ -24,6 +24,25 @@ export function isChatRouteName(routeName) {
   return routeName === "space" || routeName === "spaces";
 }
 
+export function resolveChatIdentity(currentSpace, accounts = []) {
+  const seats = currentSpace?.seats ?? [];
+  const members = seats.map((seat) => (
+    accounts.find((account) => account.id === seat.accountId) ?? { id: seat.accountId }
+  ));
+  if (seats.length === 1) {
+    const account = members[0];
+    return {
+      title: account?.name ?? currentSpace?.name ?? account?.id ?? "选择 Space",
+      subtitle: account?.model ?? "模型未知",
+    };
+  }
+  const names = members.map((account) => account?.name ?? account?.id).filter(Boolean);
+  return {
+    title: currentSpace?.name ?? "选择 Space",
+    subtitle: names.length ? `${names.length} 个 Account · ${names.join("、")}` : "尚未添加 Account",
+  };
+}
+
 function defaultManagementHeader(routeName, currentSpace) {
   const currentChat = currentSpace ? `#/spaces/${encodeURIComponent(currentSpace.id)}` : "#/";
   const defaults = {
@@ -47,15 +66,23 @@ function defaultManagementHeader(routeName, currentSpace) {
   return defaults[routeName] ?? { title: "Vera", backHref: currentChat, backLabel: "返回" };
 }
 
-export function resolveShellHeader({ routeName, currentSpace, navigatorOpen = false, managementHeader = null } = {}) {
+export function resolveShellHeader({
+  routeName,
+  currentSpace,
+  accounts = [],
+  navigatorOpen = false,
+  managementHeader = null,
+} = {}) {
   if (isChatRouteName(routeName)) {
+    const identity = resolveChatIdentity(currentSpace, accounts);
     return {
       leadingText: navigatorOpen ? "收起" : "目录",
       leadingHref: "#/spaces",
       leadingLabel: navigatorOpen ? "收起 Space 目录" : "打开 Space 目录",
-      title: currentSpace?.name ?? "选择 Space",
+      title: identity.title,
+      subtitle: identity.subtitle,
       titleHref: currentSpace ? `#/spaces/${encodeURIComponent(currentSpace.id)}/settings` : "#/spaces",
-      titleLabel: currentSpace ? `打开 ${currentSpace.name} 的设置` : "选择 Space",
+      titleLabel: currentSpace ? `打开 ${identity.title} 的 Space 设置` : "选择 Space",
       titleIsHeading: false,
       settingsVisible: true,
     };
@@ -66,6 +93,7 @@ export function resolveShellHeader({ routeName, currentSpace, navigatorOpen = fa
     leadingHref: header.backHref,
     leadingLabel: header.backLabel ?? "返回",
     title: header.title,
+    subtitle: "",
     titleHref: null,
     titleLabel: header.title,
     titleIsHeading: true,
@@ -140,7 +168,13 @@ export function createAppShell({ root, platform, runtime } = {}) {
   }
 
   function updateHeader() {
-    const headerState = resolveShellHeader({ routeName: activeRouteName, currentSpace, navigatorOpen, managementHeader });
+    const headerState = resolveShellHeader({
+      routeName: activeRouteName,
+      currentSpace,
+      accounts: runtime.getBootstrap().accounts ?? [],
+      navigatorOpen,
+      managementHeader,
+    });
     setIconButtonContent(leading, isChatRoute() ? "menu" : "arrow-left", headerState.leadingText);
     leading.href = headerState.leadingHref;
     leading.setAttribute("aria-label", headerState.leadingLabel);
@@ -158,7 +192,8 @@ export function createAppShell({ root, platform, runtime } = {}) {
     }
     settings.hidden = !headerState.settingsVisible;
     participants.hidden = !isChatRoute();
-    subtitle.hidden = !isChatRoute();
+    subtitle.textContent = headerState.subtitle;
+    subtitle.hidden = !isChatRoute() || !headerState.subtitle;
     renderParticipants();
   }
 
@@ -182,12 +217,6 @@ export function createAppShell({ root, platform, runtime } = {}) {
       more.textContent = `+${seats.length - visible.length}`;
       participants.appendChild(more);
     }
-    const names = seats
-      .map((seat) => accounts.find((candidate) => candidate.id === seat.accountId)?.name ?? seat.accountId)
-      .filter(Boolean);
-    subtitle.textContent = names.length
-      ? `${names.length} 个 Account · ${names.join("、")}`
-      : "尚未添加 Account";
   }
 
   function setSpace(nextSpace) {

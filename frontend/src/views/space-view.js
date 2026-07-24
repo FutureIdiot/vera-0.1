@@ -1,7 +1,11 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createSpacesClient } from "../api/spaces-client.js";
 import { createTimelineStore } from "../state/timeline-store.js";
-import { renderMessageBubble, applyMessageBubble } from "../components/message-bubble.js";
+import {
+  renderMessageBubble,
+  applyMessageBubble,
+  resolveMessageGrouping,
+} from "../components/message-bubble.js";
 import { renderActivity, applyActivity } from "../components/activity-item.js";
 import { renderApprovalCard, applyApprovalCard } from "../components/approval-card.js";
 import { createComposer } from "../components/composer.js";
@@ -83,6 +87,12 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
   const nodeByKey = new Map();
   const accountNameById = new Map();
   const bubbleCtx = { accountName: (id) => accountNameById.get(id) };
+  const messageContext = (items, index) => ({
+    ...bubbleCtx,
+    grouping: resolveMessageGrouping(items, index, {
+      isGroupChat: (space?.seats?.length ?? 0) > 1,
+    }),
+  });
 
   async function handleAnswer(approvalId, answer) {
     try {
@@ -102,17 +112,30 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     }
   }
 
-  function renderItem(item) {
-    if (item.itemType === "message") return renderMessageBubble(item, bubbleCtx);
+  function renderItem(item, items, index) {
+    if (item.itemType === "message") return renderMessageBubble(item, messageContext(items, index));
     if (item.itemType === "activity") return renderActivity(item);
     if (item.itemType === "approval") return renderApprovalCard(item, { onAnswer: handleAnswer });
     return null;
   }
 
-  function applyItem(element, item) {
-    if (item.itemType === "message") return applyMessageBubble(element, item, bubbleCtx);
+  function applyItem(element, item, items, index) {
+    if (item.itemType === "message") return applyMessageBubble(element, item, messageContext(items, index));
     if (item.itemType === "activity") return applyActivity(element, item);
     if (item.itemType === "approval") return applyApprovalCard(element, item, { onAnswer: handleAnswer });
+  }
+
+  function refreshMessageBubble(items, index) {
+    const item = items[index];
+    if (item?.itemType !== "message") return;
+    const element = nodeByKey.get(keyOf(item));
+    if (element) applyMessageBubble(element, item, messageContext(items, index));
+  }
+
+  function refreshAllMessageBubbles(items = store.getOrderedItems()) {
+    for (let index = 0; index < items.length; index += 1) {
+      refreshMessageBubble(items, index);
+    }
   }
 
   function isNearBottom() {
@@ -126,8 +149,9 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
   function fullRender(items) {
     timelineEl.replaceChildren();
     nodeByKey.clear();
-    for (const item of items) {
-      const element = renderItem(item);
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      const element = renderItem(item, items, index);
       if (!element) continue;
       nodeByKey.set(keyOf(item), element);
       timelineEl.appendChild(element);
@@ -148,14 +172,21 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     }
     const item = items.find((candidate) => keyOf(candidate) === changedKey);
     if (!item) return;
+    const itemIndex = items.indexOf(item);
     const existing = nodeByKey.get(changedKey);
     const keepLatestVisible = isNearBottom();
-    if (existing) applyItem(existing, item);
+    if (existing) applyItem(existing, item, items, itemIndex);
     else {
-      const element = renderItem(item);
+      const element = renderItem(item, items, itemIndex);
       if (!element) return;
       nodeByKey.set(changedKey, element);
       timelineEl.appendChild(element);
+    }
+    if (removedKeys.length) refreshAllMessageBubbles(items);
+    else if (!existing && item.itemType === "message") {
+      refreshMessageBubble(items, itemIndex - 1);
+      refreshMessageBubble(items, itemIndex);
+      refreshMessageBubble(items, itemIndex + 1);
     }
     if (keepLatestVisible) scrollToBottom();
   });
@@ -268,6 +299,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
       shell?.setSpace(space);
       composer.setDisabled(Boolean(space.archivedAt));
       composer.setTargets(runtime.getBootstrap().accounts.filter((account) => space.seats.some((seat) => seat.accountId === account.id)));
+      refreshAllMessageBubbles();
       if (space.archivedAt) showArchivedStatus();
       else setStatus(null);
     }

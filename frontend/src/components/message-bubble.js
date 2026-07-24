@@ -12,6 +12,33 @@ const ACTIONS = [
   ["copy", "copy", "复制"],
 ];
 
+function accountRunKey(item) {
+  if (item?.itemType !== "message" || item.author?.type !== "account") return null;
+  if (!item.author.accountId || !item.runId) return null;
+  return `${item.author.accountId}\u0000${item.runId}`;
+}
+
+export function resolveMessageGrouping(items, index, { isGroupChat = false } = {}) {
+  const item = items[index];
+  const key = accountRunKey(item);
+  const isAccount = item?.itemType === "message" && item.author?.type === "account";
+  if (!isAccount) {
+    return { position: "solo", showAuthor: false, showAvatar: false, showTail: false };
+  }
+
+  const joinsPrevious = Boolean(key && accountRunKey(items[index - 1]) === key);
+  const joinsNext = Boolean(key && accountRunKey(items[index + 1]) === key);
+  const position = joinsPrevious
+    ? (joinsNext ? "middle" : "last")
+    : (joinsNext ? "first" : "solo");
+  return {
+    position,
+    showAuthor: isGroupChat && !joinsPrevious,
+    showAvatar: !joinsNext,
+    showTail: !joinsNext,
+  };
+}
+
 function formatTime(timestamp) {
   if (!timestamp || Number.isNaN(Date.parse(timestamp))) return "";
   return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -134,9 +161,23 @@ function ensureStructure(el) {
 export function applyMessageBubble(el, item, ctx = {}) {
   const isUser = item.author?.type === "user";
   const streaming = item.status === "streaming";
+  const grouping = ctx.grouping ?? {
+    position: "solo",
+    showAuthor: false,
+    showAvatar: !isUser,
+    showTail: !isUser,
+  };
   ensureStructure(el);
-  el.className = `vera-item vera-bubble vera-bubble--${isUser ? "user" : "agent"}${streaming ? " vera-bubble--streaming" : ""}`;
+  el.className = [
+    "vera-item",
+    "vera-bubble",
+    `vera-bubble--${isUser ? "user" : "agent"}`,
+    `vera-bubble--group-${grouping.position}`,
+    streaming ? "vera-bubble--streaming" : "",
+    !isUser && grouping.showTail ? "vera-bubble--has-tail" : "",
+  ].filter(Boolean).join(" ");
   el.dataset.messageId = item.id;
+  el.dataset.groupPosition = grouping.position;
   el.tabIndex = 0;
   el.setAttribute("aria-label", `${isUser ? "你的" : "Account"}消息；点击显示操作`);
   el._veraMessageItem = item;
@@ -150,13 +191,17 @@ export function applyMessageBubble(el, item, ctx = {}) {
   const statusEl = el.querySelector(".vera-bubble__status");
 
   const accountId = item.author?.accountId;
-  const accountName = item.author?.accountNameSnapshot ?? ctx.accountName?.(accountId) ?? accountId ?? "";
-  const authorName = isUser
-    ? ""
-    : `${accountName}${item.author?.effectiveModel ? ` · ${item.author.effectiveModel}` : ""}`;
-  const avatarVisible = !isUser && Boolean(accountId);
-  avatarEl.textContent = avatarVisible ? (accountName || "?").charAt(0).toUpperCase() : "";
-  avatarEl.hidden = !avatarVisible;
+  const accountName = item.accountNameSnapshot ?? ctx.accountName?.(accountId) ?? accountId ?? "";
+  const authorName = !isUser && grouping.showAuthor
+    ? `${accountName}${item.effectiveModel ? ` · ${item.effectiveModel}` : ""}`
+    : "";
+  const avatarEligible = !isUser && Boolean(accountId);
+  const avatarVisible = avatarEligible && grouping.showAvatar;
+  avatarEl.textContent = avatarEligible ? (accountName || "?").charAt(0).toUpperCase() : "";
+  avatarEl.hidden = !avatarEligible;
+  avatarEl.classList.toggle("is-placeholder", avatarEligible && !avatarVisible);
+  avatarEl.setAttribute("aria-hidden", String(!avatarVisible));
+  avatarEl.tabIndex = avatarVisible ? 0 : -1;
   if (avatarVisible) {
     avatarEl.href = `#/settings/accounts/${encodeURIComponent(accountId)}`;
     avatarEl.setAttribute("aria-label", `打开 ${accountName || "Account"} 设置`);

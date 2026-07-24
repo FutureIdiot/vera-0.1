@@ -54,6 +54,11 @@
   align-self: flex-start;
 }
 
+.vera-bubble--group-middle,
+.vera-bubble--group-last {
+  margin-top: calc((var(--vera-bubble-gap) - var(--vera-bubble-group-gap)) * -1);
+}
+
 .vera-bubble__stack {
   display: flex;
   flex-direction: column;
@@ -64,12 +69,47 @@
   background: var(--vera-color-bubble-agent-bg);
   border: var(--vera-border-width) solid transparent;
   border-radius: var(--vera-bubble-radius);
-  border-top-left-radius: var(--vera-bubble-corner-tight);
   box-shadow: var(--vera-shadow-sm);
   color: var(--vera-color-bubble-agent-text);
   min-width: 0;
   padding: var(--vera-bubble-padding);
+  position: relative;
   transition: border-color var(--vera-transition-fast), box-shadow var(--vera-transition-fast);
+}
+
+.vera-bubble--agent.vera-bubble--group-first .vera-bubble__surface {
+  border-radius:
+    var(--vera-bubble-radius)
+    var(--vera-bubble-radius)
+    var(--vera-bubble-corner-tight)
+    var(--vera-bubble-corner-tight);
+}
+
+.vera-bubble--agent.vera-bubble--group-middle .vera-bubble__surface {
+  border-radius: var(--vera-bubble-corner-tight);
+}
+
+.vera-bubble--agent.vera-bubble--group-last .vera-bubble__surface {
+  border-radius:
+    var(--vera-bubble-corner-tight)
+    var(--vera-bubble-corner-tight)
+    var(--vera-bubble-radius)
+    var(--vera-bubble-radius);
+}
+
+.vera-bubble--agent.vera-bubble--group-solo .vera-bubble__surface {
+  border-radius: var(--vera-bubble-radius);
+}
+
+.vera-bubble--agent.vera-bubble--has-tail .vera-bubble__surface::after {
+  background: var(--vera-color-bubble-agent-bg);
+  bottom: calc(var(--vera-border-width) * -1);
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+  content: "";
+  height: var(--vera-bubble-tail-size);
+  left: calc((var(--vera-bubble-tail-size) - var(--vera-border-width)) * -1);
+  position: absolute;
+  width: var(--vera-bubble-tail-size);
 }
 
 .vera-bubble--user .vera-bubble__surface {
@@ -106,10 +146,29 @@
   font-weight: 700;
   height: var(--vera-avatar-size);
   justify-content: center;
-  margin-top: var(--vera-space-lg);
   text-decoration: none;
   user-select: none;
   width: var(--vera-avatar-size);
+}
+
+.vera-bubble__avatar.is-placeholder {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.vera-bubble--agent.vera-bubble--group-last,
+.vera-bubble--agent.vera-bubble--group-solo {
+  align-items: flex-end;
+}
+
+.vera-bubble--agent.vera-bubble--group-last .vera-bubble__avatar,
+.vera-bubble--agent.vera-bubble--group-solo .vera-bubble__avatar {
+  margin-bottom: var(--vera-space-xs);
+}
+
+.vera-bubble--agent.is-selected.vera-bubble--group-last .vera-bubble__avatar,
+.vera-bubble--agent.is-selected.vera-bubble--group-solo .vera-bubble__avatar {
+  margin-bottom: calc(var(--vera-action-size) + var(--vera-space-xs));
 }
 
 .vera-bubble__content {
