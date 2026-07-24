@@ -2,6 +2,7 @@
   "name": "vera",
   "version": "0.0.1",
   "private": true,
+  "license": "MIT",
   "description": "Vera backend gateway",
   "type": "module",
   "engines": {

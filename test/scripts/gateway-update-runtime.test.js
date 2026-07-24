@@ -51,7 +51,7 @@ async function applyFixture() {
   return { ...value, oldCommit, oldRelease };
 }
 
-function releaseExec(fixtureValue, { mutateOnNewStart = false } = {}) {
+function releaseExec(fixtureValue, { mutateOnNewStart = false, failTests = false } = {}) {
   let startCount = 0;
   const calls = [];
   const exec = async (command, args, options = {}) => {
@@ -79,6 +79,7 @@ function releaseExec(fixtureValue, { mutateOnNewStart = false } = {}) {
       await writeFile(join(options.cwd, "dist", "index.html"), "ok");
       return { code: 0, stdout: "", stderr: "" };
     }
+    if (command === "npm" && args[0] === "test" && failTests) throw new Error("tests failed");
     if (command === "cp") {
       await cp(args[args.length - 2], args[args.length - 1], { recursive: true, preserveTimestamps: true, errorOnExist: true });
       return { code: 0, stdout: "", stderr: "" };
@@ -183,8 +184,29 @@ test("successful apply builds a release, preserves a cold backup, and switches a
   assert.equal(marker.commit, TARGET);
   const status = JSON.parse(await readFile(join(value.updateRoot, "status", "status.json"), "utf8"));
   assert.equal(status.state, "succeeded");
+  const validationCalls = commands.calls
+    .filter(([command]) => command === "npm" || command === "node")
+    .map(([command, args]) => [command, ...args.slice(0, 2)]);
+  assert.deepEqual(validationCalls, [
+    ["npm", "ci"],
+    ["npm", "test"],
+    ["npm", "run", "build:web"],
+    ["node", "--check", join(value.releaseRoot, "releases", `.staging-${TARGET}-${process.pid}`, "src", "server.js")],
+  ]);
   assert.equal(commands.calls.some(([command, args]) => command === "systemctl" && args[0] === "stop"), true);
   assert.equal(commands.calls.some(([command, args]) => command === "cp" && args[0] === "-a"), true);
+});
+
+test("a failing release test stops before service, data, or current release mutation", async () => {
+  const value = await applyFixture();
+  const commands = releaseExec(value, { failTests: true });
+  await assert.rejects(() => runGatewayUpdate(value.env, { exec: commands.exec }), { code: "release_failed" });
+  assert.equal(await readlink(join(value.releaseRoot, "current")), value.oldRelease);
+  assert.equal(await readFile(join(value.dataPath, "canary"), "utf8"), "original");
+  assert.equal(commands.calls.some(([command]) => command === "systemctl" || command === "cp"), false);
+  const status = JSON.parse(await readFile(join(value.updateRoot, "status", "status.json"), "utf8"));
+  assert.equal(status.state, "failed");
+  assert.equal(status.error.code, "release_failed");
 });
 
 test("unhealthy new release restores the old symlink and pre-update data", async () => {

@@ -118,6 +118,7 @@ async function prepareRelease(config, commit, version, exec, now) {
     await mkdir(stagingPath, { mode: 0o755 });
     await exec("tar", ["-xf", archivePath, "-C", stagingPath]);
     await exec("npm", ["ci"], { cwd: stagingPath, env: { ...process.env, NODE_ENV: "development", NPM_CONFIG_CACHE: join(config.updateRoot, "npm-cache") } });
+    await exec("npm", ["test"], { cwd: stagingPath, env: { ...process.env, NODE_ENV: "test", NPM_CONFIG_CACHE: join(config.updateRoot, "npm-cache") } });
     await exec("npm", ["run", "build:web"], { cwd: stagingPath, env: { ...process.env, NODE_ENV: "production", NPM_CONFIG_CACHE: join(config.updateRoot, "npm-cache") } });
     await exec("node", ["--check", join(stagingPath, "src", "server.js")]);
     const markerPath = join(stagingPath, ".vera-release.json");
