@@ -53,6 +53,7 @@ export function createHttpClient(platform) {
     },
     get(path) { return request("GET", path); },
     post(path, body) { return request("POST", path, body); },
+    put(path, body) { return request("PUT", path, body); },
     patch(path, body) { return request("PATCH", path, body); },
     delete(path, body) { return request("DELETE", path, body); },
   };

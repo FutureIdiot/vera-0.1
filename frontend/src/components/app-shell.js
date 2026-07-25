@@ -1,5 +1,7 @@
 import { createSpaceNavigator } from "./space-navigator.js";
 import { setIconButtonContent } from "./vector-icon.js";
+import { createHttpClient } from "../api/http-client.js";
+import { createSpacesClient } from "../api/spaces-client.js";
 
 const MANAGEMENT_ROUTES = new Set([
   "space-settings",
@@ -106,6 +108,7 @@ export function resolveNavigatorState({ routeName, navigatorOpen = false } = {})
 }
 
 export function createAppShell({ root, platform, runtime } = {}) {
+  const spacesClient = createSpacesClient(createHttpClient(platform));
   let currentSpace = runtime.getBootstrap().spaces[0] ?? null;
   let activeRouteName = "space";
   let navigatorOpen = false;
@@ -144,6 +147,35 @@ export function createAppShell({ root, platform, runtime } = {}) {
   settings.setAttribute("aria-label", "全局 Settings");
   setIconButtonContent(settings, "settings", "设置");
 
+  const observe = document.createElement("button");
+  observe.type = "button";
+  observe.className = "vera-icon-button vera-shell__observe";
+  setIconButtonContent(observe, "observe", "关注");
+  observe.addEventListener("click", async () => {
+    if (observe.disabled || currentSpace?.seats?.length !== 1) return;
+    const observation = runtime.getBootstrap().observation ?? { observedSpaceId: null, revision: 0 };
+    const observed = observation.observedSpaceId === currentSpace.id;
+    observe.disabled = true;
+    try {
+      const result = await spacesClient.updateObservation({
+        spaceId: observed ? null : currentSpace.id,
+        ifRevision: observation.revision,
+      });
+      if (result?.observation) {
+        runtime.getBootstrap().observation = result.observation;
+        updateHeader();
+      }
+    } catch (error) {
+      setConnection(error?.code === "conflict" ? "关注状态已变化" : "关注失败", "danger");
+    } finally {
+      observe.disabled = false;
+    }
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "vera-shell__actions";
+  actions.append(observe, settings);
+
   const connection = document.createElement("span");
   connection.className = "vera-shell__connection";
   connection.setAttribute("role", "status");
@@ -159,7 +191,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
     currentSpaceId: currentSpace?.id,
   });
 
-  header.append(leading, participants, identity, settings, connection);
+  header.append(leading, participants, identity, actions, connection);
   shell.append(navigator.element, header, main);
   root.replaceChildren(shell);
 
@@ -191,6 +223,14 @@ export function createAppShell({ root, platform, runtime } = {}) {
       title.removeAttribute("aria-level");
     }
     settings.hidden = !headerState.settingsVisible;
+    const observation = runtime.getBootstrap().observation ?? { observedSpaceId: null };
+    const canObserve = isChatRoute() && currentSpace?.archivedAt == null && currentSpace?.seats?.length === 1;
+    const isObserved = canObserve && observation.observedSpaceId === currentSpace.id;
+    observe.hidden = !canObserve;
+    observe.classList.toggle("is-active", isObserved);
+    observe.setAttribute("aria-pressed", String(isObserved));
+    observe.setAttribute("aria-label", isObserved ? "取消关注当前私聊" : "关注当前私聊");
+    setIconButtonContent(observe, "observe", isObserved ? "取消关注" : "关注");
     participants.hidden = !isChatRoute();
     subtitle.textContent = headerState.subtitle;
     subtitle.hidden = !isChatRoute() || !headerState.subtitle;
@@ -296,6 +336,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
       else if (window.navigator.onLine) setConnection(envelope.data.status === "reconnecting" ? "重连中" : "连接中");
     } else if (envelope.type === "runtime.degraded") setConnection("同步失败", "danger");
     else if (envelope.type === "space.updated" && envelope.data?.space?.id === currentSpace?.id) setSpace(envelope.data.space);
+    else if (envelope.type === "observation.updated") updateHeader();
     else if (envelope.type === "runtime.reset") {
       const next = envelope.data.bootstrap.spaces.find((space) => space.id === currentSpace?.id) ?? envelope.data.bootstrap.spaces[0] ?? null;
       setSpace(next);

@@ -11,14 +11,23 @@ export async function run(ctx) {
     assertEqual(json.ok, true);
   });
 
-  await check("a. GET /api/bootstrap returns agents/accounts/spaces/agentStates/seq shape", async () => {
+  await check("a. bootstrap returns process-local observation and accepts a no-op revision CAS", async () => {
     const { status, json } = await httpRequest("GET", "/api/bootstrap");
     assertEqual(status, 200);
     assert(Array.isArray(json.agents), "agents should be an array");
     assert(Array.isArray(json.accounts), "accounts should be an array (4.1)");
     assert(Array.isArray(json.spaces), "spaces should be an array");
     assert(Array.isArray(json.agentStates), "agentStates should be an array");
+    assertEqual(json.observation?.observedSpaceId, null);
+    assertEqual(json.observation?.revision, 0);
     assert(typeof json.seq === "number", "seq should be a number");
+    const unchanged = await httpRequest("PUT", "/api/observation", {
+      spaceId: null,
+      ifRevision: 0,
+    });
+    assertEqual(unchanged.status, 200);
+    assertEqual(unchanged.json.observation.observedSpaceId, null);
+    assertEqual(unchanged.json.observation.revision, 0);
     ctx.bootstrap = json;
   });
 

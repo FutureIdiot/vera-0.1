@@ -93,6 +93,7 @@ async function* sseEnvelopes(body) {
 export function createDaemonClient({
   gatewayUrl, agentId, accountId, runtime, workspace, credentialStore, executor,
   memoryExecutor = null,
+  activitySummaryMaxLength = 160,
   fetchImpl = globalThis.fetch, daemonBootId = `boot_${randomUUID()}`,
   maxConnectionFailures = 3, reconnectBaseMs = 250, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
@@ -159,6 +160,7 @@ export function createDaemonClient({
     request,
     getAccountSessionId: () => session?.id ?? null,
     getTerminalReason: () => terminal,
+    activitySummaryMaxLength,
   });
   const compactionHandler = createDaemonCompactionHandler({
     identity,

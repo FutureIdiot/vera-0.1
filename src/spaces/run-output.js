@@ -13,6 +13,7 @@ function truncate(text, maxLength) {
 
 export function createRunOutput({
   store, hub, config, spaceId, spaceSessionId, runId, agent, account, effectiveModel, delegated,
+  projectActivity = (activity) => activity,
 }) {
   const bubbles = createBubbleStream({
     store,
@@ -32,16 +33,18 @@ export function createRunOutput({
 
   function onActivity(event) {
     if (!acceptsOutput()) return;
+    const summary = truncate(event?.summary, config.activity.summaryMaxLength ?? 160);
     const detail = truncate(event?.detail, config.activity.detailMaxLength);
     if (event?.callId && activityIndex.has(event.callId)) {
       const updated = store.update("activities", activityIndex.get(event.callId), {
         phase: event.phase,
         label: event.label,
+        summary,
         detail,
         toolStatus: event.toolStatus ?? null,
         updatedAt: new Date().toISOString(),
       });
-      hub.publish("activity.updated", { activity: stripInternal(updated) });
+      hub.publish("activity.updated", { activity: projectActivity(stripInternal(updated)) });
       return;
     }
     const timestamp = new Date().toISOString();
@@ -53,13 +56,14 @@ export function createRunOutput({
       agentId: agent.id,
       phase: event?.phase,
       label: event?.label,
+      summary,
       detail,
       toolStatus: event?.toolStatus ?? null,
       createdAt: timestamp,
       updatedAt: timestamp,
     });
     if (event?.callId) activityIndex.set(event.callId, activity.id);
-    hub.publish("activity.created", { activity: stripInternal(activity) });
+    hub.publish("activity.created", { activity: projectActivity(stripInternal(activity)) });
   }
 
   return {

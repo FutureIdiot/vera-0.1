@@ -42,14 +42,16 @@ function missingThread(stderr) {
     || /(?:thread|session).{0,80}(?:not found|does not exist|unknown|invalid)/iu.test(stderr);
 }
 
-function toolActivity(item) {
+function toolActivity(item, eventType = "item.completed") {
   const label = item.type || "codex-tool";
   const detail = item.command || item.query || item.name || item.server || "";
+  const toolStatus = item.status || (eventType === "item.started" ? "running" : "completed");
   return {
     phase: "tool",
     label,
+    summary: `${label} · ${toolStatus}`,
     detail: typeof detail === "string" ? detail : JSON.stringify(detail),
-    toolStatus: item.status || "completed",
+    toolStatus,
     callId: item.id || null,
   };
 }
@@ -235,6 +237,12 @@ export function createCodexAdapter({ config = {} }) {
     if (model) args.push("-m", model);
     args.push("-");
     try {
+      ctx.onActivity?.({
+        phase: "thinking",
+        label: "Codex",
+        summary: "正在思考",
+        callId: `thinking-${threadId ?? "new"}`,
+      });
       await execJson({
         binary, args, cwd: workspacePath, input: String(ctx.prompt?.text ?? ""),
         signal: ctx.signal, timeoutMs: watchdogMs,
@@ -255,13 +263,14 @@ export function createCodexAdapter({ config = {} }) {
               }
             }
           }
-          if (event?.type !== "item.completed") return;
+          if (!["item.started", "item.completed"].includes(event?.type)) return;
           const item = event.item ?? {};
-          if (item.type === "agent_message" && typeof item.text === "string" && item.text) {
+          if (event.type === "item.completed" &&
+              item.type === "agent_message" && typeof item.text === "string" && item.text) {
             content += item.text;
             ctx.onDelta?.(item.text);
           } else if (isDigestToolItem(item)) {
-            ctx.onActivity?.(toolActivity(item));
+            ctx.onActivity?.(toolActivity(item, event.type));
           }
         },
       });
@@ -289,7 +298,12 @@ export function createCodexAdapter({ config = {} }) {
       !Number.isInteger(providerBinding?.version) || providerBinding.version < 1 ||
       typeof providerBinding?.providerState?.threadId !== "string" || !providerBinding.providerState.threadId
     )) {
-      ctx.onActivity?.({ phase: "error", label: "session-reset", detail: "Codex provider binding was invalid and has been reset" });
+      ctx.onActivity?.({
+        phase: "error",
+        label: "session-reset",
+        summary: "Codex 会话已重置",
+        detail: "Codex provider binding was invalid and has been reset",
+      });
       const rotated = await ctx.rotateProviderBinding?.({ reason: "invalid" });
       prompt = rotated?.prompt ?? prompt;
       providerBinding = rotated?.providerBinding ?? null;
@@ -299,7 +313,12 @@ export function createCodexAdapter({ config = {} }) {
       return await runAttempt({ ...ctx, prompt }, providerBinding);
     } catch (error) {
       if (!providerBinding || !error?.missingThread) throw error;
-      ctx.onActivity?.({ phase: "error", label: "session-reset", detail: "Codex thread was unavailable and has been reset" });
+      ctx.onActivity?.({
+        phase: "error",
+        label: "session-reset",
+        summary: "Codex 会话已重置",
+        detail: "Codex thread was unavailable and has been reset",
+      });
       const rotated = await ctx.rotateProviderBinding?.({ reason: "missing" });
       const prompt = rotated?.prompt ?? ctx.prompt;
       assertPromptCapacity(prompt);

@@ -3,6 +3,9 @@ export function createSpacesClient(http) {
     fetchBootstrap() {
       return http.get("/api/bootstrap");
     },
+    updateObservation({ spaceId, ifRevision }) {
+      return http.put("/api/observation", { spaceId, ifRevision });
+    },
     fetchTimeline(spaceId, { before, limit } = {}) {
       const params = new URLSearchParams();
       if (before) params.set("before", before);

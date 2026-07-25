@@ -31,7 +31,7 @@ function stripInternal({ _seq, ...rest }) {
 
 export function registerSpaceRoutes(router, {
   store, hub, config, daemonScheduler, memoryDigestScheduler,
-  daemonRuntime, daemonRunLifecycle, contextCompaction, memory, files,
+  daemonRuntime, daemonRunLifecycle, contextCompaction, memory, files, observation,
 }) {
   router.get(
     "/api/spaces",
@@ -57,6 +57,7 @@ export function registerSpaceRoutes(router, {
     asHandler(async ({ req, res, params }) => {
       const body = await readJsonBody(req);
       const space = updateSpace(store, params.id, body);
+      observation?.reconcileSpace(params.id);
       hub.publish("space.updated", { space });
       sendJson(res, 200, { space });
     }),
@@ -66,6 +67,7 @@ export function registerSpaceRoutes(router, {
     "/api/spaces/:id/archive",
     asHandler(async ({ res, params }) => {
       const space = archiveSpace(store, params.id);
+      observation?.reconcileSpace(params.id);
       hub.publish("space.updated", { space });
       sendJson(res, 200, { space });
     }),
@@ -105,6 +107,7 @@ export function registerSpaceRoutes(router, {
         spaceId: params.id,
         deleteExclusiveMemories: body.deleteExclusiveMemories,
       });
+      observation?.reconcileSpace(params.id);
       for (const fileId of deleted.deletedFileIds) {
         hub.publish("file.deleted", { spaceId: params.id, fileId });
       }
@@ -123,7 +126,11 @@ export function registerSpaceRoutes(router, {
       const limitParam = query.get("limit");
       const limit = limitParam ? Number(limitParam) : 50;
       const timeline = getTimeline(store, params.id, { spaceSessionId: spaceSession.id, before, limit });
-      timeline.items = timeline.items.map((item) => item.itemType === "message" ? files.projectMessage(item, params.id) : item);
+      timeline.items = timeline.items.map((item) => {
+        if (item.itemType === "message") return files.projectMessage(item, params.id);
+        if (item.itemType === "activity") return observation?.projectActivity(item) ?? item;
+        return item;
+      });
       sendJson(res, 200, timeline);
     }),
   );
@@ -159,7 +166,13 @@ export function registerSpaceRoutes(router, {
         before,
         limit,
       });
-      timeline.items = timeline.items.map((item) => item.itemType === "message" ? files.projectMessage(item, params.id) : item);
+      timeline.items = timeline.items.map((item) => {
+        if (item.itemType === "message") return files.projectMessage(item, params.id);
+        if (item.itemType === "activity") {
+          return observation?.projectActivity(item, { archived: session.status !== "active" }) ?? item;
+        }
+        return item;
+      });
       sendJson(res, 200, timeline);
     }),
   );
@@ -237,6 +250,7 @@ export function registerSpaceRoutes(router, {
         daemonScheduler,
         memoryDigestScheduler,
         files,
+        observation,
         spaceId: params.id,
         body,
       });

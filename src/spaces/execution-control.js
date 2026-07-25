@@ -85,7 +85,11 @@ export function authorizeDaemonExecution({
   return { execution: executionSummary(claimed), claimed: true };
 }
 
-export function releaseAccountExecutions(store, accountId, { hub = null, now = () => new Date().toISOString() } = {}) {
+export function releaseAccountExecutions(store, accountId, {
+  hub = null,
+  now = () => new Date().toISOString(),
+  projectActivity = (activity) => activity,
+} = {}) {
   const endedAt = now();
   for (const run of store.list("runs")) {
     if (run.accountId !== accountId || !["pending", "running"].includes(run.status)) continue;
@@ -101,11 +105,12 @@ export function releaseAccountExecutions(store, accountId, { hub = null, now = (
       if (activity.runId === run.id && ["pending", "running"].includes(activity.toolStatus)) {
         const updated = store.update("activities", activity.id, {
           phase: "error",
+          summary: "Account Session 已撤销",
           toolStatus: "failed",
           detail: "Account Session was revoked",
           updatedAt: endedAt,
         });
-        hub?.publish("activity.updated", { activity: stripInternal(updated) });
+        hub?.publish("activity.updated", { activity: projectActivity(stripInternal(updated)) });
       }
     }
     expirePendingApprovalsForRun(store, hub, run.id);

@@ -32,6 +32,7 @@ function requested(input, overrides = {}) {
       account: { id: "acc_a", ownerAgentId: "agt_a", activeAgentId: "agt_a" },
       workspace: { hostId: "host_a", status: "ready" },
       input,
+      activityVisibility: "status-only",
     },
   };
 }

@@ -36,7 +36,7 @@
   display: grid;
   gap: var(--vera-space-sm);
   grid-area: header;
-  grid-template-columns: var(--vera-touch-target) auto minmax(0, 1fr) var(--vera-touch-target);
+  grid-template-columns: var(--vera-touch-target) auto minmax(0, 1fr) auto;
   min-width: 0;
   padding: 0 var(--vera-space-md);
   position: relative;
@@ -52,8 +52,20 @@
 }
 
 .vera-shell__leading,
+.vera-shell__observe,
 .vera-shell__settings {
   justify-content: center;
+}
+
+.vera-shell__actions {
+  align-items: center;
+  display: flex;
+  gap: var(--vera-space-xs);
+}
+
+.vera-shell__observe.is-active {
+  background: var(--vera-color-accent-soft);
+  color: var(--vera-color-accent);
 }
 
 .vera-shell__participants {
@@ -213,7 +225,7 @@
 @media (max-width: 480px) {
   .vera-shell__header {
     gap: var(--vera-space-xs);
-    grid-template-columns: var(--vera-touch-target) auto minmax(0, 1fr) var(--vera-touch-target);
+    grid-template-columns: var(--vera-touch-target) auto minmax(0, 1fr) auto;
     padding-inline: var(--vera-space-xs);
   }
 

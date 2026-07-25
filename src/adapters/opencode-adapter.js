@@ -66,6 +66,7 @@ function mapToolPart(part) {
   return {
     phase: "tool",
     label: part.tool || "tool",
+    summary: `${part.tool || "tool"} · ${state.status || "pending"}`,
     detail,
     toolStatus: state.status || "pending",
     callId: part.callID || part.id || null,
@@ -543,12 +544,15 @@ export function createOpencodeAdapter({ config }) {
           onActivity?.({
             phase: "error",
             label: "session-reset",
+            summary: "OpenCode 会话已重置",
             detail: resetDetail,
           });
         }
       }
 
       let cumulativeText = "";
+      const reasoningPartIds = new Set();
+      const reasoningText = new Map();
       let sawIdle = false;
       let cancelled = false;
       let settleResolve;
@@ -563,7 +567,18 @@ export function createOpencodeAdapter({ config }) {
         const data = event.data || {};
         switch (event.type) {
           case "message.part.delta":
-            if (data.field === "text" && data.delta) {
+            if (data.field === "text" && data.delta && reasoningPartIds.has(data.partID)) {
+              const current = reasoningText.get(data.partID) ?? "";
+              const detail = current.endsWith(data.delta) ? current : `${current}${data.delta}`;
+              reasoningText.set(data.partID, detail);
+              onActivity?.({
+                phase: "thinking",
+                label: "Thinking",
+                summary: "正在思考",
+                detail,
+                callId: data.partID,
+              });
+            } else if (data.field === "text" && data.delta) {
               cumulativeText += data.delta;
               onDelta?.(data.delta);
             }
@@ -571,12 +586,28 @@ export function createOpencodeAdapter({ config }) {
           case "message.part.updated": {
             const part = data.part || {};
             if (part.type === "tool") onActivity?.(mapToolPart(part));
+            if (part.type === "reasoning" && typeof part.id === "string") {
+              reasoningPartIds.add(part.id);
+              reasoningText.set(part.id, String(part.text ?? ""));
+              onActivity?.({
+                phase: "thinking",
+                label: "Thinking",
+                summary: "正在思考",
+                detail: String(part.text ?? ""),
+                callId: part.id,
+              });
+            }
             break;
           }
           case "session.status":
             // 反复 busy 用同一 callId 合并成一条 working activity，避免刷屏
             if (data.status?.type === "busy") {
-              onActivity?.({ phase: "working", label: "opencode", detail: "running", callId: `working-${sessionId}` });
+              onActivity?.({
+                phase: "thinking",
+                label: "OpenCode",
+                summary: "正在思考",
+                callId: `thinking-${sessionId}`,
+              });
             }
             break;
           case "session.idle":

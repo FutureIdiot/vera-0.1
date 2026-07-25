@@ -84,6 +84,7 @@ function requested(input, overrides = {}) {
       account: { id: "acc_a", ownerAgentId: "agt_a", activeAgentId: "agt_a" },
       workspace: { hostId: "host_a", status: "ready" },
       input,
+      activityVisibility: "status-only",
     },
   };
 }
@@ -241,4 +242,44 @@ test("a rejected output report prevents a completed terminal", async () => {
   assert.equal(calls.some((call) => call.method === "PATCH" && call.body?.status === "completed"), false);
   const failed = calls.find((call) => call.method === "PATCH" && call.body?.status === "failed");
   assert.deepEqual(failed.body.error, { code: "internal", message: "daemon execution failed" });
+});
+
+test("Activity detail is filtered in the daemon and a live visibility update only affects later events", async () => {
+  const event = requested(
+    { kind: "cli", sessionMode: "isolated", promptText: "work" },
+    { effectiveModel: "model_b" },
+  );
+  event.data.activityVisibility = "observed";
+  const visibilityUpdate = {
+    type: "run.activity-visibility.updated",
+    data: { runId: "run_a", activityVisibility: "status-only" },
+  };
+  const { client, calls } = fixture({
+    envelopes: [event, visibilityUpdate],
+    executor: async ({ onActivity }) => {
+      await onActivity({
+        phase: "thinking",
+        summary: "正在思考",
+        detail: "first public detail",
+        callId: "thinking-1",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await onActivity({
+        phase: "thinking",
+        summary: "继续思考",
+        detail: "must be discarded locally",
+        callId: "thinking-1",
+      });
+      return { content: "done" };
+    },
+  });
+  await client.start();
+  await client.wait();
+  await settle();
+
+  const activities = calls.filter((call) => call.url.endsWith("/activities"));
+  assert.equal(activities.length, 2);
+  assert.equal(activities[0].body.detail, "first public detail");
+  assert.equal(Object.hasOwn(activities[1].body, "detail"), false);
+  assert.equal(activities[1].body.summary, "继续思考");
 });

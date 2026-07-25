@@ -31,6 +31,9 @@ function validateRunEvent(data, current) {
   const account = object(data?.account, "account");
   const workspace = object(data?.workspace, "workspace");
   const input = object(data?.input, "input");
+  if (!["status-only", "observed"].includes(data?.activityVisibility)) {
+    throw new DaemonRunError("invalid_event", "run activity visibility is invalid");
+  }
   const mode = input.sessionMode;
   const models = current.runtime.runtimeCapabilities?.models ?? [current.runtime.model];
   if (!text(run.id, "run.id") || run.agentId !== current.agentId || run.accountId !== current.accountId ||
@@ -77,6 +80,7 @@ function safeRunError(error) {
 
 export function createDaemonRunHandler({
   identity, executor, request, getAccountSessionId, getTerminalReason,
+  activitySummaryMaxLength = 160,
 } = {}) {
   if (!identity || typeof request !== "function" || typeof getAccountSessionId !== "function" ||
       !(typeof executor === "function" || executor?.execute)) {
@@ -87,6 +91,31 @@ export function createDaemonRunHandler({
   const handledRuns = new Set();
   const approvalWaiters = new Map();
   const knownGenerations = new Map();
+
+  function safeActivity(activity, visibility) {
+    const source = activity && typeof activity === "object" && !Array.isArray(activity) ? activity : {};
+    const phase = typeof source.phase === "string" && source.phase.trim() ? source.phase.trim() : "working";
+    const label = typeof source.label === "string" && source.label.trim() ? source.label.trim() : phase;
+    const status = typeof source.toolStatus === "string" && source.toolStatus.trim()
+      ? ` · ${source.toolStatus.trim()}`
+      : "";
+    const fallback = `${label}${status}`;
+    const summary = String(source.summary || fallback)
+      .replace(/\s+/gu, " ")
+      .trim()
+      .slice(0, activitySummaryMaxLength) || fallback;
+    const projected = {
+      phase,
+      label,
+      summary,
+      ...(source.toolStatus == null ? {} : { toolStatus: source.toolStatus }),
+      ...(source.callId == null ? {} : { callId: source.callId }),
+    };
+    if (visibility === "observed" && typeof source.detail === "string" && source.detail) {
+      projected.detail = source.detail;
+    }
+    return projected;
+  }
 
   function report(runId, suffix, method, body) {
     return request(`/api/agent/runs/${encodeURIComponent(runId)}${suffix}`, { method, body });
@@ -112,7 +141,8 @@ export function createDaemonRunHandler({
     if (handledRuns.has(current.id)) return;
     handledRuns.add(current.id);
     const controller = new AbortController();
-    activeRuns.set(current.id, controller);
+    const active = { controller, activityVisibility: data.activityVisibility };
+    activeRuns.set(current.id, active);
     const assistantMessageIds = [];
     let reportTail = Promise.resolve();
     let reportError = null;
@@ -134,7 +164,17 @@ export function createDaemonRunHandler({
       if (created?.id) assistantMessageIds.push(created.id);
       return created ?? null;
     });
-    const onActivity = (activity) => enqueue(() => report(current.id, "/activities", "POST", activity));
+    const onActivity = (activity) => {
+      const projected = safeActivity(activity, active.activityVisibility);
+      return enqueue(async () => {
+        try {
+          return await report(current.id, "/activities", "POST", projected);
+        } catch (error) {
+          if (error?.code !== "forbidden" || !Object.hasOwn(projected, "detail")) throw error;
+          return report(current.id, "/activities", "POST", safeActivity(activity, "status-only"));
+        }
+      });
+    };
     const requestApproval = async (approvalRequest) => {
       const response = await report(current.id, "/approvals", "POST", {
         prompt: String(approvalRequest?.prompt ?? ""),
@@ -209,7 +249,16 @@ export function createDaemonRunHandler({
     }
     if (envelope?.type === "run.cancelled") {
       const runId = envelope.data?.runId ?? envelope.data?.run?.id;
-      activeRuns.get(runId)?.abort();
+      activeRuns.get(runId)?.controller.abort();
+      return true;
+    }
+    if (envelope?.type === "run.activity-visibility.updated") {
+      const runId = envelope.data?.runId;
+      const visibility = envelope.data?.activityVisibility;
+      const active = activeRuns.get(runId);
+      if (active && ["status-only", "observed"].includes(visibility)) {
+        active.activityVisibility = visibility;
+      }
       return true;
     }
     if (envelope?.type === "approval.answered") {
@@ -228,8 +277,8 @@ export function createDaemonRunHandler({
   async function terminate() {
     denyApprovals();
     const patches = [];
-    for (const [runId, controller] of activeRuns) {
-      controller.abort();
+    for (const [runId, active] of activeRuns) {
+      active.controller.abort();
       patches.push(report(runId, "", "PATCH", {
         status: "failed", error: safeRunError(new DaemonRunError("gateway_unreachable", "gateway unreachable")),
       }).catch(() => {}));

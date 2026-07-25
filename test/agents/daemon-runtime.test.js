@@ -33,7 +33,10 @@ async function fixture(run) {
   const dataPath = await mkdtemp(join(tmpdir(), "vera-daemon-runtime-"));
   const store = await createStore({ dataPath, debounceMs: 1 });
   const hub = createEventHub({ bufferSize: 100 });
-  const config = { agentDaemon: { tokensPath: join(dataPath, "tokens.json"), heartbeatIntervalMs: 15000 } };
+  const config = {
+    activity: { summaryMaxLength: 160, detailMaxLength: 2000 },
+    agentDaemon: { tokensPath: join(dataPath, "tokens.json"), heartbeatIntervalMs: 15000 },
+  };
   const controlService = createControlService({ store, hub, config });
   const setupRouter = createRouter();
   registerAgentRoutes(setupRouter, { store, controlService, agentStates: { list() { return []; } } });
@@ -112,7 +115,9 @@ test("daemon Run endpoints authenticate the current Session lease and delegate s
       ["POST", "/api/agent/runs/run_runtime/subagents", { task: "inspect" }, 201],
       ["POST", "/api/agent/runs/run_runtime/messages", { content: "hello" }, 201],
       ["POST", "/api/agent/runs/run_runtime/delta", { delta: "hel" }, 200],
-      ["POST", "/api/agent/runs/run_runtime/activities", { phase: "coding", callId: "call-1" }, 200],
+      ["POST", "/api/agent/runs/run_runtime/activities", {
+        phase: "coding", summary: "正在编码", callId: "call-1",
+      }, 200],
       ["POST", "/api/agent/runs/run_runtime/approvals", { prompt: "allow?", options: ["allow", "deny"] }, 201],
       ["PATCH", "/api/agent/runs/run_runtime", { status: "completed" }, 200],
       ["PUT", `/api/agent/compactions/ccj_runtime/targets/${agentId}`, {
@@ -151,6 +156,7 @@ test("daemon SSE is independently authenticated and dispatchRun is Account-direc
     const timers = [];
     const daemonRuntime = createDaemonRuntime({
       store, hub, config, controlService,
+      observation: { isVisibility: (value) => ["status-only", "observed"].includes(value) },
       setTimer(callback) { timers.push(callback); return callback; },
       clearTimer() {},
     });
@@ -177,9 +183,17 @@ test("daemon SSE is independently authenticated and dispatchRun is Account-direc
       accountId,
       event: { type: "approval.answered", data: { approvalId: "apr_runtime", answer: "allow" } },
     });
+    daemonRuntime.dispatchRun({
+      accountId,
+      event: {
+        type: "run.activity-visibility.updated",
+        data: { runId: "run_runtime", activityVisibility: "observed" },
+      },
+    });
     timers[0]();
     assert.match(frames.join(""), /"type":"run\.requested"/u);
     assert.match(frames.join(""), /"type":"approval\.answered"/u);
+    assert.match(frames.join(""), /"type":"run\.activity-visibility\.updated"/u);
     assert.match(frames.join(""), /"type":"agent\.heartbeat"/u);
     assert.throws(
       () => daemonRuntime.dispatchRun({
@@ -241,5 +255,54 @@ test("API main completion remains blocked until api-result history CAS succeeds"
     assert.equal(result.historyVersion, 1);
     const completed = await daemonRuntime.updateRun("run_runtime", { status: "completed" }, headers);
     assert.equal(completed.run.status, "completed");
+  });
+});
+
+test("gateway rejects Activity detail outside the observed private Space with zero lifecycle writes", async () => {
+  await fixture(async ({ store, hub, config, controlService, headers }) => {
+    const writes = [];
+    let visibility = "status-only";
+    const observation = {
+      isVisibility: (value) => ["status-only", "observed"].includes(value),
+      visibilityForRun: () => visibility,
+    };
+    const daemonRuntime = createDaemonRuntime({
+      store,
+      hub,
+      config,
+      controlService,
+      observation,
+      runLifecycle: {
+        upsertActivity(input) {
+          writes.push(input.input);
+          return { activity: input.input };
+        },
+      },
+    });
+    await assert.rejects(
+      daemonRuntime.upsertActivity("run_runtime", {
+        phase: "thinking",
+        summary: "正在思考",
+        detail: "provider public reasoning",
+        callId: "thinking-1",
+      }, headers),
+      (error) => error.code === "forbidden",
+    );
+    assert.deepEqual(writes, []);
+
+    const summaryOnly = await daemonRuntime.upsertActivity("run_runtime", {
+      phase: "thinking",
+      summary: "正在思考",
+      callId: "thinking-1",
+    }, headers);
+    assert.equal(summaryOnly.activity.detail, undefined);
+    visibility = "observed";
+    await daemonRuntime.upsertActivity("run_runtime", {
+      phase: "thinking",
+      summary: "正在思考",
+      detail: "provider public reasoning",
+      callId: "thinking-1",
+    }, headers);
+    assert.equal(writes.at(-1).detail, "provider public reasoning");
   });
 });

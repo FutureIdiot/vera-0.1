@@ -56,7 +56,14 @@ function requireAgent(store, agentId) {
 }
 
 
-export function createControlService({ store, config, memoryConfigService = null, agentStates = null, hub = null }) {
+export function createControlService({
+  store,
+  config,
+  memoryConfigService = null,
+  agentStates = null,
+  hub = null,
+  projectActivity = (activity) => activity,
+}) {
   const credentials = createAgentCredentialStore({ tokensPath: config.agentDaemon.tokensPath });
   const sessions = createAccountSessionService();
   const mutationTails = new Map();
@@ -74,7 +81,7 @@ export function createControlService({ store, config, memoryConfigService = null
 
   function revokeAccountSessionState(accountId) {
     sessions.invalidateAccountSessions(accountId);
-    releaseAccountExecutions(store, accountId, { hub });
+    releaseAccountExecutions(store, accountId, { hub, projectActivity });
     const timestamp = new Date().toISOString();
     const account = requireAccount(store, accountId);
     const updated = store.update("accounts", accountId, {

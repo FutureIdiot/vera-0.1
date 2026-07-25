@@ -305,6 +305,15 @@ function digestSuccess(proposals = []) {
 test("normal streaming with a valid existing session", async () => {
   stub.seedSession("ses_known");
   stub.setRunHandler(async ({ sessionId }) => {
+    stub.emit("message.part.updated", {
+      sessionID: sessionId,
+      part: {
+        id: "reason-1",
+        type: "reasoning",
+        text: "这是 provider 公开的推理。",
+        time: { start: 1 },
+      },
+    });
     stub.emit("message.part.delta", { sessionID: sessionId, field: "text", delta: "你好" });
     stub.emit("message.part.updated", {
       sessionID: sessionId,
@@ -339,6 +348,9 @@ test("normal streaming with a valid existing session", async () => {
   assert.equal(toolActivities[1].toolStatus, "completed");
   assert.equal(toolActivities[0].callId, "call-1");
   assert.equal(toolActivities[1].callId, "call-1");
+  const thinking = activities.find((activity) => activity.callId === "reason-1");
+  assert.equal(thinking.summary, "正在思考");
+  assert.equal(thinking.detail, "这是 provider 公开的推理。");
   assert.ok(!activities.some((a) => a.label === "session-reset"), "有效会话不应上报 session-reset");
 });
 

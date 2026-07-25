@@ -51,6 +51,7 @@ export function createDaemonRunScheduler({
   memoryRetrieval = null,
   memoryDigestScheduler = null,
   contextCompaction = null,
+  observation = null,
 } = {}) {
   if (!store || !hub || !config || !controlService || !daemonRuntime) {
     throw new Error("createDaemonRunScheduler requires store, hub, config, controlService, and daemonRuntime");
@@ -197,6 +198,7 @@ export function createDaemonRunScheduler({
             account: projectAccount(account),
             workspace: publicWorkspace(account.workspace),
             input,
+            activityVisibility: observation?.visibilityForSpace(space.id) ?? "status-only",
           },
         },
       });

@@ -54,6 +54,7 @@ export function recoverInterruptedRuns(store, { now = new Date().toISOString() }
       item.runId === run.id && ["pending", "running"].includes(item.toolStatus))) {
       store.update("activities", activity.id, {
         phase: "error",
+        summary: "Run 因 gateway 重启而中断",
         toolStatus: "failed",
         detail: "Run interrupted by gateway restart",
         updatedAt: timestamp,

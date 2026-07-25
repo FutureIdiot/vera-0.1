@@ -53,6 +53,7 @@ import { createMemoryTaskTransport } from "./memory/memory-task-transport.js";
 import { registerMemoryTaskRoutes } from "./memory/memory-task-routes.js";
 import { createGatewayUpdateControl } from "./core/gateway-updates.js";
 import { registerSystemUpdateRoutes } from "./api/system-update-routes.js";
+import { createObservationService, registerObservationRoutes } from "./spaces/observation.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
@@ -72,6 +73,12 @@ const hub = createEventHub({
   pingIntervalMs: config.sse.pingIntervalMs,
   initialSeq: seqWatermark > 0 ? seqWatermark + config.sse.bufferSize : 0,
   onSeqAdvance: (seq) => store.setEventSeqWatermark(seq),
+});
+let daemonRuntime = null;
+const observation = createObservationService({
+  store,
+  hub,
+  dispatchRunVisibility: ({ accountId, event }) => daemonRuntime?.dispatchRun({ accountId, event }),
 });
 const agentStates = createAgentStateTracker({ hub });
 const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
@@ -102,6 +109,7 @@ const controlService = createControlService({
   agentStates,
   memoryConfigService: memoryConfig,
   hub,
+  projectActivity: observation.projectActivity,
 });
 const memory = createMemoryVault({
   vaultPath: config.memory.vaultPath,
@@ -246,14 +254,16 @@ const daemonRunLifecycle = createDaemonRunLifecycle({
   agentStates,
   memoryDigestScheduler,
   contextCompaction,
+  observation,
 });
-const daemonRuntime = createDaemonRuntime({
+daemonRuntime = createDaemonRuntime({
   store,
   hub,
   agentStates,
   controlService,
   config,
   runLifecycle: daemonRunLifecycle,
+  observation,
 });
 const daemonScheduler = createDaemonRunScheduler({
   store,
@@ -265,6 +275,7 @@ const daemonScheduler = createDaemonRunScheduler({
   memoryRetrieval,
   memoryDigestScheduler,
   contextCompaction,
+  observation,
 });
 
 const router = createRouter();
@@ -277,6 +288,7 @@ router.get("/api/bootstrap", ({ res }) => {
     accounts: listAccounts(store),
     spaces: listSpaces(store), // 默认只返活跃（api-contract.md 260）
     agentStates: agentStates.list(),
+    observation: observation.get(),
     seq: hub.currentSeq(),
   });
 });
@@ -299,8 +311,9 @@ registerMemoryTaskRoutes(router, {
 });
 registerSpaceRoutes(router, {
   store, hub, config, daemonScheduler, daemonRuntime, daemonRunLifecycle,
-  memoryDigestScheduler, contextCompaction, memory, files,
+  memoryDigestScheduler, contextCompaction, memory, files, observation,
 });
+registerObservationRoutes(router, { observation });
 registerFilesRoutes(router, { files, hub });
 registerMemoryRoutes(router, {
   memory,

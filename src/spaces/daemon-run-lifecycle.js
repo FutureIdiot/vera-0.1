@@ -36,6 +36,7 @@ export function createDaemonRunLifecycle({
   agentStates = null,
   memoryDigestScheduler = null,
   contextCompaction = null,
+  observation = null,
 } = {}) {
   if (!store || !hub || !config) throw new Error("createDaemonRunLifecycle requires store, hub, and config");
   const outputs = new Map();
@@ -54,6 +55,7 @@ export function createDaemonRunLifecycle({
         account: { ...account, name: run.accountNameSnapshot ?? account.name },
         effectiveModel: run.effectiveModel,
         delegated: false,
+        projectActivity: observation?.projectActivity,
       });
       outputs.set(run.id, output);
     }
@@ -163,6 +165,7 @@ export function createDaemonRunLifecycle({
           account: projectAccount(account),
           workspace: workspaceForDaemon(account.workspace),
           input: inputEnvelope,
+          activityVisibility: observation?.visibilityForSpace(parent.spaceId) ?? "status-only",
         },
       },
     });

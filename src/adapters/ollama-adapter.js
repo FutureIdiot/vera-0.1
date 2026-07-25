@@ -204,6 +204,12 @@ export function createOllamaAdapter({ config }) {
     const control = requestControl(ctx.signal, watchdogMs, shutdownController.signal);
     let response;
     try {
+      ctx.onActivity?.({
+        phase: "thinking",
+        label: "Ollama",
+        summary: "正在思考",
+        callId: "thinking",
+      });
       response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/x-ndjson" },

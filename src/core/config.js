@@ -22,6 +22,7 @@ const DEFAULTS = {
     maxLength: 800,
   },
   activity: {
+    summaryMaxLength: 160,
     detailMaxLength: 2000,
   },
   mock: {
@@ -43,6 +44,11 @@ const DEFAULTS = {
     digestTimeoutMs: 5 * 60 * 1000,
     dreamTimeoutMs: 10 * 60 * 1000,
     maxInputBytes: 12000,
+  },
+  claudeCode: {
+    binary: "claude",
+    watchdogMs: 30 * 60 * 1000,
+    permissionMode: "auto",
   },
   ollama: {
     watchdogMs: 30 * 60 * 1000,
@@ -222,6 +228,7 @@ export function loadConfig(env = process.env) {
       maxLength: num(env.VERA_BUBBLE_MAX_LENGTH, DEFAULTS.bubbles.maxLength),
     },
     activity: {
+      summaryMaxLength: num(env.VERA_ACTIVITY_SUMMARY_MAX_LENGTH, DEFAULTS.activity.summaryMaxLength),
       detailMaxLength: num(env.VERA_ACTIVITY_DETAIL_MAX_LENGTH, DEFAULTS.activity.detailMaxLength),
     },
     mock: {
@@ -252,6 +259,15 @@ export function loadConfig(env = process.env) {
         DEFAULTS.codex.dreamTimeoutMs,
       ),
       maxInputBytes: positiveInt(env.VERA_CODEX_MAX_INPUT_BYTES, DEFAULTS.codex.maxInputBytes),
+    },
+    claudeCode: {
+      binary: env.VERA_CLAUDE_CODE_BIN || DEFAULTS.claudeCode.binary,
+      watchdogMs: positiveInt(env.VERA_CLAUDE_CODE_WATCHDOG_MS, DEFAULTS.claudeCode.watchdogMs),
+      permissionMode: ["acceptEdits", "auto", "manual", "dontAsk", "plan"].includes(
+        env.VERA_CLAUDE_CODE_PERMISSION_MODE,
+      )
+        ? env.VERA_CLAUDE_CODE_PERMISSION_MODE
+        : DEFAULTS.claudeCode.permissionMode,
     },
     ollama: {
       watchdogMs: positiveInt(env.VERA_OLLAMA_WATCHDOG_MS, DEFAULTS.ollama.watchdogMs),

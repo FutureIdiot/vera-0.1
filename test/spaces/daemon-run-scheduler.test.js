@@ -11,7 +11,7 @@ import { createDaemonRunScheduler } from "../../src/spaces/daemon-run-scheduler.
 
 const CONFIG = {
   bubbles: { boundaryPattern: "\\n\\s*\\n", minLength: 1, maxLength: 800 },
-  activity: { detailMaxLength: 2000 },
+  activity: { summaryMaxLength: 160, detailMaxLength: 2000 },
   viewCompiler: {
     groupDeltaMaxMessages: 20,
     groupDeltaMaxChars: 4000,
@@ -136,6 +136,7 @@ for (const kind of ["cli", "api"]) {
       assert.equal(dispatch.event.type, "run.requested");
       assert.equal(dispatch.event.data.input.kind, kind);
       assert.equal(dispatch.event.data.input.sessionMode, "main");
+      assert.equal(dispatch.event.data.activityVisibility, "status-only");
       assert.equal(dispatch.event.data.run.delegated, false);
       assert.equal("delegationContext" in dispatch.event.data, false);
       assert.equal(JSON.stringify(dispatch).includes("must-not-cross-wire"), false);

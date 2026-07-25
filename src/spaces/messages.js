@@ -49,7 +49,7 @@ function shouldRespond(seat, message) {
   return false;
 }
 
-function publishOfflineActivity({ store, hub, space, spaceSession, account }) {
+function publishOfflineActivity({ store, hub, space, spaceSession, account, observation }) {
   const timestamp = new Date().toISOString();
   const activity = store.insert("activities", {
     id: newActivityId(),
@@ -60,17 +60,20 @@ function publishOfflineActivity({ store, hub, space, spaceSession, account }) {
     agentId: null,
     phase: "error",
     label: "agent-offline",
+    summary: `${account.name} 当前离线，已跳过`,
     detail: `${account.name} Account当前离线，已跳过此条`,
     toolStatus: null,
     createdAt: timestamp,
     updatedAt: timestamp,
   });
-  hub.publish("activity.created", { activity: stripInternal(activity) });
+  hub.publish("activity.created", {
+    activity: observation?.projectActivity(stripInternal(activity)) ?? stripInternal(activity),
+  });
   return activity;
 }
 
 export function postMessage({
-  store, hub, daemonScheduler, memoryDigestScheduler, files, spaceId, body,
+  store, hub, daemonScheduler, memoryDigestScheduler, files, observation, spaceId, body,
 }) {
   const space = getSpaceOrThrow(store, spaceId);
   const content = typeof body?.content === "string" ? body.content : "";
@@ -115,7 +118,7 @@ export function postMessage({
     const isOnlineOwner = account.presence === "online" && activeAgent &&
       activeAgent.id === account.ownerAgentId;
     if (!isOnlineOwner) {
-      if (addressed) publishOfflineActivity({ store, hub, space, spaceSession, account });
+      if (addressed) publishOfflineActivity({ store, hub, space, spaceSession, account, observation });
       continue;
     }
     const agent = activeAgent;

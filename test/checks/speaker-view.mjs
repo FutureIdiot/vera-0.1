@@ -80,7 +80,7 @@ export async function run(ctx) {
     assert(/回声第 \d+ 次/.test(afterSig), `expected echo counter after agent signature, got: ${afterSig}`);
   });
 
-  await check("l.2 Activity 不进 prompt：agentB echo reply 不含 '5 passed'，timeline 有该 activity", async () => {
+  await check("l.2 Activity 不进 prompt：正文不含tool输出，未关注timeline只保留summary", async () => {
     assert(l1AgentBReplyContent, "l.1 must have captured agentB reply content first");
     assert(
       !l1AgentBReplyContent.includes("5 passed"),
@@ -89,10 +89,11 @@ export async function run(ctx) {
 
     const tl = await httpRequest("GET", `/api/spaces/${l1Space.id}/timeline?limit=500`);
     assertEqual(tl.status, 200);
-    const hasActivity = tl.json.items.some(
-      (i) => i.itemType === "activity" && (i.detail ?? "").includes("5 passed"),
+    const activity = tl.json.items.find(
+      (item) => item.itemType === "activity" && item.phase === "tool" && item.summary === "bash · completed",
     );
-    assert(hasActivity, `timeline should contain an activity with '5 passed' detail (positive control)`);
+    assert(activity, "timeline should retain the safe completed tool summary");
+    assertEqual(activity.detail, null, "status-only timeline must not expose tool output detail");
   });
 
   await check("l.3 常驻索引块仅首次注入", async () => {

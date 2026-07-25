@@ -72,6 +72,7 @@ function requestedApiRun() {
       account: { id: "acc_a", ownerAgentId: "agt_a", activeAgentId: "agt_a" },
       workspace: { hostId: "host_a", status: "ready" },
       input: { kind: "api", sessionMode: "main", messages: [], historyVersion: 0 },
+      activityVisibility: "status-only",
     },
   };
 }

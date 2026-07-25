@@ -5,6 +5,7 @@ import { createDaemonRunResults } from "./daemon-run-results.js";
 const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const DIRECTED_DAEMON_EVENTS = new Set([
   "run.requested",
+  "run.activity-visibility.updated",
   "approval.answered",
   "agent-session.compact.requested",
   "account.upserted",
@@ -35,6 +36,7 @@ export function createDaemonRuntime({
   controlService,
   config = {},
   runLifecycle = {},
+  observation = null,
   setTimer = setInterval,
   clearTimer = clearInterval,
 } = {}) {
@@ -153,6 +155,13 @@ export function createDaemonRuntime({
     if (event.type === "run.requested" && event?.data?.run?.accountId !== accountId) {
       invalid("dispatchRun requires a matching run.requested Account");
     }
+    if (event.type === "run.activity-visibility.updated") {
+      const run = store.find("runs", event?.data?.runId);
+      if (!run || run.accountId !== accountId || run.status !== "running" ||
+          !observation?.isVisibility?.(event?.data?.activityVisibility)) {
+        invalid("dispatchRun requires a valid running Run visibility update");
+      }
+    }
     return dispatchEvent({ accountId, event });
   }
 
@@ -214,9 +223,16 @@ export function createDaemonRuntime({
       if (typeof body.delta !== "string") invalid("delta must be a string");
       if (body.paragraphEnd !== undefined && typeof body.paragraphEnd !== "boolean") invalid("paragraphEnd must be boolean");
     } else if (kind === "upsertActivity") {
-      strictObject(body, { allowed: ["phase", "label", "detail", "toolStatus", "callId"], required: ["phase"] });
+      strictObject(body, {
+        allowed: ["phase", "label", "summary", "detail", "toolStatus", "callId"],
+        required: ["phase", "summary"],
+      });
       requiredText(body.phase, "phase");
-      for (const field of ["label", "detail", "toolStatus", "callId"]) {
+      requiredText(body.summary, "summary");
+      if (/[\r\n]/u.test(body.summary) || body.summary.length > (config.activity?.summaryMaxLength ?? 160)) {
+        invalid("summary must be a bounded single line");
+      }
+      for (const field of ["label", "summary", "detail", "toolStatus", "callId"]) {
         if (body[field] !== undefined && body[field] !== null && typeof body[field] !== "string") {
           invalid(`${field} must be a string or null`);
         }
@@ -229,6 +245,10 @@ export function createDaemonRuntime({
       }
     }
     const authority = await runAuthority(runId, headers);
+    if (kind === "upsertActivity" && body.detail &&
+        observation?.visibilityForRun?.(authority.run) !== "observed") {
+      throw new ApiError("forbidden", "Activity detail is only accepted for the observed private Space");
+    }
     return invoke(kind, {
       ...authority,
       input: structuredClone(body),

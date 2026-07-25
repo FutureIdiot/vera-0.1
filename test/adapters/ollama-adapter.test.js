@@ -184,7 +184,12 @@ test("API messages are one-shot, legacy context fields are ignored, and oversize
   });
   const oneShotResult = await adapter.run(oneShot.ctx);
   assert.deepEqual(oneShotResult, { content: "ok" });
-  assert.deepEqual(oneShot.activities, []);
+  assert.deepEqual(oneShot.activities, [{
+    phase: "thinking",
+    label: "Ollama",
+    summary: "正在思考",
+    callId: "thinking",
+  }]);
   assert.deepEqual(stub.requests[0].body.messages, [
     { role: "user", content: "new2" },
   ]);

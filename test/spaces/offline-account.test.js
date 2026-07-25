@@ -108,6 +108,7 @@ test("direct @ skips an offline Account, writes one error Activity, and is never
         agentId: null,
         phase: "error",
         label: "agent-offline",
+        summary: "Offline 当前离线，已跳过",
         detail: "Offline Account当前离线，已跳过此条",
         toolStatus: null,
         createdAt: store.list("activities")[0].createdAt,

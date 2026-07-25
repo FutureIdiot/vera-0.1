@@ -65,7 +65,14 @@ export function createMockAdapter({ chunkDelayMs = 30, approvalTimeoutMs = 15000
       const paragraph1 = `回声第 ${count} 次：${prompt.text}`;
       const callId = "mock-bash-1";
 
-      onActivity({ phase: "tool", label: "bash", detail: "npm test", toolStatus: "pending", callId });
+      onActivity({
+        phase: "tool",
+        label: "bash",
+        summary: "bash · pending",
+        detail: "npm test",
+        toolStatus: "pending",
+        callId,
+      });
       await delay(chunkDelayMs, signal);
 
       const half = Math.ceil(paragraph1.length / 2);
@@ -78,6 +85,7 @@ export function createMockAdapter({ chunkDelayMs = 30, approvalTimeoutMs = 15000
       onActivity({
         phase: "tool",
         label: "bash",
+        summary: "bash · completed",
         detail: "npm test\n5 passed",
         toolStatus: "completed",
         callId,

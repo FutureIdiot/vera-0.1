@@ -103,7 +103,8 @@ test("chat uses non-interactive exec, CAS-persists provider binding, resumes, an
   assert.equal(firstResult.content, "CODEX_CHAT_OK");
   assert.deepEqual(first.deltas, ["CODEX_CHAT_OK"]);
   assert.deepEqual(first.persisted, [{ providerState: { threadId: "thr_fake_1" }, ifVersion: null }]);
-  assert.equal(first.activities[0].label, "command_execution");
+  assert.equal(first.activities.find((item) => item.phase === "thinking")?.summary, "正在思考");
+  assert.equal(first.activities.find((item) => item.phase === "tool")?.label, "command_execution");
   assert.deepEqual(firstResult, {
     content: "CODEX_CHAT_OK",
     providerBinding: { version: 1, providerState: { threadId: "thr_fake_1" } },
@@ -132,7 +133,7 @@ test("invalid binding and explicit missing thread rotate, while ordinary provide
     },
   });
   const invalidResult = await adapter.run(invalid.ctx);
-  assert.equal(invalid.activities[0].label, "session-reset");
+  assert.equal(invalid.activities.find((item) => item.label === "session-reset")?.summary, "Codex 会话已重置");
   assert.deepEqual(invalid.rotations, [{ reason: "invalid" }]);
   assert.deepEqual(invalid.persisted, [{ providerState: { threadId: "thr_fake_1" }, ifVersion: null }]);
   assert.equal("sessionState" in invalidResult, false);
@@ -152,8 +153,8 @@ test("invalid binding and explicit missing thread rotate, while ordinary provide
   };
   const result = await adapter.run(stale.ctx);
   assert.equal(result.content, "CODEX_CHAT_OK");
-  assert.equal(stale.activities[0].label, "session-reset");
-  assert.deepEqual(resetOrder, [
+  assert.equal(stale.activities.find((item) => item.label === "session-reset")?.summary, "Codex 会话已重置");
+  assert.deepEqual(resetOrder.filter((item) => item.type === "rotate" || item.label === "session-reset"), [
     { type: "activity", label: "session-reset" },
     { type: "rotate", reason: { reason: "missing" } },
   ]);
@@ -174,7 +175,7 @@ test("invalid binding and explicit missing thread rotate, while ordinary provide
     },
   });
   await assert.rejects(() => adapter.run(failed.ctx), (error) => error.code === "provider_error" && !error.message.includes("secret"));
-  assert.equal(failed.activities.length, 0);
+  assert.equal(failed.activities.every((item) => item.phase === "thinking"), true);
   assert.deepEqual(ordinaryRotateReasons, []);
 });
 
