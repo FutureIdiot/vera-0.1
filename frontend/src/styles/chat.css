@@ -77,22 +77,30 @@
   transition: border-color var(--vera-transition-fast), box-shadow var(--vera-transition-fast);
 }
 
+.vera-bubble--has-tail .vera-bubble__surface {
+  box-shadow: none;
+}
+
 .vera-bubble--agent.vera-bubble--group-first .vera-bubble__surface {
   border-radius:
     var(--vera-bubble-radius)
     var(--vera-bubble-radius)
-    var(--vera-bubble-corner-tight)
+    var(--vera-bubble-radius)
     var(--vera-bubble-corner-tight);
 }
 
 .vera-bubble--agent.vera-bubble--group-middle .vera-bubble__surface {
-  border-radius: var(--vera-bubble-corner-tight);
+  border-radius:
+    var(--vera-bubble-corner-tight)
+    var(--vera-bubble-radius)
+    var(--vera-bubble-radius)
+    var(--vera-bubble-corner-tight);
 }
 
 .vera-bubble--agent.vera-bubble--group-last .vera-bubble__surface {
   border-radius:
     var(--vera-bubble-corner-tight)
-    var(--vera-bubble-corner-tight)
+    var(--vera-bubble-radius)
     var(--vera-bubble-radius)
     var(--vera-bubble-radius);
 }
@@ -112,14 +120,14 @@
 .vera-bubble--agent.vera-bubble--has-tail .vera-bubble__surface::before {
   background: var(--vera-color-bubble-agent-bg);
   border-bottom-right-radius: var(--vera-bubble-tail-radius);
-  left: calc(var(--vera-bubble-tail-extension) * -1);
+  left: calc((var(--vera-bubble-tail-extension) + var(--vera-border-width)) * -1);
   width: var(--vera-bubble-tail-size);
 }
 
 .vera-bubble--agent.vera-bubble--has-tail .vera-bubble__surface::after {
   background: var(--vera-color-background);
   border-bottom-right-radius: var(--vera-bubble-tail-radius);
-  left: calc(var(--vera-bubble-tail-cutout-width) * -1);
+  left: calc((var(--vera-bubble-tail-cutout-width) + var(--vera-border-width)) * -1);
   width: var(--vera-bubble-tail-cutout-width);
 }
 
@@ -127,6 +135,30 @@
   background: linear-gradient(135deg, var(--vera-color-bubble-user-bg), var(--vera-color-bubble-user-end));
   border-radius: var(--vera-bubble-radius);
   color: var(--vera-color-bubble-user-text);
+}
+
+.vera-bubble--user.vera-bubble--group-first .vera-bubble__surface {
+  border-radius:
+    var(--vera-bubble-radius)
+    var(--vera-bubble-radius)
+    var(--vera-bubble-corner-tight)
+    var(--vera-bubble-radius);
+}
+
+.vera-bubble--user.vera-bubble--group-middle .vera-bubble__surface {
+  border-radius:
+    var(--vera-bubble-radius)
+    var(--vera-bubble-corner-tight)
+    var(--vera-bubble-corner-tight)
+    var(--vera-bubble-radius);
+}
+
+.vera-bubble--user.vera-bubble--group-last .vera-bubble__surface {
+  border-radius:
+    var(--vera-bubble-radius)
+    var(--vera-bubble-corner-tight)
+    var(--vera-bubble-radius)
+    var(--vera-bubble-radius);
 }
 
 .vera-bubble--user.vera-bubble--has-tail .vera-bubble__surface::before,
@@ -140,14 +172,14 @@
 .vera-bubble--user.vera-bubble--has-tail .vera-bubble__surface::before {
   background: var(--vera-color-bubble-user-end);
   border-bottom-left-radius: var(--vera-bubble-tail-radius);
-  right: calc(var(--vera-bubble-tail-extension) * -1);
+  right: calc((var(--vera-bubble-tail-extension) + var(--vera-border-width)) * -1);
   width: var(--vera-bubble-tail-size);
 }
 
 .vera-bubble--user.vera-bubble--has-tail .vera-bubble__surface::after {
   background: var(--vera-color-background);
   border-bottom-left-radius: var(--vera-bubble-tail-radius);
-  right: calc(var(--vera-bubble-tail-cutout-width) * -1);
+  right: calc((var(--vera-bubble-tail-cutout-width) + var(--vera-border-width)) * -1);
   width: var(--vera-bubble-tail-cutout-width);
 }
 
@@ -158,6 +190,10 @@
 .vera-bubble.is-selected .vera-bubble__surface {
   border-color: color-mix(in srgb, var(--vera-color-accent), transparent 45%);
   box-shadow: var(--vera-shadow-sm), 0 0 0 var(--vera-border-width) var(--vera-color-accent-soft);
+}
+
+.vera-bubble--has-tail.is-selected .vera-bubble__surface {
+  box-shadow: none;
 }
 
 .vera-bubble__author {
@@ -301,12 +337,108 @@
   background: var(--vera-color-activity-bg);
   border: var(--vera-border-width) solid var(--vera-color-activity-border);
   border-radius: var(--vera-control-radius);
-  border-top-left-radius: var(--vera-bubble-corner-tight);
   color: var(--vera-color-activity-text);
-  font-family: var(--vera-font-family-mono);
   font-size: var(--vera-font-size-small);
+  max-width: var(--vera-bubble-max-width);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.vera-activity--thinking {
+  background: var(--vera-color-activity-thinking-bg);
+  border-color: var(--vera-color-activity-thinking-border);
+}
+
+.vera-activity--tool {
+  background: var(--vera-color-activity-tool-bg);
+  border-color: var(--vera-color-activity-tool-border);
+}
+
+.vera-activity__header {
+  align-items: center;
+  display: flex;
+  gap: var(--vera-space-sm);
+  min-width: 0;
+  padding: var(--vera-space-xs) var(--vera-space-sm);
+}
+
+.vera-activity__toggle {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font: inherit;
+  font-weight: var(--vera-font-weight-semibold);
+  gap: var(--vera-space-2xs);
+  margin: 0;
+  padding: var(--vera-space-xs);
+}
+
+.vera-activity--thinking .vera-activity__toggle {
+  color: var(--vera-color-activity-thinking-label);
+}
+
+.vera-activity--tool .vera-activity__toggle {
+  color: var(--vera-color-activity-tool-label);
+}
+
+.vera-activity__toggle:disabled {
+  cursor: default;
+}
+
+.vera-activity__toggle:not(:disabled) {
+  cursor: pointer;
+}
+
+.vera-activity__toggle .vera-vector-icon {
+  height: var(--vera-icon-size);
+  transition: transform var(--vera-transition-fast);
+  width: var(--vera-icon-size);
+}
+
+.vera-activity:not(.is-expandable) .vera-activity__toggle .vera-vector-icon {
+  display: none;
+}
+
+.vera-activity.is-expanded .vera-activity__toggle .vera-vector-icon {
+  transform: rotate(180deg);
+}
+
+.vera-activity__summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vera-activity__detail {
+  background: var(--vera-color-activity-detail-bg);
+  border-top: var(--vera-border-width) solid currentColor;
+  font-family: var(--vera-font-family);
+  line-height: var(--vera-line-height-base);
+  max-height: var(--vera-activity-detail-max-height);
+  overflow: auto;
+  overflow-wrap: anywhere;
   padding: var(--vera-space-sm) var(--vera-space-md);
+  scrollbar-width: thin;
   white-space: pre-wrap;
+}
+
+.vera-activity--tool .vera-activity__detail {
+  font-family: var(--vera-font-family-mono);
+}
+
+.vera-activity__detail::-webkit-scrollbar {
+  height: var(--vera-scrollbar-width);
+  width: var(--vera-scrollbar-width);
+}
+
+.vera-activity__detail::-webkit-scrollbar-thumb {
+  background: var(--vera-color-activity-border);
+  border-radius: var(--vera-control-radius);
 }
 
 .vera-approval {
@@ -437,7 +569,7 @@
 }
 
 .vera-composer__input {
-  align-self: center;
+  align-self: end;
   background: transparent;
   border: 0;
   color: var(--vera-color-text);
@@ -447,7 +579,10 @@
   min-width: 0;
   outline: 0;
   overflow-y: auto;
-  padding: var(--vera-space-sm) var(--vera-space-xs);
+  padding:
+    calc(var(--vera-space-sm) + var(--vera-composer-text-optical-offset))
+    var(--vera-space-xs)
+    calc(var(--vera-space-sm) - var(--vera-composer-text-optical-offset));
   resize: none;
 }
 

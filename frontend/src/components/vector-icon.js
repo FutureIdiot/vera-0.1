@@ -14,6 +14,9 @@ const ICONS = {
   check: [
     ["path", { d: "M5 12.5l4 4L19 7" }],
   ],
+  "chevron-down": [
+    ["path", { d: "M7 10l5 5 5-5" }],
+  ],
   copy: [
     ["rect", { x: "8", y: "8", width: "11", height: "11", rx: "2" }],
     ["path", { d: "M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2" }],

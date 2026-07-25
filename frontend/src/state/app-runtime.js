@@ -79,6 +79,8 @@ export function createAppRuntime({
       bootstrap.agentStates = index === -1
         ? [...bootstrap.agentStates, state]
         : bootstrap.agentStates.map((candidate, candidateIndex) => candidateIndex === index ? state : candidate);
+    } else if (envelope.type === "observation.updated" && envelope.data?.observation) {
+      bootstrap.observation = envelope.data.observation;
     }
   }
 

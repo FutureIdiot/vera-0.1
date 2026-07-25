@@ -35,6 +35,13 @@
   --vera-color-activity-bg: var(--vera-color-surface-soft);
   --vera-color-activity-text: var(--vera-color-muted-text);
   --vera-color-activity-border: var(--vera-color-border);
+  --vera-color-activity-thinking-bg: color-mix(in srgb, var(--vera-color-warning), var(--vera-color-surface) 90%);
+  --vera-color-activity-thinking-border: color-mix(in srgb, var(--vera-color-warning), transparent 62%);
+  --vera-color-activity-thinking-label: var(--vera-color-warning);
+  --vera-color-activity-tool-bg: color-mix(in srgb, var(--vera-color-muted-text), var(--vera-color-surface) 90%);
+  --vera-color-activity-tool-border: color-mix(in srgb, var(--vera-color-muted-text), transparent 58%);
+  --vera-color-activity-tool-label: var(--vera-color-muted-text);
+  --vera-color-activity-detail-bg: color-mix(in srgb, var(--vera-color-background), transparent 38%);
   --vera-color-approval-bg: var(--vera-color-warning-soft);
   --vera-color-approval-border: var(--vera-color-warning);
   --vera-color-approval-answered-bg: var(--vera-color-surface);
@@ -49,6 +56,7 @@
   --vera-font-size-small: 12px;
   --vera-font-size-tiny: 10px;
   --vera-font-size-large: 18px;
+  --vera-font-weight-semibold: 600;
   --vera-line-height-base: 1.55;
 
   --vera-bubble-radius-phone: 16px;
@@ -79,6 +87,8 @@
   --vera-bubble-tail-radius: 16px;
   --vera-composer-height: 64px;
   --vera-composer-input-max-height: 160px;
+  --vera-activity-detail-max-height: 192px;
+  --vera-composer-text-optical-offset: 2px;
   --vera-topbar-height: 64px;
   --vera-touch-target: 44px;
   --vera-icon-size: 20px;

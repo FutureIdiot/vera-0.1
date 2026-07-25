@@ -18,23 +18,31 @@ function accountRunKey(item) {
   return `${item.author.accountId}\u0000${item.runId}`;
 }
 
+function messageGroupKey(item) {
+  if (item?.itemType !== "message") return null;
+  if (item.author?.type === "user") return "user";
+  const accountKey = accountRunKey(item);
+  return accountKey ? `account\u0000${accountKey}` : null;
+}
+
 export function resolveMessageGrouping(items, index, { isGroupChat = false } = {}) {
   const item = items[index];
-  const key = accountRunKey(item);
   const isAccount = item?.itemType === "message" && item.author?.type === "account";
-  if (!isAccount) {
+  const isUser = item?.itemType === "message" && item.author?.type === "user";
+  if (!isAccount && !isUser) {
     return { position: "solo", showAuthor: false, showAvatar: false, showTail: false };
   }
 
-  const joinsPrevious = Boolean(key && accountRunKey(items[index - 1]) === key);
-  const joinsNext = Boolean(key && accountRunKey(items[index + 1]) === key);
+  const key = messageGroupKey(item);
+  const joinsPrevious = Boolean(key && messageGroupKey(items[index - 1]) === key);
+  const joinsNext = Boolean(key && messageGroupKey(items[index + 1]) === key);
   const position = joinsPrevious
     ? (joinsNext ? "middle" : "last")
     : (joinsNext ? "first" : "solo");
   return {
     position,
-    showAuthor: isGroupChat && !joinsPrevious,
-    showAvatar: !joinsNext,
+    showAuthor: isAccount && isGroupChat && !joinsPrevious,
+    showAvatar: isAccount && !joinsNext,
     showTail: !joinsNext,
   };
 }
@@ -168,7 +176,7 @@ export function applyMessageBubble(el, item, ctx = {}) {
     position: "solo",
     showAuthor: false,
     showAvatar: !isUser,
-    showTail: !isUser,
+    showTail: true,
   };
   ensureStructure(el);
   el.className = [
@@ -177,7 +185,7 @@ export function applyMessageBubble(el, item, ctx = {}) {
     `vera-bubble--${isUser ? "user" : "agent"}`,
     `vera-bubble--group-${grouping.position}`,
     streaming ? "vera-bubble--streaming" : "",
-    isUser || grouping.showTail ? "vera-bubble--has-tail" : "",
+    grouping.showTail ? "vera-bubble--has-tail" : "",
   ].filter(Boolean).join(" ");
   el.dataset.messageId = item.id;
   el.dataset.groupPosition = grouping.position;

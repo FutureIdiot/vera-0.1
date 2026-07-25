@@ -206,6 +206,38 @@ test("space-session.created advances the canonical active session pointer", asyn
   runtime.close();
 });
 
+test("observation.updated keeps the shared process-visibility projection current", async () => {
+  const sources = [];
+  const platform = {
+    async getGatewayUrl() { return "https://vera.test"; },
+    async fetch() {
+      return jsonResponse({
+        agents: [],
+        accounts: [],
+        spaces: [],
+        agentStates: [],
+        observation: { observedSpaceId: null, revision: 0 },
+        seq: 1,
+      });
+    },
+    createEventSource(url) {
+      const source = { url, close() {} };
+      sources.push(source);
+      return source;
+    },
+  };
+  const runtime = createAppRuntime({ platform });
+  await runtime.start();
+  await flushAsyncWork();
+  sources[0].onmessage({ data: JSON.stringify({
+    seq: 2,
+    type: "observation.updated",
+    data: { observation: { observedSpaceId: "spc_1", revision: 1 } },
+  }) });
+  assert.deepEqual(runtime.getBootstrap().observation, { observedSpaceId: "spc_1", revision: 1 });
+  runtime.close();
+});
+
 test("local Space merges and presence events update the canonical bootstrap projection", async () => {
   const sources = [];
   const platform = {

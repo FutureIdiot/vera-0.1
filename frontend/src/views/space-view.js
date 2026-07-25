@@ -42,6 +42,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
   let loadingOlder = false;
   let preserveFullRenderScroll = false;
   let activeCompactionJobId = null;
+  let observation = null;
 
   root.dataset.routeScope = "chat";
 
@@ -93,6 +94,9 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
       isGroupChat: (space?.seats?.length ?? 0) > 1,
     }),
   });
+  const activityContext = () => ({
+    canExpand: (space?.seats?.length ?? 0) === 1 && observation?.observedSpaceId === space?.id,
+  });
 
   async function handleAnswer(approvalId, answer) {
     try {
@@ -114,14 +118,14 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
 
   function renderItem(item, items, index) {
     if (item.itemType === "message") return renderMessageBubble(item, messageContext(items, index));
-    if (item.itemType === "activity") return renderActivity(item);
+    if (item.itemType === "activity") return renderActivity(item, activityContext());
     if (item.itemType === "approval") return renderApprovalCard(item, { onAnswer: handleAnswer });
     return null;
   }
 
   function applyItem(element, item, items, index) {
     if (item.itemType === "message") return applyMessageBubble(element, item, messageContext(items, index));
-    if (item.itemType === "activity") return applyActivity(element, item);
+    if (item.itemType === "activity") return applyActivity(element, item, activityContext());
     if (item.itemType === "approval") return applyApprovalCard(element, item, { onAnswer: handleAnswer });
   }
 
@@ -135,6 +139,14 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
   function refreshAllMessageBubbles(items = store.getOrderedItems()) {
     for (let index = 0; index < items.length; index += 1) {
       refreshMessageBubble(items, index);
+    }
+  }
+
+  function refreshAllActivities(items = store.getOrderedItems()) {
+    for (const item of items) {
+      if (item.itemType !== "activity") continue;
+      const element = nodeByKey.get(keyOf(item));
+      if (element) applyActivity(element, item, activityContext());
     }
   }
 
@@ -233,6 +245,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     const generation = ++hydrationGeneration;
     hydrating = true;
     if (clearPending) pendingEvents = [];
+    observation = bootstrap.observation ?? null;
     accountNameById.clear();
     for (const account of bootstrap.accounts ?? []) accountNameById.set(account.id, account.name);
     space = requestedSpaceId
@@ -300,8 +313,15 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
       composer.setDisabled(Boolean(space.archivedAt));
       composer.setTargets(runtime.getBootstrap().accounts.filter((account) => space.seats.some((seat) => seat.accountId === account.id)));
       refreshAllMessageBubbles();
+      refreshAllActivities();
       if (space.archivedAt) showArchivedStatus();
       else setStatus(null);
+    }
+    if (envelope.type === "observation.updated" && envelope.data?.observation) {
+      observation = envelope.data.observation;
+      refreshAllActivities();
+      void reloadActiveTimeline().catch((err) => handleHydrationError("过程可见性刷新失败", err));
+      return;
     }
     if (envelope.type === "space-session.created" && envelope.data?.spaceId === space?.id) {
       space = { ...space, activeSpaceSessionId: envelope.data.spaceSession.id };

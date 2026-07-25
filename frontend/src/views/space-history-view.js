@@ -6,6 +6,10 @@ function formatTime(value) {
   return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : "时间未知";
 }
 
+function activitySummary(item) {
+  return String(item.summary ?? item.detail ?? "").split(/\r?\n/u)[0];
+}
+
 function historyItem(item, accounts) {
   const row = document.createElement("article");
   row.className = "vera-management-card";
@@ -20,7 +24,9 @@ function historyItem(item, accounts) {
     label.textContent = "Approval";
   }
   const content = document.createElement("p");
-  content.textContent = item.content ?? item.detail ?? item.prompt ?? "";
+  content.textContent = item.itemType === "activity"
+    ? activitySummary(item)
+    : item.content ?? item.prompt ?? "";
   const time = document.createElement("small");
   time.textContent = formatTime(item.createdAt);
   row.append(label, content, time);

@@ -197,25 +197,29 @@ test("only the latest split bubble exposes the avatar and tail", () => {
   }
 });
 
-test("user messages do not expose an Agent avatar link", () => {
+test("user message groups hide avatars and expose a tail only on the latest bubble", () => {
   const previousDocument = globalThis.document;
   globalThis.document = {
     createElement: (tagName) => new FakeElement(tagName),
     createElementNS: (_namespace, tagName) => new FakeElement(tagName),
   };
   try {
-    const bubble = renderMessageBubble({
-      id: "msg_2",
-      itemType: "message",
-      status: "completed",
-      author: { type: "user" },
-      content: "hello",
+    const items = [
+      { ...userMessage("msg_2"), status: "completed", content: "first" },
+      { ...userMessage("msg_3"), status: "completed", content: "latest" },
+    ];
+    const first = renderMessageBubble(items[0], {
+      grouping: resolveMessageGrouping(items, 0),
+    });
+    const last = renderMessageBubble(items[1], {
+      grouping: resolveMessageGrouping(items, 1),
     });
 
-    const avatar = bubble.querySelector(".vera-bubble__avatar");
-    assert.equal(avatar.hidden, true);
-    assert.equal(avatar.href, "");
-    assert.equal(bubble.classList.contains("vera-bubble--has-tail"), true);
+    assert.equal(first.querySelector(".vera-bubble__avatar").hidden, true);
+    assert.equal(first.querySelector(".vera-bubble__avatar").href, "");
+    assert.equal(first.classList.contains("vera-bubble--has-tail"), false);
+    assert.equal(last.querySelector(".vera-bubble__avatar").hidden, true);
+    assert.equal(last.classList.contains("vera-bubble--has-tail"), true);
   } finally {
     globalThis.document = previousDocument;
   }
@@ -299,6 +303,14 @@ function accountMessage(id, runId, accountId = "acc_a") {
   };
 }
 
+function userMessage(id) {
+  return {
+    id,
+    itemType: "message",
+    author: { type: "user" },
+  };
+}
+
 test("same Account and run form first middle last bubbles in group chat", () => {
   const items = [
     accountMessage("msg_1", "run_1"),
@@ -324,6 +336,44 @@ test("same Account and run form first middle last bubbles in group chat", () => 
     showAvatar: true,
     showTail: true,
   });
+});
+
+test("adjacent user messages form first middle last bubbles without run ids", () => {
+  const items = [
+    userMessage("msg_user_1"),
+    userMessage("msg_user_2"),
+    userMessage("msg_user_3"),
+  ];
+
+  assert.deepEqual(resolveMessageGrouping(items, 0), {
+    position: "first",
+    showAuthor: false,
+    showAvatar: false,
+    showTail: false,
+  });
+  assert.deepEqual(resolveMessageGrouping(items, 1), {
+    position: "middle",
+    showAuthor: false,
+    showAvatar: false,
+    showTail: false,
+  });
+  assert.deepEqual(resolveMessageGrouping(items, 2), {
+    position: "last",
+    showAuthor: false,
+    showAvatar: false,
+    showTail: true,
+  });
+});
+
+test("a new user message moves the tail from the former latest bubble", () => {
+  const first = userMessage("msg_user_1");
+  assert.equal(resolveMessageGrouping([first], 0).showTail, true);
+
+  const items = [first, userMessage("msg_user_2")];
+  assert.equal(resolveMessageGrouping(items, 0).position, "first");
+  assert.equal(resolveMessageGrouping(items, 0).showTail, false);
+  assert.equal(resolveMessageGrouping(items, 1).position, "last");
+  assert.equal(resolveMessageGrouping(items, 1).showTail, true);
 });
 
 test("new split bubble moves the avatar from the former latest bubble", () => {
