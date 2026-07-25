@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  activityIconName,
   activitySummary,
   applyActivity,
   renderActivity,
@@ -105,22 +106,25 @@ test("status-only thinking renders one summary line and never exposes detail", (
     const activity = renderActivity({
       id: "act_thinking",
       phase: "thinking",
+      kind: "reasoning",
       summary: "正在分析请求",
       detail: "第一步\n第二步",
     }, { canExpand: false });
 
     assert.equal(activity.querySelector(".vera-activity__summary").textContent, "正在分析请求");
     assert.equal(activity.querySelector(".vera-activity__toggle").disabled, true);
+    assert.equal(activity.querySelector(".vera-vector-icon").dataset.icon, "reasoning");
     assert.equal(activity.querySelector(".vera-activity__detail").textContent, "");
     assert.equal(activity.classList.contains("is-expanded"), false);
   });
 });
 
-test("observed public reasoning starts expanded and the Thinking label toggles it", () => {
+test("observed public reasoning starts expanded and the whole summary row toggles it", () => {
   withFakeDocument(() => {
     const activity = renderActivity({
       id: "act_reasoning",
       phase: "thinking",
+      kind: "reasoning",
       summary: "正在比较两个实现",
       detail: "方案一的权衡\n方案二的权衡",
     }, { canExpand: true });
@@ -129,6 +133,7 @@ test("observed public reasoning starts expanded and the Thinking label toggles i
 
     assert.equal(activity.classList.contains("is-expanded"), true);
     assert.equal(toggle.getAttribute("aria-expanded"), "true");
+    assert.equal(toggle.textContent, "正在比较两个实现");
     assert.equal(detail.hidden, false);
     assert.match(detail.textContent, /方案二/u);
 
@@ -144,6 +149,7 @@ test("tool updates preserve the user's collapsed preference", () => {
     const item = {
       id: "act_tool",
       phase: "tool",
+      kind: "command",
       label: "bash",
       summary: "运行测试",
       detail: "npm test",
@@ -154,13 +160,15 @@ test("tool updates preserve the user's collapsed preference", () => {
 
     applyActivity(activity, {
       ...item,
+      summary: "已运行测试",
       detail: "npm test\n18 passed",
       toolStatus: "completed",
     }, { canExpand: true });
 
     assert.equal(activity.classList.contains("is-expanded"), false);
     assert.equal(activity.querySelector(".vera-activity__detail").hidden, true);
-    assert.match(activitySummary({ ...item, toolStatus: "completed" }), /completed/u);
+    assert.equal(activitySummary({ ...item, summary: "已运行测试", toolStatus: "completed" }), "已运行测试");
+    assert.equal(activityIconName(item), "command");
   });
 });
 
@@ -169,6 +177,7 @@ test("providers without public reasoning detail stay as the same non-expandable 
     const activity = renderActivity({
       id: "act_codex",
       phase: "thinking",
+      kind: "reasoning",
       summary: "正在思考",
       detail: null,
     }, { canExpand: true });
@@ -176,5 +185,23 @@ test("providers without public reasoning detail stay as the same non-expandable 
     assert.equal(activity.querySelector(".vera-activity__toggle").disabled, true);
     assert.equal(activity.querySelector(".vera-activity__detail").textContent, "");
     assert.equal(activity.querySelector(".vera-activity__summary").textContent, "正在思考");
+  });
+});
+
+test("unified Activity kinds select their own vector icons without provider labels", () => {
+  withFakeDocument(() => {
+    const activity = renderActivity({
+      id: "act_read",
+      phase: "tool",
+      kind: "read",
+      label: "Read",
+      summary: "已读取文件",
+      detail: null,
+    }, { canExpand: false });
+
+    assert.equal(activity.querySelector(".vera-vector-icon").dataset.icon, "read");
+    assert.equal(activity.querySelector(".vera-activity__summary").textContent, "已读取文件");
+    assert.equal(activity.querySelector(".vera-activity__toggle").textContent, "已读取文件");
+    assert.equal(activity.querySelector(".vera-activity__toggle").getAttribute("aria-label"), "读取文件摘要");
   });
 });

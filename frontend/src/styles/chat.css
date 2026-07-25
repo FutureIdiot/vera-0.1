@@ -357,9 +357,7 @@
 .vera-activity__header {
   align-items: center;
   display: flex;
-  gap: var(--vera-space-sm);
   min-width: 0;
-  padding: var(--vera-space-xs) var(--vera-space-sm);
 }
 
 .vera-activity__toggle {
@@ -367,21 +365,25 @@
   appearance: none;
   background: transparent;
   border: 0;
-  color: inherit;
+  color: var(--vera-color-activity-text);
   display: inline-flex;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  border-radius: var(--vera-control-radius);
   font: inherit;
-  font-weight: var(--vera-font-weight-semibold);
-  gap: var(--vera-space-2xs);
+  gap: var(--vera-space-sm);
+  justify-content: flex-start;
   margin: 0;
-  padding: var(--vera-space-xs);
+  min-width: 0;
+  padding: var(--vera-space-xs) var(--vera-space-sm);
+  text-align: left;
+  width: 100%;
 }
 
-.vera-activity--thinking .vera-activity__toggle {
+.vera-activity--thinking .vera-activity__toggle .vera-vector-icon {
   color: var(--vera-color-activity-thinking-label);
 }
 
-.vera-activity--tool .vera-activity__toggle {
+.vera-activity--tool .vera-activity__toggle .vera-vector-icon {
   color: var(--vera-color-activity-tool-label);
 }
 
@@ -393,21 +395,17 @@
   cursor: pointer;
 }
 
+.vera-activity__toggle:not(:disabled):hover {
+  background: var(--vera-color-activity-detail-bg);
+}
+
 .vera-activity__toggle .vera-vector-icon {
-  height: var(--vera-icon-size);
-  transition: transform var(--vera-transition-fast);
-  width: var(--vera-icon-size);
-}
-
-.vera-activity:not(.is-expandable) .vera-activity__toggle .vera-vector-icon {
-  display: none;
-}
-
-.vera-activity.is-expanded .vera-activity__toggle .vera-vector-icon {
-  transform: rotate(180deg);
+  height: var(--vera-activity-icon-size);
+  width: var(--vera-activity-icon-size);
 }
 
 .vera-activity__summary {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

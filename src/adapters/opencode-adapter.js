@@ -26,6 +26,11 @@ import { AdapterError } from "../core/errors.js";
 import { spawnProcess, killProcessTree } from "../core/spawn.js";
 import { buildMemoryDigestPrompt, MEMORY_DIGEST_SYSTEM_PROMPT, parseMemoryDigestEnvelope } from "../memory/memory-digest-prompt.js";
 import { MEMORY_DIGEST_OUTPUT_JSON_SCHEMA } from "../memory/memory-proposals.js";
+import {
+  inferToolActivityKind,
+  summarizeReasoning,
+  summarizeToolActivity,
+} from "../core/activity-events.js";
 
 const HEALTH_POLL_INTERVAL_MS = 200;
 const POLLER_RECONNECT_DELAY_MS = 500;
@@ -59,14 +64,17 @@ function stripAnsi(text) {
 // 合并为同一条记录原地更新（pending -> running -> completed/error）。
 function mapToolPart(part) {
   const state = part.state || {};
+  const name = part.tool || "tool";
+  const kind = inferToolActivityKind(name);
   let detail = state.title || state.input?.command || state.input?.description || state.input?.path || state.input?.pattern || "";
   if (state.status === "completed" && state.output) {
     detail = detail ? `${detail}\n${state.output}` : String(state.output);
   }
   return {
     phase: "tool",
-    label: part.tool || "tool",
-    summary: `${part.tool || "tool"} · ${state.status || "pending"}`,
+    kind,
+    label: name,
+    summary: summarizeToolActivity({ kind, name, status: state.status || "pending" }),
     detail,
     toolStatus: state.status || "pending",
     callId: part.callID || part.id || null,
@@ -543,6 +551,7 @@ export function createOpencodeAdapter({ config }) {
         if (resetDetail) {
           onActivity?.({
             phase: "error",
+            kind: "error",
             label: "session-reset",
             summary: "OpenCode 会话已重置",
             detail: resetDetail,
@@ -573,8 +582,9 @@ export function createOpencodeAdapter({ config }) {
               reasoningText.set(data.partID, detail);
               onActivity?.({
                 phase: "thinking",
+                kind: "reasoning",
                 label: "Thinking",
-                summary: "正在思考",
+                summary: summarizeReasoning(detail),
                 detail,
                 callId: data.partID,
               });
@@ -591,8 +601,9 @@ export function createOpencodeAdapter({ config }) {
               reasoningText.set(part.id, String(part.text ?? ""));
               onActivity?.({
                 phase: "thinking",
+                kind: "reasoning",
                 label: "Thinking",
-                summary: "正在思考",
+                summary: summarizeReasoning(part.text),
                 detail: String(part.text ?? ""),
                 callId: part.id,
               });
@@ -604,8 +615,9 @@ export function createOpencodeAdapter({ config }) {
             if (data.status?.type === "busy") {
               onActivity?.({
                 phase: "thinking",
+                kind: "reasoning",
                 label: "OpenCode",
-                summary: "正在思考",
+                summary: "正在分析请求",
                 callId: `thinking-${sessionId}`,
               });
             }

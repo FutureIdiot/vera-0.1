@@ -42,6 +42,9 @@ if (model === "fake-bad-jsonl") {
 process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: threadId }) + "\\n");
 process.stdout.write(JSON.stringify({ type: "turn.started" }) + "\\n");
 if (model === "fake-tool") {
+  process.stdout.write(JSON.stringify({ type: "item.completed", item: {
+    id: "reasoning_1", type: "reasoning", text: "检查项目状态并运行验证"
+  } }) + "\\n");
   process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "tool_1", type: "command_execution", command: "pwd", status: "completed" } }) + "\\n");
 }
 

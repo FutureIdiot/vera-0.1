@@ -186,8 +186,9 @@ test("API messages are one-shot, legacy context fields are ignored, and oversize
   assert.deepEqual(oneShotResult, { content: "ok" });
   assert.deepEqual(oneShot.activities, [{
     phase: "thinking",
+    kind: "reasoning",
     label: "Ollama",
-    summary: "正在思考",
+    summary: "正在生成回复",
     callId: "thinking",
   }]);
   assert.deepEqual(stub.requests[0].body.messages, [

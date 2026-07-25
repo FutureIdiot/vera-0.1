@@ -67,8 +67,9 @@ export function createMockAdapter({ chunkDelayMs = 30, approvalTimeoutMs = 15000
 
       onActivity({
         phase: "tool",
+        kind: "command",
         label: "bash",
-        summary: "bash · pending",
+        summary: "准备运行测试",
         detail: "npm test",
         toolStatus: "pending",
         callId,
@@ -84,8 +85,9 @@ export function createMockAdapter({ chunkDelayMs = 30, approvalTimeoutMs = 15000
       onDelta("\n\n");
       onActivity({
         phase: "tool",
+        kind: "command",
         label: "bash",
-        summary: "bash · completed",
+        summary: "已运行测试",
         detail: "npm test\n5 passed",
         toolStatus: "completed",
         callId,

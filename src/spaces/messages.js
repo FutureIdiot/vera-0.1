@@ -59,6 +59,7 @@ function publishOfflineActivity({ store, hub, space, spaceSession, account, obse
     accountId: account.id,
     agentId: null,
     phase: "error",
+    kind: "error",
     label: "agent-offline",
     summary: `${account.name} 当前离线，已跳过`,
     detail: `${account.name} Account当前离线，已跳过此条`,

@@ -224,15 +224,22 @@ export function createDaemonRuntime({
       if (body.paragraphEnd !== undefined && typeof body.paragraphEnd !== "boolean") invalid("paragraphEnd must be boolean");
     } else if (kind === "upsertActivity") {
       strictObject(body, {
-        allowed: ["phase", "label", "summary", "detail", "toolStatus", "callId"],
-        required: ["phase", "summary"],
+        allowed: ["phase", "kind", "label", "summary", "detail", "toolStatus", "callId"],
+        required: ["phase", "kind", "summary"],
       });
       requiredText(body.phase, "phase");
+      requiredText(body.kind, "kind");
       requiredText(body.summary, "summary");
+      if (!new Set([
+        "reasoning", "command", "read", "edit", "search", "plan",
+        "compact", "tool", "status", "usage", "error",
+      ]).has(body.kind)) {
+        invalid("kind must be a supported Activity kind");
+      }
       if (/[\r\n]/u.test(body.summary) || body.summary.length > (config.activity?.summaryMaxLength ?? 160)) {
         invalid("summary must be a bounded single line");
       }
-      for (const field of ["label", "summary", "detail", "toolStatus", "callId"]) {
+      for (const field of ["kind", "label", "summary", "detail", "toolStatus", "callId"]) {
         if (body[field] !== undefined && body[field] !== null && typeof body[field] !== "string") {
           invalid(`${field} must be a string or null`);
         }

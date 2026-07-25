@@ -23,6 +23,11 @@ import {
   parseMemoryDigestEnvelope,
 } from "../memory/memory-digest-prompt.js";
 import { buildMemoryDreamPrompt, MEMORY_DREAM_SYSTEM_PROMPT } from "../memory/memory-dream-prompt.js";
+import {
+  inferToolActivityKind,
+  summarizeReasoning,
+  summarizeToolActivity,
+} from "../core/activity-events.js";
 import { projectCodexDigestSchema } from "./codex-digest-schema.js";
 import { normalizeCodexDreamProposals, projectCodexDreamSchema } from "./codex-dream-schema.js";
 
@@ -46,10 +51,12 @@ function toolActivity(item, eventType = "item.completed") {
   const label = item.type || "codex-tool";
   const detail = item.command || item.query || item.name || item.server || "";
   const toolStatus = item.status || (eventType === "item.started" ? "running" : "completed");
+  const kind = inferToolActivityKind(label);
   return {
     phase: "tool",
+    kind,
     label,
-    summary: `${label} · ${toolStatus}`,
+    summary: summarizeToolActivity({ kind, name: label, status: toolStatus }),
     detail: typeof detail === "string" ? detail : JSON.stringify(detail),
     toolStatus,
     callId: item.id || null,
@@ -229,6 +236,8 @@ export function createCodexAdapter({ config = {} }) {
     let persistPromise = null;
     let persistError = null;
     let content = "";
+    let reasoningCount = 0;
+    const initialReasoningCallId = `thinking-${threadId ?? "new"}`;
     const workspacePath = ctx.workspacePath || process.cwd();
     const args = ["-C", workspacePath, "-a", "never", "-s", chatSandbox, "exec"];
     if (threadId) args.push("resume", threadId);
@@ -239,9 +248,10 @@ export function createCodexAdapter({ config = {} }) {
     try {
       ctx.onActivity?.({
         phase: "thinking",
+        kind: "reasoning",
         label: "Codex",
-        summary: "正在思考",
-        callId: `thinking-${threadId ?? "new"}`,
+        summary: "正在分析请求",
+        callId: initialReasoningCallId,
       });
       await execJson({
         binary, args, cwd: workspacePath, input: String(ctx.prompt?.text ?? ""),
@@ -269,6 +279,20 @@ export function createCodexAdapter({ config = {} }) {
               item.type === "agent_message" && typeof item.text === "string" && item.text) {
             content += item.text;
             ctx.onDelta?.(item.text);
+          } else if (item.type === "reasoning") {
+            const publicSummary = item.text ?? item.summary ?? "";
+            if (publicSummary) {
+              reasoningCount += 1;
+              ctx.onActivity?.({
+                phase: "thinking",
+                kind: "reasoning",
+                label: "Codex",
+                summary: summarizeReasoning(publicSummary),
+                callId: reasoningCount === 1
+                  ? initialReasoningCallId
+                  : item.id || `${initialReasoningCallId}-${reasoningCount}`,
+              });
+            }
           } else if (isDigestToolItem(item)) {
             ctx.onActivity?.(toolActivity(item, event.type));
           }
@@ -300,6 +324,7 @@ export function createCodexAdapter({ config = {} }) {
     )) {
       ctx.onActivity?.({
         phase: "error",
+        kind: "error",
         label: "session-reset",
         summary: "Codex 会话已重置",
         detail: "Codex provider binding was invalid and has been reset",
@@ -315,6 +340,7 @@ export function createCodexAdapter({ config = {} }) {
       if (!providerBinding || !error?.missingThread) throw error;
       ctx.onActivity?.({
         phase: "error",
+        kind: "error",
         label: "session-reset",
         summary: "Codex 会话已重置",
         detail: "Codex thread was unavailable and has been reset",

@@ -105,6 +105,7 @@ export function releaseAccountExecutions(store, accountId, {
       if (activity.runId === run.id && ["pending", "running"].includes(activity.toolStatus)) {
         const updated = store.update("activities", activity.id, {
           phase: "error",
+          kind: "error",
           summary: "Account Session 已撤销",
           toolStatus: "failed",
           detail: "Account Session was revoked",

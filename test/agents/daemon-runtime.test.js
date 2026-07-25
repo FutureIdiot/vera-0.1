@@ -116,7 +116,7 @@ test("daemon Run endpoints authenticate the current Session lease and delegate s
       ["POST", "/api/agent/runs/run_runtime/messages", { content: "hello" }, 201],
       ["POST", "/api/agent/runs/run_runtime/delta", { delta: "hel" }, 200],
       ["POST", "/api/agent/runs/run_runtime/activities", {
-        phase: "coding", summary: "正在编码", callId: "call-1",
+        phase: "coding", kind: "status", summary: "正在编码", callId: "call-1",
       }, 200],
       ["POST", "/api/agent/runs/run_runtime/approvals", { prompt: "allow?", options: ["allow", "deny"] }, 201],
       ["PATCH", "/api/agent/runs/run_runtime", { status: "completed" }, 200],
@@ -282,6 +282,7 @@ test("gateway rejects Activity detail outside the observed private Space with ze
     await assert.rejects(
       daemonRuntime.upsertActivity("run_runtime", {
         phase: "thinking",
+        kind: "reasoning",
         summary: "正在思考",
         detail: "provider public reasoning",
         callId: "thinking-1",
@@ -292,6 +293,7 @@ test("gateway rejects Activity detail outside the observed private Space with ze
 
     const summaryOnly = await daemonRuntime.upsertActivity("run_runtime", {
       phase: "thinking",
+      kind: "reasoning",
       summary: "正在思考",
       callId: "thinking-1",
     }, headers);
@@ -299,6 +301,7 @@ test("gateway rejects Activity detail outside the observed private Space with ze
     visibility = "observed";
     await daemonRuntime.upsertActivity("run_runtime", {
       phase: "thinking",
+      kind: "reasoning",
       summary: "正在思考",
       detail: "provider public reasoning",
       callId: "thinking-1",

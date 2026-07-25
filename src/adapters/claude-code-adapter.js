@@ -3,6 +3,11 @@ import { basename } from "node:path";
 
 import { AdapterError } from "../core/errors.js";
 import { killProcessTree, spawnProcess } from "../core/spawn.js";
+import {
+  inferToolActivityKind,
+  summarizeReasoning,
+  summarizeToolActivity,
+} from "../core/activity-events.js";
 
 function missingSession(stderr) {
   return /(?:session|conversation).{0,80}(?:not found|does not exist|unknown|invalid)/iu.test(stderr);
@@ -96,10 +101,12 @@ export function createClaudeCodeAdapter({ config = {} } = {}) {
       const previous = toolState.get(callId) ?? { name: "tool", input: "", output: "", status: "pending" };
       const next = { ...previous, ...patch };
       toolState.set(callId, next);
+      const kind = inferToolActivityKind(next.name);
       ctx.onActivity?.({
         phase: "tool",
+        kind,
         label: next.name,
-        summary: `${next.name} · ${next.status}`,
+        summary: summarizeToolActivity({ kind, name: next.name, status: next.status }),
         detail: [next.input, next.output].filter(Boolean).join("\n"),
         toolStatus: next.status,
         callId,
@@ -111,8 +118,9 @@ export function createClaudeCodeAdapter({ config = {} } = {}) {
       thinkingState.set(callId, detail);
       ctx.onActivity?.({
         phase: "thinking",
+        kind: "reasoning",
         label: "Thinking",
-        summary: "正在思考",
+        summary: summarizeReasoning(detail),
         detail,
         callId,
       });
@@ -245,6 +253,7 @@ export function createClaudeCodeAdapter({ config = {} } = {}) {
     )) {
       ctx.onActivity?.({
         phase: "error",
+        kind: "error",
         label: "session-reset",
         summary: "Claude Code 会话已重置",
         detail: "Claude Code provider binding was invalid and has been reset",
@@ -259,6 +268,7 @@ export function createClaudeCodeAdapter({ config = {} } = {}) {
       if (!providerBinding || !error?.missingSession) throw error;
       ctx.onActivity?.({
         phase: "error",
+        kind: "error",
         label: "session-reset",
         summary: "Claude Code 会话已重置",
         detail: "Claude Code session was unavailable and has been reset",

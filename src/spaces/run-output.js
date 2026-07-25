@@ -1,4 +1,5 @@
 import { newActivityId } from "../core/id.js";
+import { inferToolActivityKind, normalizeActivityKind } from "../core/activity-events.js";
 import { requestApproval } from "./approvals.js";
 import { createBubbleStream } from "./bubble-stream.js";
 
@@ -33,11 +34,20 @@ export function createRunOutput({
 
   function onActivity(event) {
     if (!acceptsOutput()) return;
+    const kind = normalizeActivityKind(
+      event?.kind,
+      event?.phase === "thinking" ? "reasoning"
+        : event?.phase === "tool" ? inferToolActivityKind(event?.label)
+          : event?.phase === "error" ? "error"
+            : event?.phase === "usage" ? "usage"
+              : "status",
+    );
     const summary = truncate(event?.summary, config.activity.summaryMaxLength ?? 160);
     const detail = truncate(event?.detail, config.activity.detailMaxLength);
     if (event?.callId && activityIndex.has(event.callId)) {
       const updated = store.update("activities", activityIndex.get(event.callId), {
         phase: event.phase,
+        kind,
         label: event.label,
         summary,
         detail,
@@ -55,6 +65,7 @@ export function createRunOutput({
       runId,
       agentId: agent.id,
       phase: event?.phase,
+      kind,
       label: event?.label,
       summary,
       detail,

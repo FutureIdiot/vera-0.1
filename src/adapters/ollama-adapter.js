@@ -206,8 +206,9 @@ export function createOllamaAdapter({ config }) {
     try {
       ctx.onActivity?.({
         phase: "thinking",
+        kind: "reasoning",
         label: "Ollama",
-        summary: "正在思考",
+        summary: "正在生成回复",
         callId: "thinking",
       });
       response = await fetch(`${baseUrl}/api/chat`, {

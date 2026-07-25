@@ -1,6 +1,8 @@
 // Account-bound Run protocol handler. Connection login, SSE lifecycle and
 // reconnect policy remain owned by daemon-client.
 
+import { inferToolActivityKind, normalizeActivityKind } from "../core/activity-events.js";
+
 const RUN_ERROR_CODES = new Set([
   "cancelled", "timed_out", "unavailable", "provider_error", "internal", "gateway_unreachable",
 ]);
@@ -95,6 +97,14 @@ export function createDaemonRunHandler({
   function safeActivity(activity, visibility) {
     const source = activity && typeof activity === "object" && !Array.isArray(activity) ? activity : {};
     const phase = typeof source.phase === "string" && source.phase.trim() ? source.phase.trim() : "working";
+    const kind = normalizeActivityKind(
+      source.kind,
+      phase === "thinking" ? "reasoning"
+        : phase === "tool" ? inferToolActivityKind(source.label)
+          : phase === "error" ? "error"
+            : phase === "usage" ? "usage"
+              : "status",
+    );
     const label = typeof source.label === "string" && source.label.trim() ? source.label.trim() : phase;
     const status = typeof source.toolStatus === "string" && source.toolStatus.trim()
       ? ` · ${source.toolStatus.trim()}`
@@ -106,6 +116,7 @@ export function createDaemonRunHandler({
       .slice(0, activitySummaryMaxLength) || fallback;
     const projected = {
       phase,
+      kind,
       label,
       summary,
       ...(source.toolStatus == null ? {} : { toolStatus: source.toolStatus }),

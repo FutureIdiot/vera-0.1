@@ -90,7 +90,7 @@ export async function run(ctx) {
     const tl = await httpRequest("GET", `/api/spaces/${l1Space.id}/timeline?limit=500`);
     assertEqual(tl.status, 200);
     const activity = tl.json.items.find(
-      (item) => item.itemType === "activity" && item.phase === "tool" && item.summary === "bash · completed",
+      (item) => item.itemType === "activity" && item.kind === "command" && item.summary === "已运行测试",
     );
     assert(activity, "timeline should retain the safe completed tool summary");
     assertEqual(activity.detail, null, "status-only timeline must not expose tool output detail");
