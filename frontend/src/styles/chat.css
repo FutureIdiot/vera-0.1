@@ -3,23 +3,14 @@
   flex: 1;
   flex-direction: column;
   gap: var(--vera-bubble-gap);
+  overflow-x: hidden;
   overflow-y: auto;
   padding: var(--vera-space-lg) var(--vera-window-margin);
-  scrollbar-color: color-mix(in srgb, var(--vera-color-border), transparent 30%) transparent;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
 
 .vera-timeline::-webkit-scrollbar {
-  width: var(--vera-scrollbar-width);
-}
-
-.vera-timeline::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.vera-timeline::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--vera-color-border), transparent 30%);
-  border-radius: var(--vera-control-radius);
+  display: none;
 }
 
 .vera-status-bar:empty {
