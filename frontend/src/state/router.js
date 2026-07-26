@@ -1,4 +1,6 @@
 import { createAppShell } from "../components/app-shell.js";
+import { createHttpClient } from "../api/http-client.js";
+import { createSpacesClient } from "../api/spaces-client.js";
 import { getSpaceType } from "../../../src/spaces/space-types.js";
 
 export function parseRoute(hash = "") {
@@ -114,6 +116,7 @@ export function createAppRouter({
   loadAgentDataView = () => import("../views/agent-data-view.js"),
   loadAgentMemoryConfigView = () => import("../views/agent-memory-config-view.js"),
   loadAgentMemoryLibraryView = () => import("../views/agent-memory-library-view.js"),
+  loadAllSpaces = null,
 } = {}) {
   let activeCleanup = null;
   let shell = null;
@@ -121,6 +124,19 @@ export function createAppRouter({
   let transition = 0;
   let activeHash = null;
   let revertingHash = null;
+  const spacesClient = createSpacesClient(createHttpClient(platform));
+
+  async function resolveRouteSpace(route) {
+    if (route.name !== "space" && route.name !== "spaces") return null;
+    const bootstrap = runtime.getBootstrap();
+    if (!route.spaceId) return shell?.getCurrentSpace?.() ?? bootstrap.spaces[0] ?? null;
+    const activeSpace = bootstrap.spaces.find((space) => space.id === route.spaceId);
+    if (activeSpace) return activeSpace;
+    const response = loadAllSpaces
+      ? await loadAllSpaces()
+      : await spacesClient.listSpaces({ archived: "all" });
+    return response.spaces.find((space) => space.id === route.spaceId) ?? null;
+  }
 
   function renderFailure(messageText, { retry = false } = {}) {
     const outlet = shell?.outlet ?? root;
@@ -157,15 +173,14 @@ export function createAppRouter({
     activeCleanup = null;
     const outlet = shell?.outlet ?? root;
     outlet.replaceChildren();
-    shell?.setRoute(route);
-
-    const routeSpace = route.name === "space" || route.name === "spaces"
-      ? (
-        route.spaceId
-          ? runtime.getBootstrap().spaces.find((space) => space.id === route.spaceId)
-          : shell?.getCurrentSpace?.() ?? runtime.getBootstrap().spaces[0]
-      )
-      : null;
+    const routeSpace = await resolveRouteSpace(route);
+    if (currentTransition !== transition) return;
+    shell?.setRoute(route, { space: routeSpace });
+    if (route.name === "space" && route.spaceId && !routeSpace) {
+      renderFailure("Space 不存在");
+      activeHash = targetHash;
+      return;
+    }
     const routeSpaceType = getSpaceType(routeSpace?.spaceType);
     const spaceSurface = routeSpaceType.surface === "blank"
       ? {

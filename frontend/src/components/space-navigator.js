@@ -200,6 +200,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       initialValue: space,
       projects,
       onCreateProject: createProject,
+      allowSpaceType: false,
     });
     if (!details?.name) return;
     try {
@@ -655,7 +656,11 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     focusFirst() { panel.querySelector("button")?.focus(); },
     setCurrentSpace(spaceId) {
       currentSpaceId = spaceId;
-      selectedKey = directoryKey(spaces.find((space) => space.id === spaceId) ?? { seats: [] });
+      selectedKey = directoryKey(
+        spaces.find((space) => space.id === spaceId)
+        ?? archived?.find((space) => space.id === spaceId)
+        ?? { seats: [] },
+      );
       render();
     },
     destroy() {

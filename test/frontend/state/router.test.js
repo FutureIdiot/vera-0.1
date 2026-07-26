@@ -7,10 +7,13 @@ function createFixture({
   hash = "#/",
   spaces = [],
   loadSpaceView,
+  loadBlankSpaceView,
   loadSpaceSurfacePlaceholderView,
   loadSpaceSettingsView,
+  loadAllSpaces = async () => ({ spaces }),
 } = {}) {
   const listeners = new Map();
+  const shellRoutes = [];
   const children = [];
   const root = {
     children,
@@ -64,13 +67,19 @@ function createFixture({
     runtime: { getBootstrap() { return { spaces, agents: [], accounts: [], agentStates: [], seq: 0 }; } },
     windowTarget,
     createShell() {
-      return { outlet: root, setRoute() {}, destroy() {} };
+      return {
+        outlet: root,
+        setRoute(route, options) { shellRoutes.push({ route, options }); },
+        destroy() {},
+      };
     },
     loadSpaceView,
+    loadBlankSpaceView,
     loadSpaceSurfacePlaceholderView,
     loadSpaceSettingsView,
+    loadAllSpaces,
   });
-  return { root, router, windowTarget, listeners };
+  return { root, router, windowTarget, listeners, shellRoutes };
 }
 
 async function flushAsyncWork() {
@@ -140,6 +149,9 @@ test("non-chat Space types mount the development placeholder instead of Chat", a
   const fixture = createFixture({
     hash: "#/spaces/spc_library",
     spaces: [{ id: "spc_library", spaceType: "library" }],
+    loadAllSpaces: async () => {
+      throw new Error("active Space must not trigger an all-Spaces lookup");
+    },
     loadSpaceView: async () => ({
       mountSpaceView() { chatMounts += 1; return () => {}; },
     }),
@@ -159,11 +171,156 @@ test("non-chat Space types mount the development placeholder instead of Chat", a
   fixture.router.stop();
 });
 
+test("archived non-chat Spaces resolve their own surface without mutating bootstrap", async () => {
+  let chatMounts = 0;
+  let placeholderMounts = 0;
+  const activeSpaces = [{ id: "spc_chat", spaceType: "chat" }];
+  const archivedSpace = {
+    id: "spc_archived_library",
+    name: "Archive",
+    spaceType: "library",
+    archivedAt: "2026-07-26T00:00:00.000Z",
+  };
+  const fixture = createFixture({
+    hash: "#/spaces/spc_archived_library",
+    spaces: activeSpaces,
+    loadAllSpaces: async () => ({ spaces: [...activeSpaces, archivedSpace] }),
+    loadSpaceView: async () => ({
+      mountSpaceView() { chatMounts += 1; return () => {}; },
+    }),
+    loadSpaceSurfacePlaceholderView: async () => ({
+      mountSpaceSurfacePlaceholderView({ space }) {
+        placeholderMounts += 1;
+        assert.equal(space, archivedSpace);
+        return () => {};
+      },
+    }),
+  });
+
+  await fixture.router.start();
+
+  assert.equal(chatMounts, 0);
+  assert.equal(placeholderMounts, 1);
+  assert.deepEqual(activeSpaces, [{ id: "spc_chat", spaceType: "chat" }]);
+  assert.equal(fixture.shellRoutes[0].options.space, archivedSpace);
+  fixture.router.stop();
+});
+
+test("archived Blank Spaces mount the Blank surface", async () => {
+  let blankMounts = 0;
+  let chatMounts = 0;
+  const archivedSpace = {
+    id: "spc_archived_blank",
+    spaceType: "blank",
+    archivedAt: "2026-07-26T00:00:00.000Z",
+  };
+  const fixture = createFixture({
+    hash: "#/spaces/spc_archived_blank",
+    loadAllSpaces: async () => ({ spaces: [archivedSpace] }),
+    loadSpaceView: async () => ({
+      mountSpaceView() { chatMounts += 1; return () => {}; },
+    }),
+    loadBlankSpaceView: async () => ({
+      mountBlankSpaceView({ space }) {
+        blankMounts += 1;
+        assert.equal(space, archivedSpace);
+        return () => {};
+      },
+    }),
+  });
+
+  await fixture.router.start();
+
+  assert.equal(chatMounts, 0);
+  assert.equal(blankMounts, 1);
+  fixture.router.stop();
+});
+
+test("a stale archived lookup cannot mount after navigation reaches an active Space", async () => {
+  let resolveArchivedLookup;
+  let chatMounts = 0;
+  let placeholderMounts = 0;
+  const archivedLookup = new Promise((resolve) => {
+    resolveArchivedLookup = resolve;
+  });
+  const fixture = createFixture({
+    hash: "#/spaces/spc_archived",
+    spaces: [{ id: "spc_active", spaceType: "chat" }],
+    loadAllSpaces: () => archivedLookup,
+    loadSpaceView: async () => ({
+      mountSpaceView({ space }) {
+        chatMounts += 1;
+        assert.equal(space.id, "spc_active");
+        return () => {};
+      },
+    }),
+    loadSpaceSurfacePlaceholderView: async () => ({
+      mountSpaceSurfacePlaceholderView() {
+        placeholderMounts += 1;
+        return () => {};
+      },
+    }),
+  });
+
+  const starting = fixture.router.start();
+  fixture.windowTarget.location.hash = "#/spaces/spc_active";
+  fixture.listeners.get("hashchange")();
+  await flushAsyncWork();
+  resolveArchivedLookup({
+    spaces: [{
+      id: "spc_archived",
+      spaceType: "library",
+      archivedAt: "2026-07-26T00:00:00.000Z",
+    }],
+  });
+  await starting;
+  await flushAsyncWork();
+
+  assert.equal(chatMounts, 1);
+  assert.equal(placeholderMounts, 0);
+  fixture.router.stop();
+});
+
+test("archived lookup failures use the retryable route error boundary", async () => {
+  let attempts = 0;
+  let placeholderMounts = 0;
+  const archivedSpace = {
+    id: "spc_archived_retry",
+    spaceType: "notebook",
+    archivedAt: "2026-07-26T00:00:00.000Z",
+  };
+  const fixture = createFixture({
+    hash: "#/spaces/spc_archived_retry",
+    loadAllSpaces: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("archive unavailable");
+      return { spaces: [archivedSpace] };
+    },
+    loadSpaceSurfacePlaceholderView: async () => ({
+      mountSpaceSurfacePlaceholderView() {
+        placeholderMounts += 1;
+        return () => {};
+      },
+    }),
+  });
+
+  await fixture.router.start();
+  const error = fixture.root.children[0];
+  assert.equal(error.children[0].textContent, "页面加载失败：archive unavailable");
+  error.children[1].listeners.get("click")();
+  await flushAsyncWork();
+
+  assert.equal(attempts, 2);
+  assert.equal(placeholderMounts, 1);
+  fixture.router.stop();
+});
+
 test("start mounts the current route once and stop removes listener and view", async () => {
   const mounts = [];
   let cleanupCount = 0;
   const fixture = createFixture({
     hash: "#/spaces/spc_start",
+    spaces: [{ id: "spc_start", spaceType: "chat" }],
     loadSpaceView: async () => ({
       async mountSpaceView(options) {
         mounts.push(options);
@@ -197,6 +354,10 @@ test("hash navigation cleans up the previous route before mounting the next", as
   const calls = [];
   const fixture = createFixture({
     hash: "#/spaces/spc_first",
+    spaces: [
+      { id: "spc_first", spaceType: "chat" },
+      { id: "spc_second", spaceType: "chat" },
+    ],
     loadSpaceView: async () => ({
       async mountSpaceView({ root, spaceId }) {
         calls.push(`mount:${spaceId}`);
@@ -221,6 +382,7 @@ test("unknown routes replace the active view with a lightweight error", async ()
   let cleanupCount = 0;
   const fixture = createFixture({
     hash: "#/spaces/spc_known",
+    spaces: [{ id: "spc_known", spaceType: "chat" }],
     loadSpaceView: async () => ({
       async mountSpaceView({ root }) {
         root.appendChild({ route: "known" });
@@ -249,6 +411,7 @@ test("route load failures render a retryable error boundary", async () => {
   let attempts = 0;
   const fixture = createFixture({
     hash: "#/spaces/spc_retry",
+    spaces: [{ id: "spc_retry", spaceType: "chat" }],
     loadSpaceView: async () => {
       attempts += 1;
       if (attempts === 1) throw new Error("chunk unavailable");
@@ -285,6 +448,10 @@ test("a stale async route load cannot mount after a newer navigation", async () 
   };
   const fixture = createFixture({
     hash: "#/spaces/spc_slow",
+    spaces: [
+      { id: "spc_slow", spaceType: "chat" },
+      { id: "spc_fast", spaceType: "chat" },
+    ],
     loadSpaceView: () => {
       loadCount += 1;
       return loadCount === 1 ? firstLoad : Promise.resolve(module);
@@ -311,6 +478,7 @@ test("a route cleanup can veto navigation to preserve unsaved settings", async (
   let cleanupCount = 0;
   const fixture = createFixture({
     hash: "#/spaces/spc_1/settings",
+    spaces: [{ id: "spc_1", spaceType: "chat" }],
     loadSpaceSettingsView: async () => ({
       mountSpaceSettingsView({ root }) {
         root.appendChild({ route: "settings" });

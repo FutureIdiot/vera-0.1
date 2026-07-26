@@ -69,7 +69,7 @@ export async function run(ctx) {
     await sse.waitFor((event) => event.type === "space.updated" && event.data.space.id === spaceId && event.data.space.archivedAt === null);
   });
 
-  await check("p.2 Space settings 拒绝重复/未知 Seat 与非法枚举", async () => {
+  await check("p.2 Space settings 拒绝重复/未知 Seat、非法枚举与 Type 修改", async () => {
     const duplicate = await httpRequest("PATCH", `/api/spaces/${spaceId}`, {
       seats: [
         { accountId: owningAccount.id, responseMode: "default" },
@@ -98,8 +98,9 @@ export async function run(ctx) {
     });
     assertEqual(badNotifications.status, 400);
 
-    const badSpaceType = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { spaceType: "unknown" });
-    assertEqual(badSpaceType.status, 400);
+    const immutableSpaceType = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { spaceType: "library" });
+    assertEqual(immutableSpaceType.status, 400);
+    assertEqual(immutableSpaceType.json.error.code, "invalid_request");
     const badPinned = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { pinned: "yes" });
     assertEqual(badPinned.status, 400);
     const badProject = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { projectId: "prj_missing" });
@@ -121,7 +122,6 @@ export async function run(ctx) {
       seats: [{ accountId: owningAccount.id, responseMode: "silent", respondTo: ["user"] }],
       notifications: { mode: "accountMessages", includeActivityErrors: true },
       pinned: false,
-      spaceType: "library",
       projectId: null,
     });
     assertEqual(response.status, 200);
@@ -131,7 +131,7 @@ export async function run(ctx) {
     assertEqual(space.topic, "F3 settings");
     assertEqual(space.seats[0].respondTo[0], "user");
     assertEqual(space.pinned, false);
-    assertEqual(space.spaceType, "library");
+    assertEqual(space.spaceType, "garage");
     assertEqual(space.projectId, null);
   });
 

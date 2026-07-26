@@ -175,6 +175,7 @@ export function requestSpaceDetails(host, {
   initialValue = {},
   projects = [],
   onCreateProject = null,
+  allowSpaceType = true,
 } = {}) {
   return new Promise((resolve) => {
     const dialog = document.createElement("form");
@@ -203,6 +204,8 @@ export function requestSpaceDetails(host, {
     typeText.textContent = "Space Type";
     const typeSelect = document.createElement("select");
     typeSelect.setAttribute("aria-label", "Space Type");
+    typeSelect.disabled = !allowSpaceType;
+    if (!allowSpaceType) typeSelect.title = "Space Type 创建后不可修改";
     for (const type of SPACE_TYPES) {
       const option = document.createElement("option");
       option.value = type.id;
@@ -281,7 +284,7 @@ export function requestSpaceDetails(host, {
       event.preventDefault();
       finish({
         name: nameInput.value.trim(),
-        spaceType: typeSelect.value,
+        ...(allowSpaceType ? { spaceType: typeSelect.value } : {}),
         projectId: projectSelect.value || null,
       });
     });

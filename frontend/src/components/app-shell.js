@@ -268,6 +268,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
   function setSpace(nextSpace) {
     currentSpace = nextSpace;
     navigator.setCurrentSpace(currentSpace?.id ?? null);
+    if (isSpaceRoute()) shell.dataset.routeScope = isChatSurface() ? "chat" : "management";
     updateHeader();
   }
 
@@ -312,12 +313,21 @@ export function createAppShell({ root, platform, runtime } = {}) {
     if (MANAGEMENT_ROUTES.has(activeRouteName)) updateHeader();
   }
 
-  function setRoute(route) {
+  function setRoute(route, { space: projectedSpace } = {}) {
     activeRouteName = route.name;
     managementHeader = null;
     const bootstrap = runtime.getBootstrap();
-    const routeSpace = route.spaceId ? bootstrap.spaces.find((space) => space.id === route.spaceId) : null;
-    if (routeSpace) setSpace(routeSpace);
+    if (isSpaceRoute()) {
+      const routeSpace = projectedSpace !== undefined
+        ? projectedSpace
+        : route.spaceId
+          ? bootstrap.spaces.find((space) => space.id === route.spaceId) ?? null
+          : currentSpace ?? bootstrap.spaces[0] ?? null;
+      setSpace(routeSpace);
+    } else {
+      const routeSpace = route.spaceId ? bootstrap.spaces.find((space) => space.id === route.spaceId) : null;
+      if (routeSpace) setSpace(routeSpace);
+    }
     shell.dataset.routeScope = isChatSurface() ? "chat" : "management";
     if (route.name === "spaces") navigatorOpen = true;
     else if (!isSpaceRoute()) navigatorOpen = false;
@@ -350,7 +360,11 @@ export function createAppShell({ root, platform, runtime } = {}) {
     else if (envelope.type === "space.updated" && envelope.data?.space?.id === currentSpace?.id) setSpace(envelope.data.space);
     else if (envelope.type === "observation.updated") updateHeader();
     else if (envelope.type === "runtime.reset") {
-      const next = envelope.data.bootstrap.spaces.find((space) => space.id === currentSpace?.id) ?? envelope.data.bootstrap.spaces[0] ?? null;
+      const retainedArchivedSpace = isSpaceRoute() && currentSpace?.archivedAt ? currentSpace : null;
+      const next = envelope.data.bootstrap.spaces.find((space) => space.id === currentSpace?.id)
+        ?? retainedArchivedSpace
+        ?? envelope.data.bootstrap.spaces[0]
+        ?? null;
       setSpace(next);
     }
   });

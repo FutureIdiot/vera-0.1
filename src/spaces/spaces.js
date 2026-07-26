@@ -206,7 +206,7 @@ export function updateSpace(store, id, patch) {
   if (!space) throw new ApiError("not_found", `space ${id} does not exist`);
   assertExactObject(
     patch,
-    ["name", "topic", "seats", "notifications", "pinned", "spaceType", "projectId"],
+    ["name", "topic", "seats", "notifications", "pinned", "projectId"],
     { name: "patch", allowEmpty: false },
   );
   const next = {};
@@ -224,7 +224,6 @@ export function updateSpace(store, id, patch) {
   }
   if (patch.notifications !== undefined) next.notifications = normalizeNotifications(patch.notifications);
   if (patch.pinned !== undefined) next.pinned = normalizePinned(patch.pinned);
-  if (patch.spaceType !== undefined) next.spaceType = normalizeSpaceType(patch.spaceType);
   if (patch.projectId !== undefined) next.projectId = normalizeProjectId(store, patch.projectId);
   next.updatedAt = new Date().toISOString();
   const updated = store.update("spaces", id, next);
