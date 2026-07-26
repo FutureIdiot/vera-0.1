@@ -295,6 +295,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
 
   function closeNavigator() {
     if (!navigatorOpen) return;
+    navigator.cancelDialogs();
     navigatorOpen = false;
     applyNavigatorState();
     leading.focus();
@@ -314,6 +315,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
   }
 
   function setRoute(route, { space: projectedSpace } = {}) {
+    navigator.cancelDialogs();
     activeRouteName = route.name;
     managementHeader = null;
     const bootstrap = runtime.getBootstrap();

@@ -187,6 +187,57 @@ test("space.deleted removes the Space from the shared bootstrap projection", asy
   runtime.close();
 });
 
+test("Project events upsert and delete the shared bootstrap projection", async () => {
+  const sources = [];
+  const platform = {
+    async getGatewayUrl() { return "https://vera.test"; },
+    async fetch() {
+      return jsonResponse({
+        agents: [],
+        accounts: [],
+        projects: [],
+        spaces: [],
+        agentStates: [],
+        seq: 1,
+      });
+    },
+    createEventSource(url) {
+      const source = { url, close() {} };
+      sources.push(source);
+      return source;
+    },
+  };
+  const runtime = createAppRuntime({ platform });
+  await runtime.start();
+  await flushAsyncWork();
+
+  sources[0].onmessage({
+    data: JSON.stringify({
+      seq: 2,
+      type: "project.updated",
+      data: { project: { id: "prj_1", name: "Initial" } },
+    }),
+  });
+  sources[0].onmessage({
+    data: JSON.stringify({
+      seq: 3,
+      type: "project.updated",
+      data: { project: { id: "prj_1", name: "Renamed" } },
+    }),
+  });
+  assert.deepEqual(runtime.getBootstrap().projects, [{ id: "prj_1", name: "Renamed" }]);
+
+  sources[0].onmessage({
+    data: JSON.stringify({
+      seq: 4,
+      type: "project.deleted",
+      data: { projectId: "prj_1" },
+    }),
+  });
+  assert.deepEqual(runtime.getBootstrap().projects, []);
+  runtime.close();
+});
+
 test("space-session.created advances the canonical active session pointer", async () => {
   const sources = [];
   const platform = {
@@ -263,6 +314,38 @@ test("local Space and Group merges plus presence events update the canonical boo
   assert.equal(runtime.getBootstrap().groups[0].id, "grp_local");
   sources[0].onmessage({ data: JSON.stringify({ seq: 2, type: "account.presence.updated", data: { accountId: "acc_1", presence: "online", lastSeenAt: "now", activeAgentId: "agt_1" } }) });
   assert.deepEqual(runtime.getBootstrap().accounts[0], { id: "acc_1", presence: "online", lastSeenAt: "now", activeAgentId: "agt_1" });
+  runtime.close();
+});
+
+test("local Project merges update the canonical projection and notify subscribers once", async () => {
+  const platform = {
+    async getGatewayUrl() { return "https://vera.test"; },
+    async fetch() {
+      return jsonResponse({
+        agents: [],
+        accounts: [],
+        projects: [],
+        groups: [],
+        spaces: [],
+        agentStates: [],
+        seq: 1,
+      });
+    },
+    createEventSource() { return { close() {} }; },
+  };
+  const runtime = createAppRuntime({ platform });
+  await runtime.start();
+  await flushAsyncWork();
+  const received = [];
+  runtime.subscribe((event) => received.push(event));
+
+  runtime.mergeProject({ id: "prj_local", name: "Local" });
+  runtime.mergeProject({ id: "prj_local", name: "Updated" });
+
+  assert.deepEqual(runtime.getBootstrap().projects, [{ id: "prj_local", name: "Updated" }]);
+  assert.deepEqual(received.map((event) => event.type), ["project.updated", "project.updated"]);
+  assert.equal(received[0].data.project.name, "Local");
+  assert.equal(received[1].data.project.name, "Updated");
   runtime.close();
 });
 

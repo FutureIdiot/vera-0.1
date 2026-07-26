@@ -53,6 +53,10 @@ export function createAppRuntime({
         : upsert(bootstrap.spaces, space);
     } else if (envelope.type === "space.deleted" && envelope.data?.spaceId) {
       bootstrap.spaces = bootstrap.spaces.filter((space) => space.id !== envelope.data.spaceId);
+    } else if (envelope.type === "project.updated" && envelope.data?.project) {
+      bootstrap.projects = upsert(bootstrap.projects ?? [], envelope.data.project);
+    } else if (envelope.type === "project.deleted" && envelope.data?.projectId) {
+      bootstrap.projects = (bootstrap.projects ?? []).filter((project) => project.id !== envelope.data.projectId);
     } else if (envelope.type === "group.updated" && envelope.data?.group) {
       bootstrap.groups = upsert(bootstrap.groups ?? [], envelope.data.group);
     } else if (envelope.type === "group.deleted" && envelope.data?.groupId) {
@@ -166,6 +170,11 @@ export function createAppRuntime({
     },
     mergeGroup(group) {
       const envelope = { type: "group.updated", seq: bootstrap?.seq ?? 0, data: { group } };
+      applyBootstrapEvent(envelope);
+      for (const listener of listeners) listener(envelope);
+    },
+    mergeProject(project) {
+      const envelope = { type: "project.updated", seq: bootstrap?.seq ?? 0, data: { project } };
       applyBootstrapEvent(envelope);
       for (const listener of listeners) listener(envelope);
     },

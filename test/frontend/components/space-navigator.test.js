@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveSpaceCreationTarget } from "../../../frontend/src/components/space-navigator.js";
+import {
+  filterAndSortSpaces,
+  resolveSpaceCreationTarget,
+} from "../../../frontend/src/components/space-navigator-projection.js";
 
 const accounts = [
   { id: "acc_a", name: "Alpha" },
@@ -37,4 +40,34 @@ test("Space creation inherits the selected contact member set", () => {
       { accountId: "acc_a", responseMode: "default" },
     ],
   });
+});
+
+test("Space filtering is a derived projection and does not mutate canonical order", () => {
+  const spaces = [
+    {
+      id: "spc_old",
+      name: "Notes",
+      topic: "Research",
+      spaceType: "notebook",
+      projectId: "prj_docs",
+      updatedAt: "2026-07-25T00:00:00.000Z",
+    },
+    {
+      id: "spc_new",
+      name: "Chat",
+      topic: "",
+      spaceType: "chat",
+      projectId: null,
+      updatedAt: "2026-07-26T00:00:00.000Z",
+    },
+  ];
+
+  const filtered = filterAndSortSpaces(
+    spaces,
+    [{ id: "prj_docs", name: "Documentation" }],
+    "documentation",
+  );
+
+  assert.deepEqual(filtered.map((space) => space.id), ["spc_old"]);
+  assert.deepEqual(spaces.map((space) => space.id), ["spc_old", "spc_new"]);
 });
