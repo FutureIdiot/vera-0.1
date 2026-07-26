@@ -28,6 +28,15 @@
   position: relative;
 }
 
+html.vera-navigator-swipe-route,
+html.vera-navigator-swipe-route body {
+  overscroll-behavior-x: none;
+}
+
+.vera-shell.is-space-route {
+  touch-action: pan-y pinch-zoom;
+}
+
 .vera-shell__header {
   align-items: center;
   backdrop-filter: blur(var(--vera-backdrop-blur));
@@ -76,7 +85,7 @@
 
 .vera-shell__participant {
   align-items: center;
-  background: var(--vera-color-accent-soft);
+  background: var(--vera-color-avatar-background);
   border: calc(var(--vera-border-width) * 2) solid var(--vera-color-header);
   border-radius: 50%;
   color: var(--vera-color-accent);
@@ -95,7 +104,7 @@
 }
 
 .vera-shell__participant--more {
-  background: var(--vera-color-surface-strong);
+  background: var(--vera-color-avatar-background);
   color: var(--vera-color-muted-text);
   font-size: var(--vera-font-size-tiny);
 }

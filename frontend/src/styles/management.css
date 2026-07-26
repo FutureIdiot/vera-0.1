@@ -93,7 +93,7 @@
 }
 .vera-agent-avatar__canvas {
   align-items: center;
-  background: var(--vera-color-surface);
+  background: var(--vera-color-avatar-background);
   border: calc(var(--vera-border-width) * 3) solid var(--vera-color-border);
   border-radius: var(--vera-control-radius);
   display: flex;

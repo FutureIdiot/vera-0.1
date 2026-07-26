@@ -21,6 +21,35 @@
   z-index: 10;
 }
 
+.vera-space-details-dialog,
+.vera-group-details-dialog {
+  -webkit-backdrop-filter: blur(var(--vera-navigator-dialog-backdrop-blur));
+  backdrop-filter: blur(var(--vera-navigator-dialog-backdrop-blur));
+  background: var(--vera-color-navigator-dialog-acrylic);
+  border-color: var(--vera-color-navigator-dialog-border);
+  border-radius: var(--vera-navigator-dialog-radius);
+  box-shadow: none;
+}
+
+.vera-navigator__spaces:has(> .vera-space-details-dialog, > .vera-group-details-dialog)::after {
+  background: var(--vera-color-navigator-dialog-scrim);
+  content: "";
+  inset: 0;
+  position: absolute;
+  z-index: 9;
+}
+
+.vera-space-details-dialog :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea),
+.vera-group-details-dialog :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  background: var(--vera-color-navigator-dialog-control-bg);
+  border-color: var(--vera-color-navigator-dialog-control-border);
+}
+
+.vera-space-details-dialog .vera-dialog__actions :is(.vera-text-button, .vera-primary-button),
+.vera-group-details-dialog .vera-dialog__actions :is(.vera-text-button, .vera-primary-button) {
+  font-size: var(--vera-navigator-dialog-action-font-size);
+}
+
 .vera-dialog__field {
   color: var(--vera-color-muted-text);
   display: grid;

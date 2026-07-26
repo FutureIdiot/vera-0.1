@@ -87,12 +87,14 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
   const nodeByKey = new Map();
   const accountNameById = new Map();
   const bubbleCtx = { accountName: (id) => accountNameById.get(id) };
-  const messageContext = (items, index) => ({
-    ...bubbleCtx,
-    grouping: resolveMessageGrouping(items, index, {
-      isGroupChat: (space?.seats?.length ?? 0) > 1,
-    }),
-  });
+  const messageContext = (items, index) => {
+    const isGroupChat = (space?.seats?.length ?? 0) > 1;
+    return {
+      ...bubbleCtx,
+      isGroupChat,
+      grouping: resolveMessageGrouping(items, index, { isGroupChat }),
+    };
+  };
   const activityContext = () => ({
     canExpand: (space?.seats?.length ?? 0) === 1 && observation?.observedSpaceId === space?.id,
   });

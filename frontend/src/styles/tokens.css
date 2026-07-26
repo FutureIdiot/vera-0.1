@@ -24,6 +24,7 @@
   --vera-color-overlay: color-mix(in srgb, var(--vera-color-text), transparent 62%);
   --vera-color-selection: color-mix(in srgb, var(--vera-color-accent), transparent 70%);
   --vera-color-accent-soft: color-mix(in srgb, var(--vera-color-accent), transparent 86%);
+  --vera-color-avatar-background: transparent;
   --vera-color-error-soft: color-mix(in srgb, var(--vera-color-error), transparent 84%);
   --vera-color-success-soft: color-mix(in srgb, var(--vera-color-success), transparent 84%);
   --vera-color-warning-soft: color-mix(in srgb, var(--vera-color-warning), transparent 86%);
@@ -135,6 +136,9 @@
   --vera-navigator-sort-icon-size: var(--vera-font-size-small);
   --vera-navigator-sort-menu-width: 220px;
   --vera-navigator-dialog-width: 304px;
+  --vera-navigator-dialog-radius: calc(var(--vera-control-radius) + var(--vera-space-sm));
+  --vera-navigator-dialog-backdrop-blur: 10px;
+  --vera-navigator-dialog-action-font-size: var(--vera-font-size-small);
   --vera-navigator-font-size-rail: 9px;
   --vera-navigator-font-size-label: 11px;
   --vera-navigator-font-size-meta: 11px;
@@ -147,6 +151,31 @@
     var(--vera-font-weight-regular) var(--vera-font-size-chat-body) / 1.25 var(--vera-font-family);
   --vera-navigator-row-icon-stroke-width: 1.5;
   --vera-color-navigator-bg: color-mix(in srgb, var(--vera-color-surface), var(--vera-color-text) 14.3%);
+  --vera-color-navigator-dialog-acrylic: color-mix(
+    in srgb,
+    var(--vera-color-surface),
+    transparent 28%
+  );
+  --vera-color-navigator-dialog-scrim: color-mix(
+    in srgb,
+    var(--vera-color-background),
+    transparent 76%
+  );
+  --vera-color-navigator-dialog-border: color-mix(
+    in srgb,
+    var(--vera-color-text),
+    transparent 82%
+  );
+  --vera-color-navigator-dialog-control-bg: color-mix(
+    in srgb,
+    var(--vera-color-surface-soft),
+    transparent 12%
+  );
+  --vera-color-navigator-dialog-control-border: color-mix(
+    in srgb,
+    var(--vera-color-text),
+    transparent 90%
+  );
   --vera-color-navigator-rail-bg: color-mix(
     in srgb,
     var(--vera-color-surface-strong),

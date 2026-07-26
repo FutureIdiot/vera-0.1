@@ -153,9 +153,14 @@ test("private Account message hides the repeated name and model", () => {
       effectiveModel: "gemma-test",
       content: "hello",
     }, {
+      isGroupChat: false,
       grouping: { position: "solo", showAuthor: false, showAvatar: true, showTail: true },
     });
 
+    const avatar = bubble.querySelector(".vera-bubble__avatar");
+    assert.equal(bubble.classList.contains("vera-bubble--private-agent"), true);
+    assert.equal(avatar.hidden, true);
+    assert.equal(avatar.href, "");
     assert.equal(bubble.querySelector(".vera-bubble__author").hidden, true);
     assert.equal(bubble.querySelector(".vera-bubble__author").textContent, "");
   } finally {
@@ -336,6 +341,16 @@ test("same Account and run form first middle last bubbles in group chat", () => 
     showAvatar: true,
     showTail: true,
   });
+});
+
+test("private Account message groups never expose an avatar", () => {
+  const items = [
+    accountMessage("msg_1", "run_1"),
+    accountMessage("msg_2", "run_1"),
+  ];
+
+  assert.equal(resolveMessageGrouping(items, 0).showAvatar, false);
+  assert.equal(resolveMessageGrouping(items, 1).showAvatar, false);
 });
 
 test("adjacent user messages form first middle last bubbles without run ids", () => {

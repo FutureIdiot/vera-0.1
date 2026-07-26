@@ -42,7 +42,7 @@ export function resolveMessageGrouping(items, index, { isGroupChat = false } = {
   return {
     position,
     showAuthor: isAccount && isGroupChat && !joinsPrevious,
-    showAvatar: isAccount && !joinsNext,
+    showAvatar: isAccount && isGroupChat && !joinsNext,
     showTail: !joinsNext,
   };
 }
@@ -171,6 +171,7 @@ function ensureStructure(el) {
 
 export function applyMessageBubble(el, item, ctx = {}) {
   const isUser = item.author?.type === "user";
+  const isPrivateAgent = !isUser && ctx.isGroupChat === false;
   const streaming = item.status === "streaming";
   const grouping = ctx.grouping ?? {
     position: "solo",
@@ -183,6 +184,7 @@ export function applyMessageBubble(el, item, ctx = {}) {
     "vera-item",
     "vera-bubble",
     `vera-bubble--${isUser ? "user" : "agent"}`,
+    isPrivateAgent ? "vera-bubble--private-agent" : "",
     `vera-bubble--group-${grouping.position}`,
     streaming ? "vera-bubble--streaming" : "",
     grouping.showTail ? "vera-bubble--has-tail" : "",
@@ -209,10 +211,10 @@ export function applyMessageBubble(el, item, ctx = {}) {
     ? `${accountName}${item.effectiveModel ? ` · ${item.effectiveModel}` : ""}`
     : "";
   const avatarEligible = !isUser && Boolean(accountId);
-  const avatarVisible = avatarEligible && grouping.showAvatar;
+  const avatarVisible = avatarEligible && grouping.showAvatar && !isPrivateAgent;
   avatarEl.textContent = avatarEligible ? (accountName || "?").charAt(0).toUpperCase() : "";
-  avatarEl.hidden = !avatarEligible;
-  avatarEl.classList.toggle("is-placeholder", avatarEligible && !avatarVisible);
+  avatarEl.hidden = !avatarEligible || isPrivateAgent;
+  avatarEl.classList.toggle("is-placeholder", avatarEligible && !avatarVisible && !isPrivateAgent);
   avatarEl.setAttribute("aria-hidden", String(!avatarVisible));
   avatarEl.tabIndex = avatarVisible ? 0 : -1;
   if (avatarVisible) {

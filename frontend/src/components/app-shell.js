@@ -123,7 +123,9 @@ export function createAppShell({ root, platform, runtime } = {}) {
   let shellDestroyed = false;
 
   const shell = document.createElement("section");
-  shell.className = "vera-shell";
+  shell.className = "vera-shell is-space-route";
+  const documentRoot = root.ownerDocument?.documentElement ?? document.documentElement;
+  documentRoot.classList.add("vera-navigator-swipe-route");
 
   const header = document.createElement("header");
   header.className = "vera-shell__header";
@@ -416,9 +418,12 @@ export function createAppShell({ root, platform, runtime } = {}) {
   function setRoute(route, { space: projectedSpace } = {}) {
     navigator.cancelDialogs();
     activeRouteName = route.name;
+    const spaceRoute = isSpaceRoute();
+    shell.classList.toggle("is-space-route", spaceRoute);
+    documentRoot.classList.toggle("vera-navigator-swipe-route", spaceRoute);
     managementHeader = null;
     const bootstrap = runtime.getBootstrap();
-    if (isSpaceRoute()) {
+    if (spaceRoute) {
       const routeSpace = projectedSpace !== undefined
         ? projectedSpace
         : route.spaceId
@@ -494,6 +499,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
     getCurrentSpace() { return currentSpace; },
     destroy() {
       shellDestroyed = true;
+      documentRoot.classList.remove("vera-navigator-swipe-route");
       unsubscribeRuntime();
       detachNavigatorSwipe();
       navigator.resizeHandle.removeEventListener("pointerdown", onNavigatorResizePointerDown);

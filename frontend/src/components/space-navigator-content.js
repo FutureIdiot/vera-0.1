@@ -5,6 +5,7 @@ import {
   filterAndSortSpaces,
   sortProjectGroups,
 } from "./space-navigator-projection.js";
+import { attachSpaceRowTouchActions } from "../hooks/space-row-actions.js";
 
 const SORT_OPTIONS = [
   { id: "recents", label: "Recents", hint: "按最近活动排序" },
@@ -32,6 +33,12 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
   let query = "";
   let sortMode = "recents";
   let sortOpen = false;
+
+  function closeTouchActions(except = null) {
+    for (const row of host.querySelectorAll(".vera-space-row.is-actions-revealed")) {
+      if (row !== except) row.classList.remove("is-actions-revealed");
+    }
+  }
 
   function renderHeader({ entry, canCreateSpace }) {
     const header = document.createElement("header");
@@ -100,6 +107,9 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
       space.id === currentSpaceId ? "is-active" : "",
       isArchived ? "is-archived" : "",
     ].filter(Boolean).join(" ");
+    attachSpaceRowTouchActions(row, {
+      onReveal: (current) => closeTouchActions(current),
+    });
     const open = makeNavigatorButton("vera-space-row__open", () => actions.navigate(space.id));
     const icon = document.createElement("span");
     icon.className = `vera-space-row__type is-${space.spaceType}`;
@@ -333,7 +343,14 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
     sortOpen = false;
     render();
   };
+  const closeTouchActionsOnOutsidePress = (event) => {
+    if (
+      event.pointerType === "touch"
+      && !event.target.closest(".vera-space-row.is-actions-revealed")
+    ) closeTouchActions();
+  };
   host.addEventListener("click", closeSortMenu);
+  host.addEventListener("pointerdown", closeTouchActionsOnOutsidePress);
 
   return {
     render,
@@ -343,6 +360,7 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
     },
     destroy() {
       host.removeEventListener("click", closeSortMenu);
+      host.removeEventListener("pointerdown", closeTouchActionsOnOutsidePress);
     },
   };
 }

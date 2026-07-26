@@ -23,7 +23,7 @@
 
 .vera-navigator__avatar {
   align-items: center;
-  background: var(--vera-color-surface-strong);
+  background: var(--vera-color-avatar-background);
   border: var(--vera-border-width) solid var(--vera-color-border);
   border-radius: 50%;
   box-shadow: var(--vera-shadow-sm);

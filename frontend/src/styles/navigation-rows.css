@@ -11,8 +11,8 @@
   transition: background var(--vera-transition-fast), border-color var(--vera-transition-fast);
 }
 
-.vera-space-row:hover,
-.vera-space-row:focus-within {
+.vera-space-row.is-actions-revealed,
+.vera-space-row:has(:focus-visible) {
   background: var(--vera-color-navigator-hover);
   border-color: transparent;
 }
@@ -140,8 +140,8 @@
   visibility: hidden;
 }
 
-.vera-space-row:hover .vera-space-row__actions,
-.vera-space-row:focus-within .vera-space-row__actions {
+.vera-space-row.is-actions-revealed .vera-space-row__actions,
+.vera-space-row:has(:focus-visible) .vera-space-row__actions {
   opacity: 1;
   transform: none;
   visibility: visible;
@@ -186,10 +186,10 @@
   visibility: hidden;
 }
 
-.vera-space-row:hover .vera-space-row__lead > .vera-space-row__pin,
-.vera-space-row:focus-within .vera-space-row__lead > .vera-space-row__pin,
-.vera-space-row:hover .vera-space-row__lead > .vera-space-row__restore,
-.vera-space-row:focus-within .vera-space-row__lead > .vera-space-row__restore {
+.vera-space-row.is-actions-revealed .vera-space-row__lead > .vera-space-row__pin,
+.vera-space-row:has(:focus-visible) .vera-space-row__lead > .vera-space-row__pin,
+.vera-space-row.is-actions-revealed .vera-space-row__lead > .vera-space-row__restore,
+.vera-space-row:has(:focus-visible) .vera-space-row__lead > .vera-space-row__restore {
   opacity: 1;
   visibility: visible;
 }
@@ -206,15 +206,13 @@
   visibility: hidden;
 }
 
-.vera-space-row:hover .vera-space-row__action.is-trailing,
-.vera-space-row:focus-within .vera-space-row__action.is-trailing {
+.vera-space-row.is-actions-revealed .vera-space-row__action.is-trailing,
+.vera-space-row:has(:focus-visible) .vera-space-row__action.is-trailing {
   opacity: 1;
   visibility: visible;
 }
 
-.vera-space-row.is-archived .vera-space-row__actions,
-.vera-space-row.is-archived:hover .vera-space-row__actions,
-.vera-space-row.is-archived:focus-within .vera-space-row__actions {
+.vera-space-row.is-archived .vera-space-row__actions {
   padding: 0;
   transform: translateX(
     calc(var(--vera-navigator-row-padding-inline) - var(--vera-navigator-row-edge-control-offset))
@@ -239,6 +237,33 @@
 
 .vera-space-row__pin .vera-vector-icon {
   transform: rotate(45deg);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .vera-space-row:hover {
+    background: var(--vera-color-navigator-hover);
+    border-color: transparent;
+  }
+
+  .vera-space-row:hover .vera-space-row__actions {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+  }
+
+  .vera-space-row:hover .vera-space-row__lead > .vera-space-row__pin,
+  .vera-space-row:hover .vera-space-row__lead > .vera-space-row__restore,
+  .vera-space-row:hover .vera-space-row__action.is-trailing {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .vera-space-row {
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
