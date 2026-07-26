@@ -13,6 +13,7 @@ function makeId(prefix) {
 export const newAgentId = () => makeId("agt");
 export const newAccountId = () => makeId("acc");
 export const newProjectId = () => makeId("prj");
+export const newGroupId = () => makeId("grp");
 export const newSpaceId = () => makeId("spc");
 export const newMessageId = () => makeId("msg");
 export const newFileId = () => makeId("fil");

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveSpaceCreationSeats } from "../../../frontend/src/components/space-navigator.js";
+import { resolveSpaceCreationTarget } from "../../../frontend/src/components/space-navigator.js";
 
 const accounts = [
   { id: "acc_a", name: "Alpha" },
@@ -8,21 +8,33 @@ const accounts = [
 ];
 
 test("Space creation has no seats until a contact is selected", () => {
-  assert.deepEqual(resolveSpaceCreationSeats(accounts, [], "account:none"), []);
-  assert.deepEqual(resolveSpaceCreationSeats(accounts, [], null), []);
+  assert.deepEqual(resolveSpaceCreationTarget(accounts, [], "account:none"), {
+    groupId: null,
+    seats: [],
+  });
+  assert.deepEqual(resolveSpaceCreationTarget(accounts, [], null), {
+    groupId: null,
+    seats: [],
+  });
 });
 
 test("Space creation inherits the selected contact member set", () => {
-  assert.deepEqual(resolveSpaceCreationSeats(accounts, [], "account:acc_a"), [
-    { accountId: "acc_a", responseMode: "default" },
-  ]);
+  assert.deepEqual(resolveSpaceCreationTarget(accounts, [], "account:acc_a"), {
+    groupId: null,
+    seats: [{ accountId: "acc_a", responseMode: "default" }],
+  });
 
-  const spaces = [{
-    id: "spc_group",
-    seats: [{ accountId: "acc_b" }, { accountId: "acc_a" }],
+  const groups = [{
+    id: "grp_ab",
+    name: "Alpha Beta",
+    topic: "",
+    accountIds: ["acc_b", "acc_a"],
   }];
-  assert.deepEqual(resolveSpaceCreationSeats(accounts, spaces, "group:acc_a,acc_b"), [
-    { accountId: "acc_a", responseMode: "default" },
-    { accountId: "acc_b", responseMode: "default" },
-  ]);
+  assert.deepEqual(resolveSpaceCreationTarget(accounts, groups, "group:grp_ab"), {
+    groupId: "grp_ab",
+    seats: [
+      { accountId: "acc_b", responseMode: "default" },
+      { accountId: "acc_a", responseMode: "default" },
+    ],
+  });
 });

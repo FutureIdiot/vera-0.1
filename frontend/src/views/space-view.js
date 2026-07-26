@@ -9,7 +9,6 @@ import {
 import { renderActivity, applyActivity } from "../components/activity-item.js";
 import { renderApprovalCard, applyApprovalCard } from "../components/approval-card.js";
 import { createComposer } from "../components/composer.js";
-import { attachEdgeSwipe } from "../hooks/edge-swipe.js";
 import { createRunStatus } from "../components/run-status.js";
 import { createFilesClient, FILE_ACCEPT } from "../api/files-client.js";
 
@@ -408,8 +407,6 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     }
   });
 
-  const detachEdgeSwipe = attachEdgeSwipe(root, () => shell?.openNavigator());
-
   void hydrateFromBootstrap(bootstrap, bootstrap.seq).catch((err) => {
     handleHydrationError("加载时间线失败", err);
   });
@@ -421,7 +418,6 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     pendingEvents = [];
     unsubscribeRuntime();
     unsubscribeStore();
-    detachEdgeSwipe();
     nodeByKey.clear();
     root.replaceChildren();
     delete root.dataset.routeScope;

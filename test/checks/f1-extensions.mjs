@@ -349,6 +349,7 @@ export async function run(ctx) {
     assert(typeof s.sse.connectedClients === "number", "connectedClients should be number");
     assert("collections" in s.store, "should have collections");
     assert("projects" in s.store.collections, "collections should include projects");
+    assert("groups" in s.store.collections, "collections should include groups");
     assert("themes" in s.store.collections, "collections should include themes");
     assert(Array.isArray(s.recentErrors), "recentErrors should be array");
   });

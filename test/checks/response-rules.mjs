@@ -3,6 +3,11 @@
 
 export async function run(ctx) {
   const { check, httpRequest, sse, assertEqual, assert, createOnlineMockAccount } = ctx;
+  const createGroup = async (name, accountIds) => {
+    const response = await httpRequest("POST", "/api/groups", { name, accountIds });
+    assertEqual(response.status, 201);
+    return response.json.group;
+  };
 
   await check("m.1 silent 默认（respondTo=null）：广播不响应、定向 @ 响应", async () => {
     const onlineS1 = await createOnlineMockAccount({ name: "VerifyMockS1" });
@@ -45,8 +50,10 @@ export async function run(ctx) {
     const onlineS2b = await createOnlineMockAccount({ name: "VerifyMockS2b" });
     const agentS2b = onlineS2b.agent;
     const accountS2b = onlineS2b.account;
+    const group = await createGroup("m2-group", [accountS2.id, accountS2b.id]);
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m2-space",
+      groupId: group.id,
       seats: [
         { accountId: accountS2.id, responseMode: "silent", respondTo: ["user"] },
         { accountId: accountS2b.id, responseMode: "focused" },
@@ -122,8 +129,10 @@ export async function run(ctx) {
     const onlineY = await createOnlineMockAccount({ name: "VerifyMockY" });
     const agentY = onlineY.agent;
     const accountY = onlineY.account;
+    const group = await createGroup("m4-group", [accountX.id, accountY.id]);
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m4-space",
+      groupId: group.id,
       seats: [
         { accountId: accountX.id, responseMode: "default" },
         { accountId: accountY.id, responseMode: "default", blockAccountIds: [accountX.id] },

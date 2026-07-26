@@ -88,9 +88,15 @@ export async function run(ctx) {
     const online2 = await createOnlineMockAccount({ name: "VerifyMock2b" });
     const agent2 = online2.agent;
     const account2 = online2.account;
+    const groupResp = await httpRequest("POST", "/api/groups", {
+      name: "Driving group",
+      accountIds: [online1.account.id, account2.id],
+    });
+    assertEqual(groupResp.status, 201);
 
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "driving-space",
+      groupId: groupResp.json.group.id,
       seats: [
         { accountId: online1.account.id, responseMode: "default" },
         { accountId: account2.id, responseMode: "default" },

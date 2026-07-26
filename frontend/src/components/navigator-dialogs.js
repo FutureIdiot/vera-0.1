@@ -75,6 +75,101 @@ export function requestNavigatorText(host, title, initialValue = "") {
   });
 }
 
+export function requestGroupDetails(host, {
+  title,
+  initialValue = {},
+  accounts = [],
+} = {}) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement("form");
+    dialog.className = "vera-dialog vera-group-details-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    heading.id = `vera-dialog-title-${++dialogSequence}`;
+    dialog.setAttribute("aria-labelledby", heading.id);
+
+    const nameLabel = document.createElement("label");
+    nameLabel.className = "vera-dialog__field";
+    const nameText = document.createElement("span");
+    nameText.textContent = "群聊名称";
+    const nameInput = document.createElement("input");
+    nameInput.value = initialValue.name ?? "";
+    nameInput.required = true;
+    nameInput.setAttribute("aria-label", "群聊名称");
+    nameLabel.append(nameText, nameInput);
+
+    const topicLabel = document.createElement("label");
+    topicLabel.className = "vera-dialog__field";
+    const topicText = document.createElement("span");
+    topicText.textContent = "主题";
+    const topicInput = document.createElement("textarea");
+    topicInput.value = initialValue.topic ?? "";
+    topicInput.setAttribute("aria-label", "群聊主题");
+    topicInput.placeholder = "这个群聊关注什么";
+    topicLabel.append(topicText, topicInput);
+
+    const members = document.createElement("fieldset");
+    members.className = "vera-dialog__members";
+    const membersLegend = document.createElement("legend");
+    membersLegend.textContent = "成员";
+    members.appendChild(membersLegend);
+    const selectedIds = new Set(initialValue.accountIds ?? []);
+    const memberInputs = new Map();
+    for (const account of accounts) {
+      const label = document.createElement("label");
+      label.className = "vera-check";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = selectedIds.has(account.id);
+      const text = document.createElement("span");
+      text.textContent = account.name;
+      label.append(input, text);
+      members.appendChild(label);
+      memberInputs.set(account.id, input);
+    }
+
+    const error = document.createElement("p");
+    error.className = "vera-inline-error";
+    error.hidden = true;
+    const actions = document.createElement("div");
+    actions.className = "vera-dialog__actions";
+    const cancel = button("取消", "vera-text-button", () => finish(null));
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.className = "vera-primary-button";
+    submit.textContent = "保存";
+    actions.append(cancel, submit);
+    dialog.append(heading, nameLabel, topicLabel, members, error, actions);
+    host.appendChild(dialog);
+
+    const deactivate = activateDialog(dialog, nameInput, () => finish(null));
+    function finish(value) {
+      deactivate();
+      dialog.remove();
+      resolve(value);
+    }
+    dialog.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const accountIds = [...memberInputs]
+        .filter(([, input]) => input.checked)
+        .map(([accountId]) => accountId);
+      if (accountIds.length < 2) {
+        error.textContent = "群聊至少需要两个 Account。";
+        error.hidden = false;
+        return;
+      }
+      finish({
+        name: nameInput.value.trim(),
+        topic: topicInput.value.trim(),
+        accountIds,
+      });
+    });
+  });
+}
+
 export function requestSpaceDetails(host, {
   title,
   initialValue = {},

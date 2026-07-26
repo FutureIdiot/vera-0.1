@@ -111,6 +111,29 @@ function normalizeProjectId(store, value) {
   return value;
 }
 
+function seatAccountIds(seats) {
+  return seats.map((seat) => seat.accountId).sort();
+}
+
+function assertSpaceMembership(store, groupId, seats) {
+  if (groupId === null) {
+    if (seats.length !== 1) {
+      throw new ApiError("invalid_request", "a Direct Space must contain exactly one Account seat");
+    }
+    return;
+  }
+  if (typeof groupId !== "string") {
+    throw new ApiError("invalid_request", "groupId must be null or a Group id");
+  }
+  const group = store.find("groups", groupId);
+  if (!group) throw new ApiError("invalid_request", `groupId ${groupId} is not a known Group`);
+  const actual = seatAccountIds(seats);
+  const expected = [...group.accountIds].sort();
+  if (actual.length !== expected.length || actual.some((id, index) => id !== expected[index])) {
+    throw new ApiError("invalid_request", "Space seats must match Group accountIds");
+  }
+}
+
 // 旧 Space 记录可能缺这些字段，读取时补默认；导航字段另由 store 启动迁移持久补齐。
 function normalizeSpace(space) {
   const normalized = stripInternal(space);
@@ -119,6 +142,7 @@ function normalizeSpace(space) {
   normalized.pinned = space.pinned ?? false;
   normalized.spaceType = space.spaceType ?? DEFAULT_SPACE_TYPE.id;
   normalized.projectId = space.projectId ?? null;
+  normalized.groupId = space.groupId ?? null;
   normalized.updatedAt = space.updatedAt ?? space.createdAt ?? null;
   return normalized;
 }
@@ -139,7 +163,7 @@ export function listSpaces(store, { archived } = {}) {
 export function createSpace(store, body) {
   assertExactObject(
     body,
-    ["name", "topic", "seats", "notifications", "pinned", "spaceType", "projectId"],
+    ["name", "topic", "seats", "groupId", "notifications", "pinned", "spaceType", "projectId"],
     { required: ["name", "seats"] },
   );
   if (typeof body?.name !== "string" || !body.name.trim()) {
@@ -148,12 +172,16 @@ export function createSpace(store, body) {
   if (body.topic !== undefined && typeof body.topic !== "string") {
     throw new ApiError("invalid_request", "topic must be a string");
   }
+  const seats = normalizeSeats(store, body.seats);
+  const groupId = body.groupId ?? null;
+  assertSpaceMembership(store, groupId, seats);
   const timestamp = new Date().toISOString();
   const space = {
     id: newSpaceId(),
     name: body.name.trim(),
     topic: body.topic ?? "",
-    seats: normalizeSeats(store, body.seats),
+    seats,
+    groupId,
     notifications: normalizeNotifications(body.notifications),
     pinned: normalizePinned(body.pinned ?? false),
     spaceType: normalizeSpaceType(body.spaceType ?? DEFAULT_SPACE_TYPE.id),
@@ -190,7 +218,10 @@ export function updateSpace(store, id, patch) {
     if (typeof patch.topic !== "string") throw new ApiError("invalid_request", "topic must be a string");
     next.topic = patch.topic;
   }
-  if (patch.seats !== undefined) next.seats = normalizeSeats(store, patch.seats);
+  if (patch.seats !== undefined) {
+    next.seats = normalizeSeats(store, patch.seats);
+    assertSpaceMembership(store, space.groupId ?? null, next.seats);
+  }
   if (patch.notifications !== undefined) next.notifications = normalizeNotifications(patch.notifications);
   if (patch.pinned !== undefined) next.pinned = normalizePinned(patch.pinned);
   if (patch.spaceType !== undefined) next.spaceType = normalizeSpaceType(patch.spaceType);

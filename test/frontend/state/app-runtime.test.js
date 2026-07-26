@@ -238,11 +238,20 @@ test("observation.updated keeps the shared process-visibility projection current
   runtime.close();
 });
 
-test("local Space merges and presence events update the canonical bootstrap projection", async () => {
+test("local Space and Group merges plus presence events update the canonical bootstrap projection", async () => {
   const sources = [];
   const platform = {
     async getGatewayUrl() { return "https://vera.test"; },
-    async fetch() { return jsonResponse({ agents: [], accounts: [{ id: "acc_1", presence: "offline" }], spaces: [], agentStates: [], seq: 1 }); },
+    async fetch() {
+      return jsonResponse({
+        agents: [],
+        accounts: [{ id: "acc_1", presence: "offline" }],
+        groups: [],
+        spaces: [],
+        agentStates: [],
+        seq: 1,
+      });
+    },
     createEventSource(url) { const source = { url, close() {} }; sources.push(source); return source; },
   };
   const runtime = createAppRuntime({ platform });
@@ -250,6 +259,8 @@ test("local Space merges and presence events update the canonical bootstrap proj
   await flushAsyncWork();
   runtime.mergeSpace({ id: "spc_local", name: "Local", archivedAt: null });
   assert.equal(runtime.getBootstrap().spaces[0].id, "spc_local");
+  runtime.mergeGroup({ id: "grp_local", name: "Local Group", accountIds: ["acc_1", "acc_2"] });
+  assert.equal(runtime.getBootstrap().groups[0].id, "grp_local");
   sources[0].onmessage({ data: JSON.stringify({ seq: 2, type: "account.presence.updated", data: { accountId: "acc_1", presence: "online", lastSeenAt: "now", activeAgentId: "agt_1" } }) });
   assert.deepEqual(runtime.getBootstrap().accounts[0], { id: "acc_1", presence: "online", lastSeenAt: "now", activeAgentId: "agt_1" });
   runtime.close();

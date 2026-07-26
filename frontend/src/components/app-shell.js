@@ -3,6 +3,7 @@ import { setIconButtonContent } from "./vector-icon.js";
 import { createHttpClient } from "../api/http-client.js";
 import { createSpacesClient } from "../api/spaces-client.js";
 import { getSpaceType } from "../../../src/spaces/space-types.js";
+import { attachNavigatorSwipe } from "../hooks/navigator-swipe.js";
 
 const MANAGEMENT_ROUTES = new Set([
   "space-settings",
@@ -331,6 +332,12 @@ export function createAppShell({ root, platform, runtime } = {}) {
     if (event.key === "Escape" && navigatorOpen) closeNavigator();
   };
   const onResize = () => applyNavigatorState();
+  const detachNavigatorSwipe = attachNavigatorSwipe(shell, {
+    onOpen: openNavigator,
+    onClose: closeNavigator,
+    isOpen: () => navigatorOpen,
+    isEnabled: isSpaceRoute,
+  });
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
   window.addEventListener("keydown", onKeyDown);
@@ -363,6 +370,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
     getCurrentSpace() { return currentSpace; },
     destroy() {
       unsubscribeRuntime();
+      detachNavigatorSwipe();
       navigator.destroy();
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);

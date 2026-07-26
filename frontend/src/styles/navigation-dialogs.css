@@ -35,7 +35,8 @@
 }
 
 .vera-dialog input,
-.vera-dialog select {
+.vera-dialog select,
+.vera-dialog textarea {
   background: var(--vera-color-background);
   border: var(--vera-border-width) solid var(--vera-color-border);
   border-radius: var(--vera-control-radius);
@@ -43,6 +44,32 @@
   min-height: var(--vera-touch-target);
   min-width: 0;
   padding: var(--vera-space-sm);
+}
+
+.vera-dialog textarea {
+  min-height: calc(var(--vera-touch-target) * 2);
+  resize: vertical;
+}
+
+.vera-dialog__members {
+  border: var(--vera-border-width) solid var(--vera-color-navigator-border-soft);
+  display: grid;
+  gap: var(--vera-space-sm);
+  margin: 0;
+  max-height: calc(var(--vera-touch-target) * 4);
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--vera-space-sm);
+  scrollbar-width: none;
+}
+
+.vera-dialog__members legend {
+  color: var(--vera-color-muted-text);
+  padding: 0 var(--vera-space-xs);
+}
+
+.vera-dialog__members::-webkit-scrollbar {
+  display: none;
 }
 
 .vera-dialog__inline-action {

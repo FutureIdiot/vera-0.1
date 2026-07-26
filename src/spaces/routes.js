@@ -31,6 +31,13 @@ import {
   updateProject,
   deleteProject,
 } from "./projects.js";
+import {
+  listGroups,
+  getGroupOrThrow,
+  createGroup,
+  updateGroup,
+  deleteGroup,
+} from "./groups.js";
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
@@ -40,6 +47,53 @@ export function registerSpaceRoutes(router, {
   store, hub, config, daemonScheduler, memoryDigestScheduler,
   daemonRuntime, daemonRunLifecycle, contextCompaction, memory, files, observation,
 }) {
+  router.get(
+    "/api/groups",
+    asHandler(async ({ res }) => {
+      sendJson(res, 200, { groups: listGroups(store) });
+    }),
+  );
+
+  router.get(
+    "/api/groups/:id",
+    asHandler(async ({ res, params }) => {
+      sendJson(res, 200, { group: getGroupOrThrow(store, params.id) });
+    }),
+  );
+
+  router.post(
+    "/api/groups",
+    asHandler(async ({ req, res }) => {
+      const body = await readJsonBody(req);
+      const group = createGroup(store, body);
+      hub.publish("group.updated", { group });
+      sendJson(res, 201, { group });
+    }),
+  );
+
+  router.patch(
+    "/api/groups/:id",
+    asHandler(async ({ req, res, params }) => {
+      const body = await readJsonBody(req);
+      const result = updateGroup(store, params.id, body);
+      hub.publish("group.updated", { group: result.group });
+      for (const space of result.spaces) {
+        observation?.reconcileSpace(space.id);
+        hub.publish("space.updated", { space });
+      }
+      sendJson(res, 200, result);
+    }),
+  );
+
+  router.delete(
+    "/api/groups/:id",
+    asHandler(async ({ res, params }) => {
+      deleteGroup(store, params.id);
+      hub.publish("group.deleted", { groupId: params.id });
+      sendNoContent(res);
+    }),
+  );
+
   router.get(
     "/api/projects",
     asHandler(async ({ res }) => {

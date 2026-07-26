@@ -55,9 +55,10 @@ import {
   planAccountModelSelection,
 } from "./migrations/account-model-selection.mjs";
 import { planWorkspaceBindings } from "./migrations/workspace-bindings.mjs";
+import { newGroupId } from "../core/id.js";
 
 const COLLECTIONS = [
-  "agents", "accounts", "projects", "spaces", "messages", "activities", "approvals", "runs", "themes",
+  "agents", "accounts", "groups", "projects", "spaces", "messages", "activities", "approvals", "runs", "themes",
   "memoryDigestJobs", "memoryRecallSessions", "memorySignals", "unitBindings", "memoryConfigs",
   "memoryTaskVerifications", "memoryDreamJobs",
   "spaceSessions", "agentSessions", "providerBindings", "apiHistories",
@@ -134,6 +135,66 @@ function normalizeSpaceNavigationFields(data, markDirty) {
   }
   if (changed) markDirty("spaces");
   return changed;
+}
+
+function normalizeSpaceGroupFields(data, markDirty) {
+  let groupsChanged = false;
+  let spacesChanged = false;
+  const timestamp = new Date().toISOString();
+  const accountsById = new Map(data.accounts.map((account) => [account.id, account]));
+  const groupsById = new Map(data.groups.map((group) => [group.id, group]));
+  const legacyGroupsByMembers = new Map(
+    data.groups.map((group) => [[...group.accountIds].sort().join(","), group]),
+  );
+
+  for (const space of data.spaces) {
+    if ("groupId" in space) {
+      const seatIds = [...new Set((space.seats ?? []).map((seat) => seat.accountId).filter(Boolean))].sort();
+      if (space.groupId === null && seatIds.length > 1) {
+        throw new Error(`direct space ${space.id} contains multiple Account seats`);
+      }
+      if (space.groupId !== null && !groupsById.has(space.groupId)) {
+        throw new Error(`space ${space.id} references missing group ${space.groupId}`);
+      }
+      if (space.groupId !== null) {
+        const groupIds = [...groupsById.get(space.groupId).accountIds].sort();
+        if (seatIds.length !== groupIds.length || seatIds.some((id, index) => id !== groupIds[index])) {
+          throw new Error(`space ${space.id} seats do not match group ${space.groupId}`);
+        }
+      }
+      continue;
+    }
+    const accountIds = [...new Set((space.seats ?? []).map((seat) => seat.accountId).filter(Boolean))].sort();
+    if (accountIds.length < 2) {
+      space.groupId = null;
+      spacesChanged = true;
+      continue;
+    }
+    const memberKey = accountIds.join(",");
+    let group = legacyGroupsByMembers.get(memberKey);
+    if (!group) {
+      const name = accountIds.map((id) => accountsById.get(id)?.name ?? id).join("、");
+      data._seq += 1;
+      group = {
+        id: newGroupId(),
+        name,
+        topic: "",
+        accountIds,
+        createdAt: space.createdAt ?? timestamp,
+        updatedAt: space.updatedAt ?? space.createdAt ?? timestamp,
+        _seq: data._seq,
+      };
+      data.groups.push(group);
+      groupsById.set(group.id, group);
+      legacyGroupsByMembers.set(memberKey, group);
+      groupsChanged = true;
+    }
+    space.groupId = group.id;
+    spacesChanged = true;
+  }
+  if (groupsChanged) markDirty(["groups", "meta"]);
+  if (spacesChanged) markDirty("spaces");
+  return groupsChanged || spacesChanged;
 }
 
 export async function createStore({ dataPath, debounceMs = 200 } = {}) {
@@ -274,6 +335,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     normalizeAccountWorkspaceBindings();
     normalizeRunExecutionFields(data, markDirty);
     normalizeSpaceNavigationFields(data, markDirty);
+    normalizeSpaceGroupFields(data, markDirty);
     markAllDirty();
     await flush();
     delete data.sessionStates;
@@ -400,9 +462,10 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     normalizeAccountWorkspaceBindings();
     const runsNormalized = normalizeRunExecutionFields(data, markDirty);
     const spacesNormalized = normalizeSpaceNavigationFields(data, markDirty);
+    const groupsNormalized = normalizeSpaceGroupFields(data, markDirty);
     if (sessionStates) await retireLegacySessionStatesFile(legacySessionStatesPath);
     delete data.sessionStates;
-    if (runsNormalized || spacesNormalized || dirty.has("accounts")) await flush();
+    if (runsNormalized || spacesNormalized || groupsNormalized || dirty.has("accounts")) await flush();
   }
 
   function assertCollection(name) {

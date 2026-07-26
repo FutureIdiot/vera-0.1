@@ -68,9 +68,36 @@ test("persists split files to the data dir and reloads on next createStore call"
     assert.equal(found.pinned, false);
     assert.equal(found.spaceType, "chat");
     assert.equal(found.projectId, null);
+    assert.equal(found.groupId, null);
     assert.equal(found.updatedAt, found.createdAt);
     assert.equal(reloaded.find("spaceSessions", "sps_1").spaceId, "spc_1");
     assert.equal(reloaded.getEventSeqWatermark(), 123);
+    await reloaded.close();
+  });
+});
+
+test("loading legacy multi-Account Spaces creates and reuses a persistent Group", async () => {
+  await withTempDataDir(async (dataPath) => {
+    const store = await createStore({ dataPath, debounceMs: 1 });
+    store.insert("accounts", { id: "acc_a", name: "Alpha" });
+    store.insert("accounts", { id: "acc_b", name: "Beta" });
+    for (const id of ["spc_a", "spc_b"]) {
+      store.insert("spaces", {
+        id,
+        name: id,
+        seats: [{ accountId: "acc_b" }, { accountId: "acc_a" }],
+        createdAt: "2026-07-01T00:00:00.000Z",
+      });
+    }
+    await store.close();
+
+    const reloaded = await createStore({ dataPath, debounceMs: 1 });
+    assert.equal(reloaded.list("groups").length, 1);
+    const group = reloaded.list("groups")[0];
+    assert.deepEqual(group.accountIds, ["acc_a", "acc_b"]);
+    assert.equal(group.name, "Alpha、Beta");
+    assert.equal(reloaded.find("spaces", "spc_a").groupId, group.id);
+    assert.equal(reloaded.find("spaces", "spc_b").groupId, group.id);
     await reloaded.close();
   });
 });

@@ -27,6 +27,7 @@ export async function run(ctx) {
     assertEqual(json.space.pinned, false);
     assertEqual(json.space.spaceType, "chat");
     assertEqual(json.space.projectId, null);
+    assertEqual(json.space.groupId, null);
     ctx.space = json.space;
   });
 

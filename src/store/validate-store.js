@@ -6,7 +6,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 const ARRAY_FILES = new Set([
-  "agents.json", "accounts.json", "projects.json", "spaces.json", "messages.json",
+  "agents.json", "accounts.json", "groups.json", "projects.json", "spaces.json", "messages.json",
   "activities.json", "approvals.json", "runs.json", "themes.json",
   "memoryDigestJobs.json", "memoryRecallSessions.json", "memorySignals.json",
   "unitBindings.json", "memoryConfigs.json", "memoryTaskVerifications.json",

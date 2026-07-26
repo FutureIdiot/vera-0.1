@@ -58,6 +58,31 @@
   white-space: nowrap;
 }
 
+.vera-navigator__group-edit {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--vera-control-radius);
+  color: var(--vera-color-muted-text);
+  display: flex;
+  flex: 0 0 var(--vera-navigator-row-action-size);
+  height: var(--vera-navigator-row-action-size);
+  justify-content: center;
+  margin-left: auto;
+  padding: var(--vera-space-xs);
+  width: var(--vera-navigator-row-action-size);
+}
+
+.vera-navigator__group-edit:hover {
+  background: var(--vera-color-navigator-hover);
+  color: var(--vera-color-accent);
+}
+
+.vera-navigator__group-edit .vera-vector-icon {
+  height: var(--vera-font-size-base);
+  width: var(--vera-font-size-base);
+}
+
 .vera-navigator__badge {
   background: var(--vera-color-accent-soft);
   border-radius: var(--vera-control-radius);
@@ -190,6 +215,11 @@
   min-height: 0;
   overflow-y: auto;
   padding: var(--vera-space-md) var(--vera-space-sm) calc(var(--vera-safe-area-bottom) + var(--vera-space-xl));
+  scrollbar-width: none;
+}
+
+.vera-navigator__scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .vera-space-section {

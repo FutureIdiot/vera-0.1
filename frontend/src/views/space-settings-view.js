@@ -53,7 +53,10 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
 
   const participants = document.createElement("fieldset");
   const participantLegend = document.createElement("legend");
-  participantLegend.textContent = "参与 Account 与响应规则";
+  const grouped = Boolean(space.groupId);
+  participantLegend.textContent = grouped
+    ? "群聊成员响应规则（成员请在群聊顶部编辑）"
+    : "参与 Account 与响应规则";
   participants.appendChild(participantLegend);
   const seatControls = new Map();
   for (const account of bootstrap.accounts) {
@@ -61,6 +64,7 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
     const row = document.createElement("section");
     row.className = "vera-agent-rule";
     const included = checkbox(account.name, Boolean(seat));
+    included.input.disabled = grouped;
     const mode = document.createElement("select");
     mode.setAttribute("aria-label", `${account.name} 响应模式`);
     for (const [value, label] of [["default", "默认：都响应"], ["silent", "静默：仅指定来源 @"], ["focused", "专注：仅 @自己"]]) {

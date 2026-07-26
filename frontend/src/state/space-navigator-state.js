@@ -1,9 +1,9 @@
 export function createSpaceNavigatorState() {
-  let selectedMemberKey = null;
+  let selectedDirectoryKey = null;
 
   return {
-    selectMembers(memberKey) { selectedMemberKey = memberKey; },
-    snapshot() { return { selectedMemberKey }; },
-    reset() { selectedMemberKey = null; },
+    selectDirectory(directoryKey) { selectedDirectoryKey = directoryKey; },
+    snapshot() { return { selectedDirectoryKey }; },
+    reset() { selectedDirectoryKey = null; },
   };
 }

@@ -202,6 +202,10 @@ export function deleteAccount(store, id) {
   if (account.ownerAgentId && store.find("agents", account.ownerAgentId)) {
     throw new ApiError("conflict", `account ${id} is still owned by agent ${account.ownerAgentId}`);
   }
+  const group = store.list("groups").find((candidate) => candidate.accountIds.includes(id));
+  if (group) throw new ApiError("conflict", `account ${id} is still a member of group ${group.id}`);
+  const space = store.list("spaces").find((candidate) => candidate.seats.some((seat) => seat.accountId === id));
+  if (space) throw new ApiError("conflict", `account ${id} is still a member of space ${space.id}`);
   for (const binding of [...store.list("providerBindings")]) {
     if (binding.accountId === id) store.remove("providerBindings", binding.id);
   }

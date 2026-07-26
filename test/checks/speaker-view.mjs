@@ -7,6 +7,11 @@ import { join } from "node:path";
 
 export async function run(ctx) {
   const { check, httpRequest, sse, assertEqual, assert, dataDir, createOnlineMockAccount } = ctx;
+  const createGroup = async (name, accountIds) => {
+    const response = await httpRequest("POST", "/api/groups", { name, accountIds });
+    assertEqual(response.status, 201);
+    return response.json.group;
+  };
 
   // 模块局部状态：l.1 拿到的 agentB reply content 给 l.2 阳性对照用。
   let agentB;
@@ -18,9 +23,11 @@ export async function run(ctx) {
     const onlineB = await createOnlineMockAccount({ name: "VerifyMockB" });
     agentB = onlineB.agent;
     accountB = onlineB.account;
+    const group = await createGroup("l1-group", [ctx.owningAccount.id, accountB.id]);
 
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "l1-space",
+      groupId: group.id,
       seats: [
         { accountId: ctx.owningAccount.id, responseMode: "default" },
         { accountId: accountB.id, responseMode: "default" },
@@ -166,9 +173,11 @@ updatedAt: 2026-07-08T00:00:00.000Z
     const onlineD = await createOnlineMockAccount({ name: "VerifyMockD" });
     const newAgent = onlineD.agent;
     const newAccount = onlineD.account;
+    const group = await createGroup("l4-group", [ctx.owningAccount.id, newAccount.id]);
 
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "l4-space",
+      groupId: group.id,
       seats: [
         { accountId: ctx.owningAccount.id, responseMode: "default" },
         { accountId: newAccount.id, responseMode: "focused" },

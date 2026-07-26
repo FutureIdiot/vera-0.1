@@ -1,10 +1,12 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createProjectsClient } from "../api/projects-client.js";
+import { createGroupsClient } from "../api/groups-client.js";
 import { createSpacesClient } from "../api/spaces-client.js";
 import { SPACE_TYPES, getSpaceType } from "../../../src/spaces/space-types.js";
 import {
   confirmNavigatorAction,
   confirmSpaceDeletion,
+  requestGroupDetails,
   requestSpaceDetails,
 } from "./navigator-dialogs.js";
 import { createVectorIcon, setIconButtonContent } from "./vector-icon.js";
@@ -15,9 +17,9 @@ const SORT_OPTIONS = [
   { id: "spacetypes", label: "Space Types", hint: "按 Space Type 分组" },
 ];
 
-function memberKey(space) {
-  const ids = [...new Set((space.seats ?? []).map((seat) => seat.accountId))].filter(Boolean).sort();
-  return ids.length > 1 ? `group:${ids.join(",")}` : `account:${ids[0] ?? "none"}`;
+function directoryKey(space) {
+  if (space.groupId) return `group:${space.groupId}`;
+  return `account:${space.seats?.[0]?.accountId ?? "none"}`;
 }
 
 function activityTime(space) {
@@ -35,30 +37,34 @@ function formatAgo(space) {
   return days < 30 ? `${days}天` : `${Math.floor(days / 30)}月`;
 }
 
-function memberProjection(accounts, spaces) {
+function directoryProjection(accounts, groups, spaces) {
   const byId = new Map(accounts.map((account) => [account.id, account]));
   const entries = accounts.map((account) => ({
     key: `account:${account.id}`,
+    kind: "direct",
+    id: account.id,
     label: account.name,
+    topic: "",
     accountIds: [account.id],
     accounts: [account],
   }));
-  const seen = new Set(entries.map((entry) => entry.key));
-  for (const space of spaces) {
-    const key = memberKey(space);
-    if (seen.has(key) || !key.startsWith("group:")) continue;
-    const accountIds = key.slice(6).split(",");
-    const members = accountIds.map((id) => byId.get(id)).filter(Boolean);
+  for (const group of groups) {
     entries.push({
-      key,
-      accountIds,
-      accounts: members,
-      label: accountIds.map((id) => byId.get(id)?.name ?? id).join("、"),
+      key: `group:${group.id}`,
+      kind: "group",
+      id: group.id,
+      label: group.name,
+      topic: group.topic,
+      accountIds: group.accountIds,
+      accounts: group.accountIds.map((id) => byId.get(id)).filter(Boolean),
+      group,
     });
-    seen.add(key);
   }
   return entries.sort((left, right) => {
-    const latest = (entry) => Math.max(0, ...spaces.filter((space) => memberKey(space) === entry.key).map(activityTime));
+    const latest = (entry) => Math.max(
+      0,
+      ...spaces.filter((space) => directoryKey(space) === entry.key).map(activityTime),
+    );
     return latest(right) - latest(left) || left.label.localeCompare(right.label);
   });
 }
@@ -91,22 +97,27 @@ function projectMeta(projects, projectId) {
   return projects.find((project) => project.id === projectId) ?? { id: "", name: "No project" };
 }
 
-export function resolveSpaceCreationSeats(accounts, spaces, selectedKey) {
-  const entry = memberProjection(accounts, spaces).find((candidate) => candidate.key === selectedKey);
-  return (entry?.accountIds ?? []).map((accountId) => ({ accountId, responseMode: "default" }));
+export function resolveSpaceCreationTarget(accounts, groups, selectedKey) {
+  const entry = directoryProjection(accounts, groups, []).find((candidate) => candidate.key === selectedKey);
+  return {
+    groupId: entry?.kind === "group" ? entry.id : null,
+    seats: (entry?.accountIds ?? []).map((accountId) => ({ accountId, responseMode: "default" })),
+  };
 }
 
 export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {}) {
   const http = createHttpClient(platform);
   const client = createSpacesClient(http);
   const projectsClient = createProjectsClient(http);
+  const groupsClient = createGroupsClient(http);
   let spaces = [...runtime.getBootstrap().spaces];
   let projects = [...(runtime.getBootstrap().projects ?? [])];
+  let groups = [...(runtime.getBootstrap().groups ?? [])];
   let archived = null;
   let query = "";
   let sortMode = "recents";
   let sortOpen = false;
-  let selectedKey = memberKey(spaces.find((space) => space.id === currentSpaceId) ?? spaces[0] ?? { seats: [] });
+  let selectedKey = directoryKey(spaces.find((space) => space.id === currentSpaceId) ?? spaces[0] ?? { seats: [] });
 
   const panel = document.createElement("aside");
   panel.className = "vera-navigator";
@@ -122,8 +133,8 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     window.location.hash = `#/spaces/${encodeURIComponent(spaceId)}`;
   }
 
-  function selectedSeats() {
-    return resolveSpaceCreationSeats(runtime.getBootstrap().accounts, spaces, selectedKey);
+  function selectedTarget() {
+    return resolveSpaceCreationTarget(runtime.getBootstrap().accounts, groups, selectedKey);
   }
 
   async function createProject(name) {
@@ -132,9 +143,40 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     return response.project;
   }
 
+  async function createGroupDirectory() {
+    const details = await requestGroupDetails(panel, {
+      title: "新建群聊",
+      accounts: runtime.getBootstrap().accounts,
+    });
+    if (!details?.name) return;
+    try {
+      const response = await groupsClient.createGroup(details);
+      selectedKey = `group:${response.group.id}`;
+      runtime.mergeGroup(response.group);
+    } catch (err) {
+      showError(err.message);
+    }
+  }
+
+  async function editGroupDirectory(group) {
+    const details = await requestGroupDetails(panel, {
+      title: "编辑群聊",
+      initialValue: group,
+      accounts: runtime.getBootstrap().accounts,
+    });
+    if (!details?.name) return;
+    try {
+      const response = await groupsClient.updateGroup(group.id, details);
+      runtime.mergeGroup(response.group);
+      for (const space of response.spaces) runtime.mergeSpace(space);
+    } catch (err) {
+      showError(err.message);
+    }
+  }
+
   async function createSpace() {
-    const seats = selectedSeats();
-    if (!seats.length) return showError("请先选择一个联系人或群组");
+    const target = selectedTarget();
+    if (!target.seats.length) return showError("请先选择一个联系人或群组");
     const details = await requestSpaceDetails(panel, {
       title: "新 Space",
       projects,
@@ -142,7 +184,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     });
     if (!details?.name) return;
     try {
-      const response = await client.createSpace({ ...details, seats });
+      const response = await client.createSpace({ ...details, ...target });
       runtime.mergeSpace(response.space);
       spaces = [...spaces.filter((space) => space.id !== response.space.id), response.space];
       render();
@@ -190,7 +232,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       archived = [...(archived ?? []).filter((item) => item.id !== response.space.id), response.space];
       render();
       if (space.id === currentSpaceId) {
-        const next = spaces.find((item) => memberKey(item) === selectedKey) ?? spaces[0];
+        const next = spaces.find((item) => directoryKey(item) === selectedKey) ?? spaces[0];
         window.location.hash = next ? `#/spaces/${encodeURIComponent(next.id)}` : "#/";
       }
     } catch (err) {
@@ -212,7 +254,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       const response = await client.restoreSpace(space.id);
       runtime.mergeSpace(response.space);
       archived = archived.filter((item) => item.id !== space.id);
-      selectedKey = memberKey(response.space);
+      selectedKey = directoryKey(response.space);
       render();
       navigate(response.space.id);
     } catch (err) {
@@ -254,7 +296,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     recent.textContent = "最近";
     const list = document.createElement("div");
     list.className = "vera-contact-list";
-    const entries = memberProjection(runtime.getBootstrap().accounts, spaces);
+    const entries = directoryProjection(runtime.getBootstrap().accounts, groups, spaces);
     for (const entry of entries) {
       const item = makeButton("vera-contact", () => {
         selectedKey = entry.key;
@@ -266,10 +308,10 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       item.title = entry.label;
       item.setAttribute("aria-label", entry.label);
       const avatar = document.createElement("span");
-      avatar.className = `vera-contact__avatar${entry.accountIds.length > 1 ? " is-group" : ""}`;
+      avatar.className = `vera-contact__avatar${entry.kind === "group" ? " is-group" : ""}`;
       avatar.textContent = avatarText(entry);
       const activeAccount = entry.accounts.find((account) => account.presence === "online");
-      if (entry.accountIds.length === 1 && activeAccount) {
+      if (entry.kind === "direct" && activeAccount) {
         const status = document.createElement("span");
         status.className = "vera-contact__status";
         avatar.appendChild(status);
@@ -280,10 +322,13 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       item.append(avatar, label);
       list.appendChild(item);
     }
-    const manage = makeIconButton("plus", "vera-contact vera-contact--manage", "管理 Account", () => {
-      window.location.hash = "#/settings/accounts";
-    });
-    contacts.append(brand, recent, list, manage);
+    const createGroup = makeIconButton(
+      "plus",
+      "vera-contact vera-contact--manage",
+      "新建群聊",
+      () => void createGroupDirectory(),
+    );
+    contacts.append(brand, recent, list, createGroup);
   }
 
   function renderHeader(entry, visible) {
@@ -292,7 +337,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     const identity = document.createElement("div");
     identity.className = "vera-navigator__identity";
     const avatar = document.createElement("span");
-    avatar.className = `vera-navigator__avatar${entry?.accountIds.length > 1 ? " is-group" : ""}`;
+    avatar.className = `vera-navigator__avatar${entry?.kind === "group" ? " is-group" : ""}`;
     avatar.textContent = entry ? avatarText(entry) : "?";
     const copy = document.createElement("div");
     copy.className = "vera-navigator__identity-copy";
@@ -302,12 +347,21 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     title.textContent = entry?.label ?? "Space 目录";
     const badge = document.createElement("span");
     badge.className = "vera-navigator__badge";
-    badge.textContent = entry?.accountIds.length > 1 ? "Group" : "Direct";
+    badge.textContent = entry?.kind === "group" ? "Group" : "Direct";
     titleLine.append(title, badge);
+    if (entry?.kind === "group") {
+      const editGroup = makeIconButton(
+        "edit",
+        "vera-navigator__group-edit",
+        "编辑群聊",
+        () => void editGroupDirectory(entry.group),
+      );
+      titleLine.appendChild(editGroup);
+    }
     const subtitle = document.createElement("span");
     subtitle.className = "vera-navigator__subtitle";
-    subtitle.textContent = entry?.accountIds.length > 1
-      ? `${entry.accountIds.length} Accounts · shared Space directory`
+    subtitle.textContent = entry?.kind === "group"
+      ? `${entry.topic || "暂无主题"} · ${entry.accountIds.length} Accounts`
       : `${entry?.accountIds[0] ?? "未选择"} · ${visible.length} Spaces`;
     copy.append(titleLine, subtitle);
     identity.append(avatar, copy);
@@ -348,7 +402,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     searchWrap.appendChild(search);
     const createButton = makeButton("vera-navigator__create", () => void createSpace(), "新 Space");
     createButton.prepend(createVectorIcon("plus"));
-    createButton.disabled = selectedSeats().length === 0;
+    createButton.disabled = selectedTarget().seats.length === 0;
     tools.append(searchWrap, createButton);
     header.append(counts, tools);
     return header;
@@ -484,9 +538,9 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
 
   function renderContent() {
     spacesPanel.replaceChildren();
-    const entries = memberProjection(runtime.getBootstrap().accounts, spaces);
+    const entries = directoryProjection(runtime.getBootstrap().accounts, groups, spaces);
     const entry = entries.find((candidate) => candidate.key === selectedKey);
-    const visible = spaces.filter((space) => memberKey(space) === selectedKey);
+    const visible = spaces.filter((space) => directoryKey(space) === selectedKey);
     spacesPanel.appendChild(renderHeader(entry, visible));
     const q = query.trim().toLocaleLowerCase();
     const filtered = visible.filter((space) => {
@@ -534,7 +588,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     scroll.appendChild(archivedToggle);
     if (archived) {
       const archivedVisible = archived
-        .filter((space) => memberKey(space) === selectedKey)
+        .filter((space) => directoryKey(space) === selectedKey)
         .sort((left, right) => activityTime(right) - activityTime(left));
       appendSection(scroll, "Archived", archivedVisible, {
         emptyText: "此联系人或群组没有已归档 Space。",
@@ -553,9 +607,11 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     if (envelope.type === "runtime.reset") {
       spaces = [...envelope.data.bootstrap.spaces];
       projects = [...(envelope.data.bootstrap.projects ?? [])];
+      groups = [...(envelope.data.bootstrap.groups ?? [])];
       archived = null;
-      if (!spaces.some((space) => memberKey(space) === selectedKey)) {
-        selectedKey = memberKey(spaces[0] ?? { seats: [] });
+      const entries = directoryProjection(runtime.getBootstrap().accounts, groups, spaces);
+      if (!entries.some((entry) => entry.key === selectedKey)) {
+        selectedKey = directoryKey(spaces[0] ?? { seats: [] });
       }
     } else if (envelope.type === "space.deleted" && envelope.data?.spaceId) {
       spaces = spaces.filter((item) => item.id !== envelope.data.spaceId);
@@ -573,6 +629,14 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       projects = [...projects.filter((item) => item.id !== project.id), project];
     } else if (envelope.type === "project.deleted" && envelope.data?.projectId) {
       projects = projects.filter((item) => item.id !== envelope.data.projectId);
+    } else if (envelope.type === "group.updated" && envelope.data?.group) {
+      const group = envelope.data.group;
+      groups = [...groups.filter((item) => item.id !== group.id), group];
+    } else if (envelope.type === "group.deleted" && envelope.data?.groupId) {
+      groups = groups.filter((item) => item.id !== envelope.data.groupId);
+      if (selectedKey === `group:${envelope.data.groupId}`) {
+        selectedKey = directoryKey(spaces[0] ?? { seats: [] });
+      }
     } else {
       return;
     }
@@ -591,7 +655,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
     focusFirst() { panel.querySelector("button")?.focus(); },
     setCurrentSpace(spaceId) {
       currentSpaceId = spaceId;
-      selectedKey = memberKey(spaces.find((space) => space.id === spaceId) ?? { seats: [] });
+      selectedKey = directoryKey(spaces.find((space) => space.id === spaceId) ?? { seats: [] });
       render();
     },
     destroy() {

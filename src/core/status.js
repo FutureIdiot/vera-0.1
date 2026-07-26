@@ -65,7 +65,7 @@ export function createStatusTracker({ config, pkgVersion = "0.1.0" }) {
 
     // store 集合计数
     const collections = {};
-    for (const name of ["agents", "accounts", "projects", "spaces", "messages", "activities", "approvals", "runs", "themes", "memoryDigestJobs"]) {
+    for (const name of ["agents", "accounts", "groups", "projects", "spaces", "messages", "activities", "approvals", "runs", "themes", "memoryDigestJobs"]) {
       collections[name] = store.list(name).length;
     }
 

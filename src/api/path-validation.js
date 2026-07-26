@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(join(dirname(fileURLToPath(import.meta.url)), "..", ".."));
-const VERA_STORE_FILE = /^(agents|accounts|projects|spaces|messages|activities|approvals|runs|session-states|meta|settings|themes|files)\.json(\.legacy)?$/;
+const VERA_STORE_FILE = /^(agents|accounts|groups|projects|spaces|messages|activities|approvals|runs|session-states|meta|settings|themes|files)\.json(\.legacy)?$/;
 
 export async function dirSize(dirPath) {
   let total = 0;
