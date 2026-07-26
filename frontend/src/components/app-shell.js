@@ -2,6 +2,7 @@ import { createSpaceNavigator } from "./space-navigator.js";
 import { setIconButtonContent } from "./vector-icon.js";
 import { createHttpClient } from "../api/http-client.js";
 import { createSpacesClient } from "../api/spaces-client.js";
+import { getSpaceType } from "../../../src/spaces/space-types.js";
 
 const MANAGEMENT_ROUTES = new Set([
   "space-settings",
@@ -22,11 +23,11 @@ const MANAGEMENT_ROUTES = new Set([
   "control-center",
 ]);
 
-export function isChatRouteName(routeName) {
+export function isSpaceRouteName(routeName) {
   return routeName === "space" || routeName === "spaces";
 }
 
-export function resolveChatIdentity(currentSpace, accounts = []) {
+export function resolveSpaceIdentity(currentSpace, accounts = []) {
   const seats = currentSpace?.seats ?? [];
   const members = seats.map((seat) => (
     accounts.find((account) => account.id === seat.accountId) ?? { id: seat.accountId }
@@ -75,8 +76,8 @@ export function resolveShellHeader({
   navigatorOpen = false,
   managementHeader = null,
 } = {}) {
-  if (isChatRouteName(routeName)) {
-    const identity = resolveChatIdentity(currentSpace, accounts);
+  if (isSpaceRouteName(routeName)) {
+    const identity = resolveSpaceIdentity(currentSpace, accounts);
     return {
       leadingText: navigatorOpen ? "收起" : "目录",
       leadingHref: "#/spaces",
@@ -104,7 +105,7 @@ export function resolveShellHeader({
 }
 
 export function resolveNavigatorState({ routeName, navigatorOpen = false } = {}) {
-  return { visible: isChatRouteName(routeName) && navigatorOpen };
+  return { visible: isSpaceRouteName(routeName) && navigatorOpen };
 }
 
 export function createAppShell({ root, platform, runtime } = {}) {
@@ -123,7 +124,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
   const leading = document.createElement("a");
   leading.className = "vera-icon-button vera-shell__leading";
   leading.addEventListener("click", (event) => {
-    if (!isChatRoute()) return;
+    if (!isSpaceRoute()) return;
     event.preventDefault();
     toggleNavigator();
   });
@@ -195,8 +196,12 @@ export function createAppShell({ root, platform, runtime } = {}) {
   shell.append(navigator.element, header, main);
   root.replaceChildren(shell);
 
-  function isChatRoute() {
-    return isChatRouteName(activeRouteName);
+  function isSpaceRoute() {
+    return isSpaceRouteName(activeRouteName);
+  }
+
+  function isChatSurface() {
+    return isSpaceRoute() && getSpaceType(currentSpace?.spaceType).surface === "chat";
   }
 
   function updateHeader() {
@@ -207,7 +212,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
       navigatorOpen,
       managementHeader,
     });
-    setIconButtonContent(leading, isChatRoute() ? "menu" : "arrow-left", headerState.leadingText);
+    setIconButtonContent(leading, isSpaceRoute() ? "menu" : "arrow-left", headerState.leadingText);
     leading.href = headerState.leadingHref;
     leading.setAttribute("aria-label", headerState.leadingLabel);
     title.textContent = headerState.title;
@@ -224,16 +229,16 @@ export function createAppShell({ root, platform, runtime } = {}) {
     }
     settings.hidden = !headerState.settingsVisible;
     const observation = runtime.getBootstrap().observation ?? { observedSpaceId: null };
-    const canObserve = isChatRoute() && currentSpace?.archivedAt == null && currentSpace?.seats?.length === 1;
+    const canObserve = isChatSurface() && currentSpace?.archivedAt == null && currentSpace?.seats?.length === 1;
     const isObserved = canObserve && observation.observedSpaceId === currentSpace.id;
     observe.hidden = !canObserve;
     observe.classList.toggle("is-active", isObserved);
     observe.setAttribute("aria-pressed", String(isObserved));
     observe.setAttribute("aria-label", isObserved ? "取消关注当前私聊" : "关注当前私聊");
     setIconButtonContent(observe, "observe", isObserved ? "取消关注" : "关注");
-    participants.hidden = !isChatRoute();
+    participants.hidden = !isSpaceRoute();
     subtitle.textContent = headerState.subtitle;
-    subtitle.hidden = !isChatRoute() || !headerState.subtitle;
+    subtitle.hidden = !isSpaceRoute() || !headerState.subtitle;
     renderParticipants();
   }
 
@@ -280,7 +285,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
   }
 
   function openNavigator() {
-    if (!isChatRoute()) return;
+    if (!isSpaceRoute()) return;
     navigatorOpen = true;
     applyNavigatorState();
     navigator.focusFirst();
@@ -312,9 +317,9 @@ export function createAppShell({ root, platform, runtime } = {}) {
     const bootstrap = runtime.getBootstrap();
     const routeSpace = route.spaceId ? bootstrap.spaces.find((space) => space.id === route.spaceId) : null;
     if (routeSpace) setSpace(routeSpace);
-    shell.dataset.routeScope = isChatRoute() ? "chat" : "management";
+    shell.dataset.routeScope = isChatSurface() ? "chat" : "management";
     if (route.name === "spaces") navigatorOpen = true;
-    else if (!isChatRoute()) navigatorOpen = false;
+    else if (!isSpaceRoute()) navigatorOpen = false;
     updateHeader();
     applyNavigatorState();
     if (route.name === "spaces") navigator.focusFirst();

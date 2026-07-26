@@ -4,6 +4,7 @@
 
 import { createBubbleSplitter } from "./bubble-splitter.js";
 import { newMessageId } from "../core/id.js";
+import { touchSpaceUpdatedAt } from "./spaces.js";
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
@@ -42,6 +43,7 @@ export function createBubbleStream({
     const stored = store.insert("messages", message);
     replyMessageIds.push(stored.id);
     hub.publish("message.created", { message: stripInternal(stored) });
+    hub.publish("space.updated", { space: touchSpaceUpdatedAt(store, spaceId, now) });
     current = stored;
     if (initialContent) {
       hub.publish("message.delta", { messageId: stored.id, spaceId, spaceSessionId, delta: initialContent });

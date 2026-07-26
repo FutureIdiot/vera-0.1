@@ -47,7 +47,7 @@ async function dirSize(dirPath) {
   return total;
 }
 
-export function createStatusTracker({ config, pkgVersion = "0.0.1" }) {
+export function createStatusTracker({ config, pkgVersion = "0.1.0" }) {
   const startedAt = new Date().toISOString();
   const pid = process.pid;
   const recentErrors = [];
@@ -65,7 +65,7 @@ export function createStatusTracker({ config, pkgVersion = "0.0.1" }) {
 
     // store 集合计数
     const collections = {};
-    for (const name of ["agents", "accounts", "spaces", "messages", "activities", "approvals", "runs", "themes", "memoryDigestJobs"]) {
+    for (const name of ["agents", "accounts", "projects", "spaces", "messages", "activities", "approvals", "runs", "themes", "memoryDigestJobs"]) {
       collections[name] = store.list(name).length;
     }
 

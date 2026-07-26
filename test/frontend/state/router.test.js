@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 
 import { createAppRouter, parseRoute } from "../../../frontend/src/state/router.js";
 
-function createFixture({ hash = "#/", loadSpaceView, loadSpaceSettingsView } = {}) {
+function createFixture({
+  hash = "#/",
+  spaces = [],
+  loadSpaceView,
+  loadSpaceSurfacePlaceholderView,
+  loadSpaceSettingsView,
+} = {}) {
   const listeners = new Map();
   const children = [];
   const root = {
@@ -55,12 +61,13 @@ function createFixture({ hash = "#/", loadSpaceView, loadSpaceSettingsView } = {
   const router = createAppRouter({
     root,
     platform: { kind: "web" },
-    runtime: { getBootstrap() { return { spaces: [], agents: [], accounts: [], agentStates: [], seq: 0 }; } },
+    runtime: { getBootstrap() { return { spaces, agents: [], accounts: [], agentStates: [], seq: 0 }; } },
     windowTarget,
     createShell() {
       return { outlet: root, setRoute() {}, destroy() {} };
     },
     loadSpaceView,
+    loadSpaceSurfacePlaceholderView,
     loadSpaceSettingsView,
   });
   return { root, router, windowTarget, listeners };
@@ -124,6 +131,31 @@ test("the Space directory deep link keeps the chat mounted behind the navigator"
   await fixture.router.start();
   assert.equal(mounts, 1);
   assert.equal(fixture.root.children[0].className, "vera-route");
+  fixture.router.stop();
+});
+
+test("non-chat Space types mount the development placeholder instead of Chat", async () => {
+  let chatMounts = 0;
+  let placeholderMounts = 0;
+  const fixture = createFixture({
+    hash: "#/spaces/spc_library",
+    spaces: [{ id: "spc_library", spaceType: "library" }],
+    loadSpaceView: async () => ({
+      mountSpaceView() { chatMounts += 1; return () => {}; },
+    }),
+    loadSpaceSurfacePlaceholderView: async () => ({
+      mountSpaceSurfacePlaceholderView({ space }) {
+        placeholderMounts += 1;
+        assert.equal(space.id, "spc_library");
+        return () => {};
+      },
+    }),
+  });
+
+  await fixture.router.start();
+
+  assert.equal(chatMounts, 0);
+  assert.equal(placeholderMounts, 1);
   fixture.router.stop();
 });
 

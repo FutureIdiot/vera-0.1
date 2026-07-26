@@ -1,0 +1,197 @@
+.vera-space-row {
+  align-items: center;
+  border: var(--vera-border-width) solid transparent;
+  border-radius: var(--vera-navigator-section-radius);
+  display: grid;
+  grid-template-areas: "space actions project";
+  grid-template-columns: minmax(0, 1fr) auto var(--vera-navigator-project-width);
+  min-height: var(--vera-navigator-row-min-height);
+  padding: var(--vera-space-sm);
+  position: relative;
+  transition: background var(--vera-transition-fast), border-color var(--vera-transition-fast);
+}
+
+.vera-space-row:hover,
+.vera-space-row:focus-within {
+  background: var(--vera-color-navigator-hover);
+  border-color: var(--vera-color-navigator-border-soft);
+}
+
+.vera-space-row.is-active {
+  background: var(--vera-color-accent-soft);
+  border-color: color-mix(in srgb, var(--vera-color-accent), transparent 58%);
+}
+
+.vera-space-row__open {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--vera-color-text);
+  display: flex;
+  gap: var(--vera-space-md);
+  grid-area: space;
+  min-height: var(--vera-touch-target);
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.vera-space-row__type {
+  align-items: center;
+  background: var(--vera-color-accent-soft);
+  border: var(--vera-border-width) solid color-mix(in srgb, var(--vera-color-accent), transparent 68%);
+  border-radius: var(--vera-control-radius);
+  color: var(--vera-color-accent);
+  display: flex;
+  flex: 0 0 var(--vera-navigator-row-icon-size);
+  height: var(--vera-navigator-row-icon-size);
+  justify-content: center;
+  width: var(--vera-navigator-row-icon-size);
+}
+
+.vera-space-row__type.is-garage {
+  background: var(--vera-color-warning-soft);
+  border-color: color-mix(in srgb, var(--vera-color-warning), transparent 68%);
+  color: var(--vera-color-warning);
+}
+
+.vera-space-row__type.is-notebook {
+  background: var(--vera-color-success-soft);
+  border-color: color-mix(in srgb, var(--vera-color-success), transparent 68%);
+  color: var(--vera-color-success);
+}
+
+.vera-space-row__type.is-blank {
+  background: var(--vera-color-surface-strong);
+  border-color: var(--vera-color-border);
+  color: var(--vera-color-muted-text);
+}
+
+.vera-space-row__type .vera-vector-icon {
+  height: var(--vera-icon-size);
+  width: var(--vera-icon-size);
+}
+
+.vera-space-row__copy {
+  display: grid;
+  gap: var(--vera-space-2xs);
+  min-width: 0;
+}
+
+.vera-space-row__copy strong {
+  font-size: var(--vera-navigator-font-size-row);
+  font-weight: var(--vera-font-weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vera-space-row__preview {
+  color: var(--vera-color-muted-text);
+  font-size: var(--vera-navigator-font-size-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vera-space-row__time {
+  color: var(--vera-color-muted-text);
+  font-size: var(--vera-navigator-font-size-label);
+  white-space: nowrap;
+}
+
+.vera-space-row__project {
+  align-items: center;
+  color: var(--vera-color-navigator-project-1);
+  display: flex;
+  font-size: var(--vera-navigator-font-size-meta);
+  font-weight: var(--vera-font-weight-semibold);
+  gap: var(--vera-space-xs);
+  grid-area: project;
+  justify-content: flex-end;
+  justify-self: end;
+  min-width: 0;
+  width: 100%;
+}
+
+.vera-space-row__project.is-palette-1 {
+  color: var(--vera-color-navigator-project-2);
+}
+
+.vera-space-row__project.is-palette-2 {
+  color: var(--vera-color-navigator-project-3);
+}
+
+.vera-space-row__project.is-palette-3 {
+  color: var(--vera-color-navigator-project-4);
+}
+
+.vera-space-row__project-dot {
+  background: currentColor;
+  border-radius: 50%;
+  flex: 0 0 var(--vera-space-xs);
+  height: var(--vera-space-xs);
+  width: var(--vera-space-xs);
+}
+
+.vera-space-row__project > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vera-space-row__actions {
+  align-items: center;
+  display: flex;
+  gap: var(--vera-space-2xs);
+  grid-area: actions;
+  justify-self: end;
+  opacity: 1;
+  padding: 0 var(--vera-space-xs);
+  position: static;
+  transform: none;
+  visibility: visible;
+}
+
+.vera-space-row__action,
+.vera-space-row__pin {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--vera-control-radius);
+  color: var(--vera-color-muted-text);
+  display: flex;
+  font-size: var(--vera-font-size-tiny);
+  height: var(--vera-navigator-row-action-size);
+  justify-content: center;
+  min-width: var(--vera-navigator-row-action-size);
+  padding: 0 var(--vera-space-xs);
+}
+
+.vera-space-row__action:hover,
+.vera-space-row__pin:hover,
+.vera-space-row__pin.is-pinned {
+  background: var(--vera-color-surface-strong);
+  color: var(--vera-color-accent);
+}
+
+.vera-space-row__action.is-danger:hover {
+  color: var(--vera-color-error);
+}
+
+.vera-space-row__action.is-icon,
+.vera-space-row__pin {
+  padding: var(--vera-space-xs);
+}
+
+.vera-space-row__action .vera-vector-icon,
+.vera-space-row__pin .vera-vector-icon {
+  height: var(--vera-font-size-base);
+  width: var(--vera-font-size-base);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vera-space-row {
+    transition: none;
+  }
+}

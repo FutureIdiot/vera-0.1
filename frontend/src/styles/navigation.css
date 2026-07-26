@@ -32,153 +32,160 @@
 
 .vera-navigator__contacts {
   align-items: center;
-  background: var(--vera-color-background);
+  background: var(--vera-color-navigator-rail);
+  border-right: var(--vera-border-width) solid var(--vera-color-navigator-border-soft);
   display: flex;
   flex-direction: column;
-  gap: var(--vera-space-sm);
+  gap: var(--vera-space-xs);
+  min-height: 0;
+  padding: calc(var(--vera-safe-area-top) + var(--vera-space-md)) var(--vera-space-xs)
+    calc(var(--vera-safe-area-bottom) + var(--vera-space-md));
+}
+
+.vera-contact-brand {
+  align-items: center;
+  background: var(--vera-color-accent);
+  border-radius: var(--vera-control-radius);
+  box-shadow: var(--vera-shadow-sm);
+  color: var(--vera-color-accent-text);
+  display: flex;
+  flex: 0 0 var(--vera-navigator-brand-size);
+  font-size: var(--vera-font-size-base);
+  font-weight: var(--vera-font-weight-semibold);
+  height: var(--vera-navigator-brand-size);
+  justify-content: center;
+  margin-bottom: var(--vera-space-xs);
+  width: var(--vera-navigator-brand-size);
+}
+
+.vera-contact-rail-label {
+  color: var(--vera-color-muted-text);
+  font-size: var(--vera-navigator-font-size-rail);
+  font-weight: var(--vera-font-weight-semibold);
+  letter-spacing: var(--vera-navigator-letter-spacing-rail);
+  text-transform: uppercase;
+}
+
+.vera-contact-list {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--vera-space-xs);
+  min-height: 0;
   overflow-y: auto;
-  padding: calc(var(--vera-safe-area-top) + var(--vera-space-md)) var(--vera-space-sm) var(--vera-space-md);
+  scrollbar-width: none;
+  width: 100%;
+}
+
+.vera-contact-list::-webkit-scrollbar {
+  display: none;
 }
 
 .vera-contact {
-  background: var(--vera-color-surface);
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--vera-navigator-section-radius);
+  color: var(--vera-color-muted-text);
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--vera-space-2xs);
+  min-height: var(--vera-touch-target);
+  padding: var(--vera-space-xs) var(--vera-space-2xs);
+  position: relative;
+  transition: background var(--vera-transition-fast), color var(--vera-transition-fast);
+  width: 100%;
+}
+
+.vera-contact::before {
+  background: var(--vera-color-accent);
+  border-radius: 0 var(--vera-control-radius) var(--vera-control-radius) 0;
+  content: "";
+  height: calc(var(--vera-touch-target) / 2);
+  left: calc(var(--vera-space-xs) * -1);
+  opacity: 0;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: opacity var(--vera-transition-fast);
+  width: var(--vera-navigator-contact-indicator-width);
+}
+
+.vera-contact:hover,
+.vera-contact:focus-visible {
+  background: var(--vera-color-navigator-hover);
+  color: var(--vera-color-text);
+}
+
+.vera-contact.is-active::before {
+  opacity: 1;
+}
+
+.vera-contact__avatar {
+  align-items: center;
+  background: var(--vera-color-surface-strong);
   border: var(--vera-border-width) solid var(--vera-color-border);
   border-radius: 50%;
   color: var(--vera-color-text);
-  flex: 0 0 var(--vera-touch-target);
-  height: var(--vera-touch-target);
-  width: var(--vera-touch-target);
+  display: flex;
+  flex: 0 0 var(--vera-navigator-contact-avatar-size);
+  font-size: var(--vera-font-size-base);
+  font-weight: var(--vera-font-weight-semibold);
+  height: var(--vera-navigator-contact-avatar-size);
+  justify-content: center;
+  position: relative;
+  transition: border-color var(--vera-transition-fast), box-shadow var(--vera-transition-fast);
+  width: var(--vera-navigator-contact-avatar-size);
 }
 
-.vera-contact.is-active {
-  background: var(--vera-color-accent-soft);
+.vera-contact__avatar.is-group,
+.vera-navigator__avatar.is-group {
+  border-radius: var(--vera-control-radius);
+}
+
+.vera-contact.is-active .vera-contact__avatar {
   border-color: var(--vera-color-accent);
-  box-shadow: inset 0 0 0 var(--vera-border-width) var(--vera-color-accent);
+  box-shadow: 0 0 0 var(--vera-border-width) var(--vera-color-accent);
   color: var(--vera-color-accent);
 }
 
-.vera-contact--manage {
-  margin-top: auto;
+.vera-contact__status {
+  background: var(--vera-color-success);
+  border: calc(var(--vera-border-width) * 2) solid var(--vera-color-navigator-rail);
+  border-radius: 50%;
+  bottom: calc(var(--vera-space-2xs) * -1);
+  height: var(--vera-navigator-contact-status-size);
+  position: absolute;
+  right: calc(var(--vera-space-2xs) * -1);
+  width: var(--vera-navigator-contact-status-size);
 }
 
-.vera-navigator__spaces {
-  min-width: 0;
-  overflow-y: auto;
-  padding: calc(var(--vera-safe-area-top) + var(--vera-space-md)) var(--vera-space-md) var(--vera-space-md);
-}
-
-.vera-navigator__heading {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  min-height: var(--vera-touch-target);
-}
-
-.vera-space-row {
-  align-items: center;
-  border-bottom: var(--vera-border-width) solid var(--vera-color-border);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  min-height: var(--vera-touch-target);
-}
-
-.vera-space-row.is-active {
-  background: var(--vera-color-surface-strong);
-}
-
-.vera-space-row__open {
-  background: transparent;
-  border: 0;
-  color: var(--vera-color-text);
-  min-height: var(--vera-touch-target);
+.vera-contact__label {
+  font-size: var(--vera-navigator-font-size-rail);
+  font-weight: var(--vera-font-weight-semibold);
+  max-width: 100%;
   overflow: hidden;
-  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.vera-space-row__actions {
-  display: flex;
-}
-
-.vera-text-button {
-  background: transparent;
-  border: 0;
-  min-height: var(--vera-touch-target);
-  padding: 0 var(--vera-space-sm);
-  text-decoration: none;
-}
-
-.vera-text-button--danger {
-  color: var(--vera-color-error);
-}
-
-.vera-navigator__archived {
-  background: transparent;
-  border: 0;
-  color: var(--vera-color-muted-text);
-  min-height: var(--vera-touch-target);
-  margin-top: var(--vera-space-lg);
-  width: 100%;
-}
-
-.vera-empty {
-  color: var(--vera-color-muted-text);
-}
-
-.vera-inline-error {
-  color: var(--vera-color-error);
-  font-size: var(--vera-font-size-small);
-}
-
-.vera-dialog {
-  background: var(--vera-color-surface);
-  border: var(--vera-border-width) solid var(--vera-color-border);
-  border-radius: var(--vera-control-radius);
-  box-shadow: var(--vera-shadow-lg);
-  display: grid;
-  gap: var(--vera-space-md);
-  left: 50%;
-  max-width: calc(100% - var(--vera-space-lg) * 2);
-  padding: var(--vera-space-lg);
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: calc(var(--vera-touch-target) * 6);
-  z-index: 10;
-}
-
-.vera-dialog input {
-  background: var(--vera-color-background);
-  border: var(--vera-border-width) solid var(--vera-color-border);
-  border-radius: var(--vera-control-radius);
-  color: var(--vera-color-text);
-  min-height: var(--vera-touch-target);
-  min-width: 0;
-  padding: var(--vera-space-sm);
-}
-
-.vera-dialog .vera-check input {
-  min-height: auto;
-  padding: 0;
-}
-
-.vera-dialog__note {
-  color: var(--vera-color-muted-text);
-  font-size: var(--vera-font-size-small);
-}
-
-.vera-dialog__actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.vera-primary-button--danger {
-  background: var(--vera-color-error);
+.vera-contact--manage {
+  border: var(--vera-border-width) dashed var(--vera-color-border);
+  border-radius: 50%;
+  flex: 0 0 var(--vera-touch-target);
+  height: var(--vera-touch-target);
+  margin-top: var(--vera-space-xs);
+  padding: var(--vera-space-md);
+  width: var(--vera-touch-target);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .vera-navigator {
+  .vera-navigator,
+  .vera-contact,
+  .vera-contact::before,
+  .vera-contact__avatar {
     transition: none;
   }
 }

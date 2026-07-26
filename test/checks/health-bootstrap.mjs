@@ -16,6 +16,7 @@ export async function run(ctx) {
     assertEqual(status, 200);
     assert(Array.isArray(json.agents), "agents should be an array");
     assert(Array.isArray(json.accounts), "accounts should be an array (4.1)");
+    assert(Array.isArray(json.projects), "projects should be an array");
     assert(Array.isArray(json.spaces), "spaces should be an array");
     assert(Array.isArray(json.agentStates), "agentStates should be an array");
     assertEqual(json.observation?.observedSpaceId, null);

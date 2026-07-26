@@ -3,17 +3,57 @@
 export async function run(ctx) {
   const { check, httpRequest, assertEqual, assert, sse, owningAccount } = ctx;
   let spaceId = null;
+  let projectId = null;
+
+  await check("p.0 Project CRUD 严格校验并发布更新事件", async () => {
+    const invalid = await httpRequest("POST", "/api/projects", {
+      name: "invalid",
+      unexpected: true,
+    });
+    assertEqual(invalid.status, 400);
+    assertEqual(invalid.json.error.code, "invalid_request");
+
+    const created = await httpRequest("POST", "/api/projects", { name: "Navigation" });
+    assertEqual(created.status, 201);
+    projectId = created.json.project.id;
+    assert(projectId.startsWith("prj_"), "Project id should have prj_ prefix");
+    await sse.waitFor((event) =>
+      event.type === "project.updated" &&
+      event.data.project.id === projectId &&
+      event.data.project.name === "Navigation");
+
+    const fetched = await httpRequest("GET", `/api/projects/${projectId}`);
+    assertEqual(fetched.status, 200);
+    assertEqual(fetched.json.project.name, "Navigation");
+
+    const updated = await httpRequest("PATCH", `/api/projects/${projectId}`, { name: "Navigation 0.1" });
+    assertEqual(updated.status, 200);
+    await sse.waitFor((event) =>
+      event.type === "project.updated" &&
+      event.data.project.id === projectId &&
+      event.data.project.name === "Navigation 0.1");
+  });
 
   await check("p.1 Space create/update/archive/restore 均发布 space.updated", async () => {
     const created = await httpRequest("POST", "/api/spaces", {
       name: "f3-live-space",
       seats: [{ accountId: owningAccount.id, responseMode: "focused" }],
       notifications: { mode: "all", includeActivityErrors: false },
+      pinned: true,
+      spaceType: "garage",
+      projectId,
     });
     assertEqual(created.status, 201);
     spaceId = created.json.space.id;
     const createEvent = await sse.waitFor((event) => event.type === "space.updated" && event.data.space.id === spaceId);
     assertEqual(createEvent.data.space.name, "f3-live-space");
+    assertEqual(createEvent.data.space.pinned, true);
+    assertEqual(createEvent.data.space.spaceType, "garage");
+    assertEqual(createEvent.data.space.projectId, projectId);
+
+    const referenced = await httpRequest("DELETE", `/api/projects/${projectId}`);
+    assertEqual(referenced.status, 409);
+    assertEqual(referenced.json.error.code, "conflict");
 
     const updated = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { name: "f3-renamed" });
     assertEqual(updated.status, 200);
@@ -58,6 +98,15 @@ export async function run(ctx) {
     });
     assertEqual(badNotifications.status, 400);
 
+    const badSpaceType = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { spaceType: "unknown" });
+    assertEqual(badSpaceType.status, 400);
+    const badPinned = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { pinned: "yes" });
+    assertEqual(badPinned.status, 400);
+    const badProject = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { projectId: "prj_missing" });
+    assertEqual(badProject.status, 400);
+    const unknownField = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { unexpected: true });
+    assertEqual(unknownField.status, 400);
+
     const nullPatch = await httpRequest("PATCH", `/api/spaces/${spaceId}`, null);
     assertEqual(nullPatch.status, 400);
     const badTopic = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { topic: { text: "no" } });
@@ -71,6 +120,9 @@ export async function run(ctx) {
       topic: "F3 settings",
       seats: [{ accountId: owningAccount.id, responseMode: "silent", respondTo: ["user"] }],
       notifications: { mode: "accountMessages", includeActivityErrors: true },
+      pinned: false,
+      spaceType: "library",
+      projectId: null,
     });
     assertEqual(response.status, 200);
     const listed = await httpRequest("GET", "/api/spaces");
@@ -78,6 +130,9 @@ export async function run(ctx) {
     assert(space, "updated Space should remain active");
     assertEqual(space.topic, "F3 settings");
     assertEqual(space.seats[0].respondTo[0], "user");
+    assertEqual(space.pinned, false);
+    assertEqual(space.spaceType, "library");
+    assertEqual(space.projectId, null);
   });
 
   await check("p.4 archived Space preview/delete 发布 space.deleted", async () => {
@@ -98,5 +153,11 @@ export async function run(ctx) {
     await sse.waitFor((event) =>
       event.type === "space.deleted" &&
       event.data.spaceId === spaceId);
+
+    const removedProject = await httpRequest("DELETE", `/api/projects/${projectId}`);
+    assertEqual(removedProject.status, 204);
+    await sse.waitFor((event) =>
+      event.type === "project.deleted" &&
+      event.data.projectId === projectId);
   });
 }

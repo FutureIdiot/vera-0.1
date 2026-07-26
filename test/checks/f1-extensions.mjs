@@ -71,12 +71,14 @@ export async function run(ctx) {
     assertEqual(json.space.archivedAt, null);
     assertEqual(json.space.notifications.mode, "accountMessages");
     assertEqual(json.space.notifications.includeActivityErrors, true);
+    assertEqual(json.space.updatedAt, json.space.createdAt);
   });
 
   await check("o.5 archive Space -> archivedAt 非空；幂等", async () => {
     const r1 = await httpRequest("POST", `/api/spaces/${archiveSpaceId}/archive`);
     assertEqual(r1.status, 200);
     assert(r1.json.space.archivedAt !== null, "archivedAt should be set");
+    assert(typeof r1.json.space.updatedAt === "string", "archive should update updatedAt");
     const r2 = await httpRequest("POST", `/api/spaces/${archiveSpaceId}/archive`);
     assertEqual(r2.status, 200);
     assertEqual(r2.json.space.archivedAt, r1.json.space.archivedAt);
@@ -107,6 +109,7 @@ export async function run(ctx) {
     const r1 = await httpRequest("POST", `/api/spaces/${archiveSpaceId}/restore`);
     assertEqual(r1.status, 200);
     assertEqual(r1.json.space.archivedAt, null);
+    assert(typeof r1.json.space.updatedAt === "string", "restore should update updatedAt");
     const r2 = await httpRequest("POST", `/api/spaces/${archiveSpaceId}/restore`);
     assertEqual(r2.status, 200);
     assertEqual(r2.json.space.archivedAt, null);
@@ -340,11 +343,12 @@ export async function run(ctx) {
     const { status, json } = await httpRequest("GET", "/api/status");
     assertEqual(status, 200);
     const s = json.status;
-    assertEqual(s.gateway.version, "0.0.1");
+    assertEqual(s.gateway.version, "0.1.0");
     assertEqual(s.agents.federation, "disabled");
     assert(typeof s.sse.currentSeq === "number", "currentSeq should be number");
     assert(typeof s.sse.connectedClients === "number", "connectedClients should be number");
     assert("collections" in s.store, "should have collections");
+    assert("projects" in s.store.collections, "collections should include projects");
     assert("themes" in s.store.collections, "collections should include themes");
     assert(Array.isArray(s.recentErrors), "recentErrors should be array");
   });

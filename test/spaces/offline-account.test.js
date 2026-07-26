@@ -97,6 +97,11 @@ test("direct @ skips an offline Account, writes one error Activity, and is never
     assert.equal(store.list("runs").length, 0);
     assert.equal(scheduled.length, 0);
     assert.equal(store.list("activities").length, 1);
+    assert.equal(store.find("spaces", space.id).updatedAt, skipped.message.createdAt);
+    const firstSpaceEvent = captured.events.find((event) =>
+      event.type === "space.updated" && event.data.space.id === space.id);
+    assert.equal(firstSpaceEvent.data.space.updatedAt, skipped.message.createdAt);
+    assert.equal(firstSpaceEvent.data.space.name, space.name);
     assert.deepEqual(
       (({ _seq, updatedAt, ...activity }) => activity)(store.list("activities")[0]),
       {
@@ -134,6 +139,8 @@ test("direct @ skips an offline Account, writes one error Activity, and is never
     });
     assert.equal(delivered.runs.length, 1);
     assert.equal(delivered.runs[0].triggerMessageId, delivered.message.id);
+    assert.equal(store.find("spaces", space.id).updatedAt, delivered.message.createdAt);
+    assert.equal(captured.events.filter((event) => event.type === "space.updated").length, 2);
     assert.equal(scheduled.length, 1);
     assert.equal(scheduled[0].agent.id, agent.id);
     assert.equal(scheduled[0].account.id, account.id);

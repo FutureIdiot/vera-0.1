@@ -14,6 +14,7 @@ import { createStaticHandler } from "./api/static.js";
 import { createAgentStateTracker } from "./agents/agent-state.js";
 import { registerAgentRoutes } from "./agents/routes.js";
 import { listSpaces } from "./spaces/spaces.js";
+import { listProjects } from "./spaces/projects.js";
 import { registerSpaceRoutes } from "./spaces/routes.js";
 import { createMemoryVault } from "./memory/memory.js";
 import { createMemoryEmbeddingIndex } from "./memory/memory-embedding-index.js";
@@ -286,6 +287,7 @@ router.get("/api/bootstrap", ({ res }) => {
   sendJson(res, 200, {
     agents: listAgents(store),
     accounts: listAccounts(store),
+    projects: listProjects(store),
     spaces: listSpaces(store), // 默认只返活跃（api-contract.md 260）
     agentStates: agentStates.list(),
     observation: observation.get(),

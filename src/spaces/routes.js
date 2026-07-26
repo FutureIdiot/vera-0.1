@@ -1,6 +1,6 @@
 // Space / Message / Run / Approval HTTP 路由。
 
-import { asHandler, readJsonBody, sendJson } from "../api/http.js";
+import { asHandler, readJsonBody, sendJson, sendNoContent } from "../api/http.js";
 import {
   listSpaces,
   createSpace,
@@ -24,6 +24,13 @@ import {
   deleteArchivedSpace,
   getSpaceDeletionPreview,
 } from "./space-deletion.js";
+import {
+  listProjects,
+  getProjectOrThrow,
+  createProject,
+  updateProject,
+  deleteProject,
+} from "./projects.js";
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
@@ -33,6 +40,49 @@ export function registerSpaceRoutes(router, {
   store, hub, config, daemonScheduler, memoryDigestScheduler,
   daemonRuntime, daemonRunLifecycle, contextCompaction, memory, files, observation,
 }) {
+  router.get(
+    "/api/projects",
+    asHandler(async ({ res }) => {
+      sendJson(res, 200, { projects: listProjects(store) });
+    }),
+  );
+
+  router.get(
+    "/api/projects/:id",
+    asHandler(async ({ res, params }) => {
+      sendJson(res, 200, { project: getProjectOrThrow(store, params.id) });
+    }),
+  );
+
+  router.post(
+    "/api/projects",
+    asHandler(async ({ req, res }) => {
+      const body = await readJsonBody(req);
+      const project = createProject(store, body);
+      hub.publish("project.updated", { project });
+      sendJson(res, 201, { project });
+    }),
+  );
+
+  router.patch(
+    "/api/projects/:id",
+    asHandler(async ({ req, res, params }) => {
+      const body = await readJsonBody(req);
+      const project = updateProject(store, params.id, body);
+      hub.publish("project.updated", { project });
+      sendJson(res, 200, { project });
+    }),
+  );
+
+  router.delete(
+    "/api/projects/:id",
+    asHandler(async ({ res, params }) => {
+      deleteProject(store, params.id);
+      hub.publish("project.deleted", { projectId: params.id });
+      sendNoContent(res);
+    }),
+  );
+
   router.get(
     "/api/spaces",
     asHandler(async ({ res, query }) => {

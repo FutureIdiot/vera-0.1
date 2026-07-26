@@ -1,3 +1,5 @@
+import { DEFAULT_SPACE_TYPE, SPACE_TYPES } from "../../../src/spaces/space-types.js";
+
 let dialogSequence = 0;
 
 function button(label, className, onClick) {
@@ -69,6 +71,124 @@ export function requestNavigatorText(host, title, initialValue = "") {
     dialog.addEventListener("submit", (event) => {
       event.preventDefault();
       finish(input.value.trim() || null);
+    });
+  });
+}
+
+export function requestSpaceDetails(host, {
+  title,
+  initialValue = {},
+  projects = [],
+  onCreateProject = null,
+} = {}) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement("form");
+    dialog.className = "vera-dialog vera-space-details-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    heading.id = `vera-dialog-title-${++dialogSequence}`;
+    dialog.setAttribute("aria-labelledby", heading.id);
+
+    const nameLabel = document.createElement("label");
+    nameLabel.className = "vera-dialog__field";
+    const nameText = document.createElement("span");
+    nameText.textContent = "名称";
+    const nameInput = document.createElement("input");
+    nameInput.value = initialValue.name ?? "";
+    nameInput.required = true;
+    nameInput.setAttribute("aria-label", "Space 名称");
+    nameLabel.append(nameText, nameInput);
+
+    const typeLabel = document.createElement("label");
+    typeLabel.className = "vera-dialog__field";
+    const typeText = document.createElement("span");
+    typeText.textContent = "Space Type";
+    const typeSelect = document.createElement("select");
+    typeSelect.setAttribute("aria-label", "Space Type");
+    for (const type of SPACE_TYPES) {
+      const option = document.createElement("option");
+      option.value = type.id;
+      option.textContent = type.label;
+      option.selected = type.id === (initialValue.spaceType ?? DEFAULT_SPACE_TYPE.id);
+      typeSelect.appendChild(option);
+    }
+    typeLabel.append(typeText, typeSelect);
+
+    const projectLabel = document.createElement("label");
+    projectLabel.className = "vera-dialog__field";
+    const projectHeading = document.createElement("span");
+    projectHeading.className = "vera-dialog__field-heading";
+    const projectText = document.createElement("span");
+    projectText.textContent = "Project";
+    projectHeading.appendChild(projectText);
+    const projectSelect = document.createElement("select");
+    projectSelect.setAttribute("aria-label", "Project");
+
+    function renderProjects(nextProjects, selectedId = projectSelect.value || initialValue.projectId || "") {
+      projectSelect.replaceChildren();
+      const unassigned = document.createElement("option");
+      unassigned.value = "";
+      unassigned.textContent = "No project";
+      projectSelect.appendChild(unassigned);
+      for (const project of nextProjects) {
+        const option = document.createElement("option");
+        option.value = project.id;
+        option.textContent = project.name;
+        projectSelect.appendChild(option);
+      }
+      projectSelect.value = nextProjects.some((project) => project.id === selectedId) ? selectedId : "";
+    }
+    renderProjects(projects);
+
+    if (onCreateProject) {
+      const addProject = button("新建 Project", "vera-dialog__inline-action", async () => {
+        const name = await requestNavigatorText(host, "新 Project 名称");
+        if (!name) return;
+        try {
+          const project = await onCreateProject(name);
+          projects = [...projects.filter((candidate) => candidate.id !== project.id), project];
+          renderProjects(projects, project.id);
+        } catch (err) {
+          let error = dialog.querySelector(".vera-inline-error");
+          if (!error) {
+            error = document.createElement("span");
+            error.className = "vera-inline-error";
+            projectLabel.appendChild(error);
+          }
+          error.textContent = err.message;
+        }
+      });
+      projectHeading.appendChild(addProject);
+    }
+    projectLabel.append(projectHeading, projectSelect);
+
+    const actions = document.createElement("div");
+    actions.className = "vera-dialog__actions";
+    const cancel = button("取消", "vera-text-button", () => finish(null));
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.className = "vera-primary-button";
+    submit.textContent = "保存";
+    actions.append(cancel, submit);
+    dialog.append(heading, nameLabel, typeLabel, projectLabel, actions);
+    host.appendChild(dialog);
+
+    const deactivate = activateDialog(dialog, nameInput, () => finish(null));
+    function finish(value) {
+      deactivate();
+      dialog.remove();
+      resolve(value);
+    }
+    dialog.addEventListener("submit", (event) => {
+      event.preventDefault();
+      finish({
+        name: nameInput.value.trim(),
+        spaceType: typeSelect.value,
+        projectId: projectSelect.value || null,
+      });
     });
   });
 }

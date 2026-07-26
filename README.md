@@ -1,6 +1,6 @@
 # Vera
 
-> Early-stage software. The current package version is 0.0.1, and the project
+> Early-stage software. The current package version is 0.1.0, and the project
 > is not yet a turn-key deployment.
 
 Vera is an open-source, owner-operated workspace for running multiple AI

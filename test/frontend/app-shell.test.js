@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  resolveChatIdentity,
+  resolveSpaceIdentity,
   resolveNavigatorState,
   resolveShellHeader,
 } from "../../frontend/src/components/app-shell.js";
@@ -35,11 +35,11 @@ test("private header shows Account name and current model while group header sho
     seats: [{ accountId: "acc_a" }, { accountId: "acc_b" }],
   };
 
-  assert.deepEqual(resolveChatIdentity(privateSpace, accounts), {
+  assert.deepEqual(resolveSpaceIdentity(privateSpace, accounts), {
     title: "Coder",
     subtitle: "gpt-5.6-sol",
   });
-  assert.deepEqual(resolveChatIdentity(groupSpace, accounts), {
+  assert.deepEqual(resolveSpaceIdentity(groupSpace, accounts), {
     title: "Release Room",
     subtitle: "2 个 Account · Coder、Reviewer",
   });

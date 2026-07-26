@@ -164,7 +164,7 @@ export function buildSetupPlan(input, snapshots, snapshotFingerprint) {
   const status = allChecks.reduce((result, item) => SEVERITY[item.status] > SEVERITY[result] ? item.status : result, "ready");
   const body = {
     schemaVersion: 1,
-    toolVersion: "0.0.1",
+    toolVersion: "0.1.0",
     stage: "planned",
     status,
     snapshotFingerprint,

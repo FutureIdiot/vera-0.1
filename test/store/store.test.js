@@ -45,19 +45,30 @@ test("insert/find/update/remove round-trip in memory", async () => {
 test("persists split files to the data dir and reloads on next createStore call", async () => {
   await withTempDataDir(async (dataPath) => {
     const store = await createStore({ dataPath, debounceMs: 10 });
-    store.insert("spaces", { id: "spc_1", name: "vera-dev" });
+    store.insert("projects", { id: "prj_1", name: "Vera" });
+    store.insert("spaces", {
+      id: "spc_1",
+      name: "vera-dev",
+      createdAt: "2026-07-01T00:00:00.000Z",
+    });
     store.insert("spaceSessions", { id: "sps_1", spaceId: "spc_1", status: "active" });
     store.setEventSeqWatermark(123);
     await store.close(); // flush
 
+    assert.ok(await exists(join(dataPath, "projects.json")), "projects.json should be written");
     assert.ok(await exists(join(dataPath, "spaces.json")), "spaces.json should be written");
     assert.ok(await exists(join(dataPath, "spaceSessions.json")));
     assert.ok(await exists(join(dataPath, "meta.json")));
 
     const reloaded = await createStore({ dataPath, debounceMs: 10 });
+    assert.equal(reloaded.find("projects", "prj_1").name, "Vera");
     const found = reloaded.find("spaces", "spc_1");
     assert.ok(found, "space should survive reload");
     assert.equal(found.name, "vera-dev");
+    assert.equal(found.pinned, false);
+    assert.equal(found.spaceType, "chat");
+    assert.equal(found.projectId, null);
+    assert.equal(found.updatedAt, found.createdAt);
     assert.equal(reloaded.find("spaceSessions", "sps_1").spaceId, "spc_1");
     assert.equal(reloaded.getEventSeqWatermark(), 123);
     await reloaded.close();

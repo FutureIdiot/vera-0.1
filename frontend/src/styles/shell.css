@@ -182,6 +182,29 @@
   margin: auto;
 }
 
+.vera-space-surface-placeholder,
+.vera-blank-space {
+  align-content: center;
+  display: grid;
+  flex: 1;
+  gap: var(--vera-space-sm);
+  justify-items: center;
+  padding: var(--vera-window-margin);
+  text-align: center;
+}
+
+.vera-space-surface-placeholder h1,
+.vera-space-surface-placeholder p,
+.vera-blank-space h1,
+.vera-blank-space p {
+  margin: 0;
+}
+
+.vera-space-surface-placeholder p,
+.vera-blank-space p {
+  color: var(--vera-color-muted-text);
+}
+
 .vera-boot-error {
   align-self: center;
   display: grid;

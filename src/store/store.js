@@ -57,7 +57,7 @@ import {
 import { planWorkspaceBindings } from "./migrations/workspace-bindings.mjs";
 
 const COLLECTIONS = [
-  "agents", "accounts", "spaces", "messages", "activities", "approvals", "runs", "themes",
+  "agents", "accounts", "projects", "spaces", "messages", "activities", "approvals", "runs", "themes",
   "memoryDigestJobs", "memoryRecallSessions", "memorySignals", "unitBindings", "memoryConfigs",
   "memoryTaskVerifications", "memoryDreamJobs",
   "spaceSessions", "agentSessions", "providerBindings", "apiHistories",
@@ -106,6 +106,33 @@ function normalizeRunExecutionFields(data, markDirty) {
     changed = true;
   }
   if (changed) markDirty("runs");
+  return changed;
+}
+
+function normalizeSpaceNavigationFields(data, markDirty) {
+  let changed = false;
+  const timestamp = new Date().toISOString();
+  for (const space of data.spaces) {
+    if (!("pinned" in space)) {
+      space.pinned = false;
+      changed = true;
+    }
+    if (!("spaceType" in space)) {
+      space.spaceType = "chat";
+      changed = true;
+    }
+    if (!("projectId" in space)) {
+      space.projectId = null;
+      changed = true;
+    }
+    if (!("updatedAt" in space)) {
+      space.updatedAt = typeof space.createdAt === "string" && space.createdAt
+        ? space.createdAt
+        : timestamp;
+      changed = true;
+    }
+  }
+  if (changed) markDirty("spaces");
   return changed;
 }
 
@@ -246,6 +273,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     }
     normalizeAccountWorkspaceBindings();
     normalizeRunExecutionFields(data, markDirty);
+    normalizeSpaceNavigationFields(data, markDirty);
     markAllDirty();
     await flush();
     delete data.sessionStates;
@@ -371,9 +399,10 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     }
     normalizeAccountWorkspaceBindings();
     const runsNormalized = normalizeRunExecutionFields(data, markDirty);
+    const spacesNormalized = normalizeSpaceNavigationFields(data, markDirty);
     if (sessionStates) await retireLegacySessionStatesFile(legacySessionStatesPath);
     delete data.sessionStates;
-    if (runsNormalized || dirty.has("accounts")) await flush();
+    if (runsNormalized || spacesNormalized || dirty.has("accounts")) await flush();
   }
 
   function assertCollection(name) {

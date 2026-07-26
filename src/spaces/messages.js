@@ -4,7 +4,7 @@
 import { newActivityId, newMessageId } from "../core/id.js";
 import { ApiError } from "../core/errors.js";
 import { getAccountOrThrow } from "../agents/accounts.js";
-import { getSpaceOrThrow } from "./spaces.js";
+import { getSpaceOrThrow, touchSpaceUpdatedAt } from "./spaces.js";
 import { ensureActiveSpaceSession, ensureAgentSession } from "./context-sessions.js";
 
 function stripInternal({ _seq, ...rest }) {
@@ -106,7 +106,9 @@ export function postMessage({
     createdAt: new Date().toISOString(),
   };
   const storedMessage = store.insert("messages", message);
+  const updatedSpace = touchSpaceUpdatedAt(store, spaceId, storedMessage.createdAt);
   hub.publish("message.created", { message: files.projectMessage(stripInternal(storedMessage), spaceId) });
+  hub.publish("space.updated", { space: updatedSpace });
   memoryDigestScheduler?.onMessageCommitted(storedMessage);
 
   const runs = [];

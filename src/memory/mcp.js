@@ -233,7 +233,7 @@ export function createMemoryMcpDispatcher({ memory, retrieval, digestService = n
       return { jsonrpc: "2.0", id, result: {
         protocolVersion: "2025-06-18",
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "vera-memory", version: "0.0.1" },
+        serverInfo: { name: "vera-memory", version: "0.1.0" },
       } };
     }
     if (message.method === "tools/list") return { jsonrpc: "2.0", id, result: { tools: TOOL_SPECS } };

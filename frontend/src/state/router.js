@@ -1,4 +1,5 @@
 import { createAppShell } from "../components/app-shell.js";
+import { getSpaceType } from "../../../src/spaces/space-types.js";
 
 export function parseRoute(hash = "") {
   const normalized = hash.startsWith("#") ? hash.slice(1) : hash;
@@ -96,6 +97,8 @@ export function createAppRouter({
   windowTarget = window,
   createShell = (options) => createAppShell(options),
   loadSpaceView = () => import("../views/space-view.js"),
+  loadBlankSpaceView = () => import("../views/blank-space-view.js"),
+  loadSpaceSurfacePlaceholderView = () => import("../views/space-surface-placeholder-view.js"),
   loadSpaceSettingsView = () => import("../views/space-settings-view.js"),
   loadSpaceHistoryView = () => import("../views/space-history-view.js"),
   loadSpaceFilesView = () => import("../views/space-files-view.js"),
@@ -156,8 +159,29 @@ export function createAppRouter({
     outlet.replaceChildren();
     shell?.setRoute(route);
 
+    const routeSpace = route.name === "space" || route.name === "spaces"
+      ? (
+        route.spaceId
+          ? runtime.getBootstrap().spaces.find((space) => space.id === route.spaceId)
+          : shell?.getCurrentSpace?.() ?? runtime.getBootstrap().spaces[0]
+      )
+      : null;
+    const routeSpaceType = getSpaceType(routeSpace?.spaceType);
+    const spaceSurface = routeSpaceType.surface === "blank"
+      ? {
+        names: ["space", "spaces"],
+        loader: loadBlankSpaceView,
+        mount: "mountBlankSpaceView",
+      }
+      : routeSpace && routeSpaceType.surface === "placeholder"
+        ? {
+        names: ["space", "spaces"],
+        loader: loadSpaceSurfacePlaceholderView,
+        mount: "mountSpaceSurfacePlaceholderView",
+      }
+        : { names: ["space", "spaces"], loader: loadSpaceView, mount: "mountSpaceView" };
     const routeMap = [
-      { names: ["space", "spaces"], loader: loadSpaceView, mount: "mountSpaceView" },
+      spaceSurface,
       { names: ["space-settings"], loader: loadSpaceSettingsView, mount: "mountSpaceSettingsView" },
       { names: ["space-history"], loader: loadSpaceHistoryView, mount: "mountSpaceHistoryView" },
       { names: ["space-files"], loader: loadSpaceFilesView, mount: "mountSpaceFilesView" },
@@ -192,6 +216,7 @@ export function createAppRouter({
         agentId: route.agentId,
         accountId: route.accountId,
         shell,
+        space: routeSpace,
       });
       if (currentTransition !== transition) { cleanup?.(); routeRoot.remove(); return; }
       activeCleanup = () => {

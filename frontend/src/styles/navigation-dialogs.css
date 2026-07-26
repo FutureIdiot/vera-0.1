@@ -1,0 +1,81 @@
+.vera-inline-error {
+  color: var(--vera-color-error);
+  font-size: var(--vera-font-size-small);
+  margin: var(--vera-space-sm) var(--vera-space-md) 0;
+}
+
+.vera-dialog {
+  background: var(--vera-color-surface);
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  border-radius: var(--vera-control-radius);
+  box-shadow: var(--vera-shadow-lg);
+  display: grid;
+  gap: var(--vera-space-md);
+  left: 50%;
+  max-width: calc(100% - var(--vera-space-lg) * 2);
+  padding: var(--vera-space-lg);
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: var(--vera-navigator-dialog-width);
+  z-index: 10;
+}
+
+.vera-dialog__field {
+  color: var(--vera-color-muted-text);
+  display: grid;
+  font-size: var(--vera-font-size-small);
+  gap: var(--vera-space-xs);
+}
+
+.vera-dialog__field-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.vera-dialog input,
+.vera-dialog select {
+  background: var(--vera-color-background);
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  border-radius: var(--vera-control-radius);
+  color: var(--vera-color-text);
+  min-height: var(--vera-touch-target);
+  min-width: 0;
+  padding: var(--vera-space-sm);
+}
+
+.vera-dialog__inline-action {
+  background: transparent;
+  border: 0;
+  color: var(--vera-color-accent);
+  font-size: var(--vera-font-size-tiny);
+  min-height: var(--vera-action-size);
+}
+
+.vera-dialog .vera-check input {
+  min-height: auto;
+  padding: 0;
+}
+
+.vera-dialog__note {
+  color: var(--vera-color-muted-text);
+  font-size: var(--vera-font-size-small);
+}
+
+.vera-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.vera-text-button {
+  background: transparent;
+  border: 0;
+  min-height: var(--vera-touch-target);
+  padding: 0 var(--vera-space-sm);
+  text-decoration: none;
+}
+
+.vera-primary-button--danger {
+  background: var(--vera-color-error);
+}

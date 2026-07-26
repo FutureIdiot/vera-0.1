@@ -3,6 +3,10 @@ import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/chat.css";
 import "./styles/navigation.css";
+import "./styles/navigation-panel.css";
+import "./styles/navigation-rows.css";
+import "./styles/navigation-sort.css";
+import "./styles/navigation-dialogs.css";
 import "./styles/management.css";
 
 import { createAppRouter } from "./state/router.js";
