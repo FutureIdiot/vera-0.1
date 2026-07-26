@@ -92,8 +92,8 @@ const DEFAULTS = {
     accentColor: "", // 同上
     fontFamily: "system", // system / 具体字体族字符串
     fontSize: {
-      phone: { chat: 14, management: 14 },
-      desktop: { chat: 16, management: 16 },
+      phone: { chat: 13, management: 14 },
+      desktop: { chat: 14, management: 16 },
     },
     bubbleRadius: { phone: 16, desktop: 16 },
     bubbleGap: { phone: 4, desktop: 10 },

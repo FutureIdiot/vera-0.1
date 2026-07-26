@@ -49,9 +49,9 @@
 
   --vera-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --vera-font-family-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  --vera-font-size-phone-chat: 14px;
+  --vera-font-size-phone-chat: 13px;
   --vera-font-size-phone-management: 14px;
-  --vera-font-size-desktop-chat: 16px;
+  --vera-font-size-desktop-chat: 14px;
   --vera-font-size-desktop-management: 16px;
   --vera-font-size-small: 12px;
   --vera-font-size-tiny: 10px;
@@ -83,21 +83,24 @@
   --vera-bubble-group-gap: 2px;
   --vera-bubble-tail-size: var(--vera-bubble-radius);
   --vera-bubble-tail-extension: calc(var(--vera-bubble-tail-size) - var(--vera-border-width));
-  --vera-bubble-tail-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M0 0C0 11 7 19 14 19C16 19 16 20 14 20H0Z' fill='black'/%3E%3C/svg%3E");
+  --vera-bubble-tail-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M0 0C0 11 6 19 12 19C14 19 14 20 12 20H0Z' fill='black'/%3E%3C/svg%3E");
   --vera-bubble-time-offset: calc(
     var(--vera-font-size-base) - var(--vera-font-size-tiny) + 8px
   );
-  --vera-composer-height: 64px;
+  --vera-composer-height: 48px;
+  --vera-composer-control-size: 36px;
   --vera-composer-input-max-height: 160px;
   --vera-activity-detail-max-height: 192px;
   --vera-activity-icon-size: 16px;
   --vera-composer-text-optical-offset: 2px;
-  --vera-topbar-height: 64px;
+  --vera-topbar-height: 52px;
+  --vera-topbar-control-size: 40px;
+  --vera-topbar-icon-size: 18px;
   --vera-touch-target: 44px;
   --vera-icon-size: 20px;
   --vera-action-size: 30px;
   --vera-avatar-size: 36px;
-  --vera-header-avatar-size: 32px;
+  --vera-header-avatar-size: 28px;
   --vera-contact-rail-width: 68px;
   --vera-navigator-width: min(88vw, 520px);
   --vera-navigator-brand-size: 36px;
@@ -141,6 +144,12 @@
   --vera-safe-area-right: env(safe-area-inset-right, 0px);
   --vera-safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --vera-safe-area-left: env(safe-area-inset-left, 0px);
+}
+
+.vera-shell[data-route-scope="chat"] {
+  --vera-font-size-small: calc(var(--vera-font-size-base) - 2.5px);
+  --vera-font-size-tiny: calc(var(--vera-font-size-base) - 4.5px);
+  --vera-font-size-large: calc(var(--vera-font-size-base) + 2px);
 }
 
 .vera-shell[data-route-scope="management"] {

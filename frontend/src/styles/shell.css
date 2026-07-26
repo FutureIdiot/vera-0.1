@@ -36,7 +36,7 @@
   display: grid;
   gap: var(--vera-space-sm);
   grid-area: header;
-  grid-template-columns: var(--vera-touch-target) auto minmax(0, 1fr) auto;
+  grid-template-columns: var(--vera-topbar-control-size) auto minmax(0, 1fr) auto;
   min-width: 0;
   padding: 0 var(--vera-space-md);
   position: relative;
@@ -151,10 +151,15 @@
   border: 0;
   border-radius: var(--vera-control-radius);
   display: inline-flex;
-  min-height: var(--vera-touch-target);
-  min-width: var(--vera-touch-target);
+  min-height: var(--vera-topbar-control-size);
+  min-width: var(--vera-topbar-control-size);
   text-decoration: none;
   transition: background var(--vera-transition-fast), color var(--vera-transition-fast);
+}
+
+.vera-shell__header .vera-vector-icon {
+  height: var(--vera-topbar-icon-size);
+  width: var(--vera-topbar-icon-size);
 }
 
 .vera-icon-button:hover {
@@ -248,7 +253,7 @@
 @media (max-width: 480px) {
   .vera-shell__header {
     gap: var(--vera-space-xs);
-    grid-template-columns: var(--vera-touch-target) auto minmax(0, 1fr) auto;
+    grid-template-columns: var(--vera-topbar-control-size) auto minmax(0, 1fr) auto;
     padding-inline: var(--vera-space-xs);
   }
 

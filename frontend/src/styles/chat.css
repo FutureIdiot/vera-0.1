@@ -506,7 +506,7 @@
 
 .vera-composer {
   background: var(--vera-color-background);
-  padding: var(--vera-space-xs) var(--vera-space-md) var(--vera-space-md);
+  padding: var(--vera-space-2xs) var(--vera-space-md) var(--vera-space-sm);
   position: relative;
 }
 
@@ -521,7 +521,7 @@
   gap: var(--vera-space-sm);
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   min-height: var(--vera-composer-height);
-  padding: var(--vera-space-sm) var(--vera-space-md);
+  padding: calc(var(--vera-space-sm) - var(--vera-space-2xs)) var(--vera-space-md);
 }
 
 .vera-composer__tools {
@@ -536,12 +536,12 @@
   border: 0;
   border-radius: var(--vera-control-radius);
   display: inline-flex;
-  flex: 0 0 var(--vera-touch-target);
-  height: var(--vera-touch-target);
+  flex: 0 0 var(--vera-composer-control-size);
+  height: var(--vera-composer-control-size);
   justify-content: center;
   padding: 0;
   transition: background var(--vera-transition-fast), color var(--vera-transition-fast);
-  width: var(--vera-touch-target);
+  width: var(--vera-composer-control-size);
 }
 
 .vera-composer__tool {
@@ -565,7 +565,7 @@
   color: var(--vera-color-text);
   line-height: var(--vera-line-height-base);
   max-height: var(--vera-composer-input-max-height);
-  min-height: var(--vera-touch-target);
+  min-height: var(--vera-composer-control-size);
   min-width: 0;
   outline: 0;
   overflow-y: auto;
