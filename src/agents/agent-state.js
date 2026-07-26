@@ -7,10 +7,18 @@ export const AGENT_STATE_STATUSES = Object.freeze([
   "idle",
   "thinking",
   "typing",
+  "planning",
+  "searching",
   "reading",
   "coding",
+  "testing",
   "reviewing",
   "on_task",
+  "waiting",
+  "needs_you",
+  "compacting",
+  "delegating",
+  "dreaming",
   "away",
 ]);
 

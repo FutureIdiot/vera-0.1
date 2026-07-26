@@ -4,6 +4,7 @@ import { createHttpClient } from "../api/http-client.js";
 import { createSpacesClient } from "../api/spaces-client.js";
 import { getSpaceType } from "../../../src/spaces/space-types.js";
 import { attachNavigatorSwipe } from "../hooks/navigator-swipe.js";
+import { resolvePrivateAccountStatus } from "../state/agent-status.js";
 
 const MANAGEMENT_ROUTES = new Set([
   "space-settings",
@@ -29,16 +30,22 @@ export function isSpaceRouteName(routeName) {
   return routeName === "space" || routeName === "spaces";
 }
 
-export function resolveSpaceIdentity(currentSpace, accounts = []) {
+export function resolveSpaceIdentity(currentSpace, accounts = [], agentStates = []) {
   const seats = currentSpace?.seats ?? [];
   const members = seats.map((seat) => (
     accounts.find((account) => account.id === seat.accountId) ?? { id: seat.accountId }
   ));
   if (seats.length === 1) {
     const account = members[0];
+    const model = account?.model ?? "模型未知";
+    const status = resolvePrivateAccountStatus({
+      account,
+      spaceId: currentSpace?.id,
+      agentStates,
+    });
     return {
       title: account?.name ?? currentSpace?.name ?? account?.id ?? "选择 Space",
-      subtitle: account?.model ?? "模型未知",
+      subtitle: `${model} · ${status}`,
     };
   }
   const names = members.map((account) => account?.name ?? account?.id).filter(Boolean);
@@ -75,11 +82,12 @@ export function resolveShellHeader({
   routeName,
   currentSpace,
   accounts = [],
+  agentStates = [],
   navigatorOpen = false,
   managementHeader = null,
 } = {}) {
   if (isSpaceRouteName(routeName)) {
-    const identity = resolveSpaceIdentity(currentSpace, accounts);
+    const identity = resolveSpaceIdentity(currentSpace, accounts, agentStates);
     return {
       leadingText: navigatorOpen ? "收起" : "目录",
       leadingHref: "#/spaces",
@@ -124,8 +132,6 @@ export function createAppShell({ root, platform, runtime } = {}) {
 
   const shell = document.createElement("section");
   shell.className = "vera-shell is-space-route";
-  const documentRoot = root.ownerDocument?.documentElement ?? document.documentElement;
-  documentRoot.classList.add("vera-navigator-swipe-route");
 
   const header = document.createElement("header");
   header.className = "vera-shell__header";
@@ -199,6 +205,11 @@ export function createAppShell({ root, platform, runtime } = {}) {
     platform,
     runtime,
     currentSpaceId: currentSpace?.id,
+    onNavigate: () => {
+      if (getComputedStyle(navigator.resizeHandle).display === "none") {
+        closeNavigator({ restoreDirectoryRoute: false });
+      }
+    },
   });
   let navigatorWidth = null;
   let resizePointerId = null;
@@ -311,6 +322,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
       routeName: activeRouteName,
       currentSpace,
       accounts: runtime.getBootstrap().accounts ?? [],
+      agentStates: runtime.getBootstrap().agentStates ?? [],
       navigatorOpen,
       managementHeader,
     });
@@ -394,13 +406,13 @@ export function createAppShell({ root, platform, runtime } = {}) {
     navigator.focusFirst();
   }
 
-  function closeNavigator() {
+  function closeNavigator({ restoreDirectoryRoute = true } = {}) {
     if (!navigatorOpen) return;
     navigator.cancelDialogs();
     navigatorOpen = false;
     applyNavigatorState();
     leading.focus();
-    if (window.location.hash === "#/spaces") {
+    if (restoreDirectoryRoute && window.location.hash === "#/spaces") {
       window.location.hash = currentSpace ? `#/spaces/${encodeURIComponent(currentSpace.id)}` : "#/";
     }
   }
@@ -420,7 +432,6 @@ export function createAppShell({ root, platform, runtime } = {}) {
     activeRouteName = route.name;
     const spaceRoute = isSpaceRoute();
     shell.classList.toggle("is-space-route", spaceRoute);
-    documentRoot.classList.toggle("vera-navigator-swipe-route", spaceRoute);
     managementHeader = null;
     const bootstrap = runtime.getBootstrap();
     if (spaceRoute) {
@@ -473,6 +484,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
       else if (window.navigator.onLine) setConnection(envelope.data.status === "reconnecting" ? "重连中" : "连接中");
     } else if (envelope.type === "runtime.degraded") setConnection("同步失败", "danger");
     else if (envelope.type === "space.updated" && envelope.data?.space?.id === currentSpace?.id) setSpace(envelope.data.space);
+    else if (["agent.state.updated", "account.presence.updated", "account.upserted"].includes(envelope.type)) updateHeader();
     else if (envelope.type === "observation.updated") updateHeader();
     else if (envelope.type === "runtime.reset") {
       const retainedArchivedSpace = isSpaceRoute() && currentSpace?.archivedAt ? currentSpace : null;
@@ -499,7 +511,6 @@ export function createAppShell({ root, platform, runtime } = {}) {
     getCurrentSpace() { return currentSpace; },
     destroy() {
       shellDestroyed = true;
-      documentRoot.classList.remove("vera-navigator-swipe-route");
       unsubscribeRuntime();
       detachNavigatorSwipe();
       navigator.resizeHandle.removeEventListener("pointerdown", onNavigatorResizePointerDown);

@@ -28,11 +28,6 @@
   position: relative;
 }
 
-html.vera-navigator-swipe-route,
-html.vera-navigator-swipe-route body {
-  overscroll-behavior-x: none;
-}
-
 .vera-shell.is-space-route {
   touch-action: pan-y pinch-zoom;
 }

@@ -21,6 +21,7 @@ function requested(input, overrides = {}) {
     data: {
       run: {
         id: "run_a", agentId: "agt_a", accountId: "acc_a", accountSessionId: "acs_a",
+        spaceId: "spc_a",
         runtimeRevision: "rev_a", executionLeaseId: "lease_a", workspaceHostId: "host_a", delegated: false,
         effectiveModel: "model_a", modelVersion: 1,
         spaceSessionId: "sps_a", agentSessionId: input.sessionMode === "main" ? "ags_a" : null,

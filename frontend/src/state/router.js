@@ -1,4 +1,5 @@
 import { createAppShell } from "../components/app-shell.js";
+import { createTimelineCache } from "./timeline-cache.js";
 import { createHttpClient } from "../api/http-client.js";
 import { createSpacesClient } from "../api/spaces-client.js";
 import { getSpaceType } from "../../../src/spaces/space-types.js";
@@ -117,6 +118,7 @@ export function createAppRouter({
   loadAgentMemoryConfigView = () => import("../views/agent-memory-config-view.js"),
   loadAgentMemoryLibraryView = () => import("../views/agent-memory-library-view.js"),
   loadAllSpaces = null,
+  timelineCache = createTimelineCache(),
 } = {}) {
   let activeCleanup = null;
   let shell = null;
@@ -232,6 +234,7 @@ export function createAppRouter({
         accountId: route.accountId,
         shell,
         space: routeSpace,
+        timelineCache,
       });
       if (currentTransition !== transition) { cleanup?.(); routeRoot.remove(); return; }
       activeCleanup = () => {

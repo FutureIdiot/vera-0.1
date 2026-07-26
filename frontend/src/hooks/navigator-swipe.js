@@ -3,7 +3,7 @@ export function attachNavigatorSwipe(element, {
   onClose,
   isOpen = () => false,
   isEnabled = () => true,
-  edgePx = 24,
+  reservedEdgePx = 24,
   thresholdPx = 64,
   intentPx = 10,
   axisRatio = 1.2,
@@ -15,7 +15,7 @@ export function attachNavigatorSwipe(element, {
   function onPointerDown(event) {
     if (event.pointerType !== "touch" || !isEnabled()) return;
     const open = Boolean(isOpen());
-    if (!open && event.clientX > edgePx) return;
+    if (!open && event.clientX <= reservedEdgePx) return;
     start = {
       x: event.clientX,
       y: event.clientY,

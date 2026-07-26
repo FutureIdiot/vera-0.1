@@ -11,6 +11,7 @@ import { renderApprovalCard, applyApprovalCard } from "../components/approval-ca
 import { createComposer } from "../components/composer.js";
 import { createRunStatus } from "../components/run-status.js";
 import { createFilesClient, FILE_ACCEPT } from "../api/files-client.js";
+import { timelineItemsMatch } from "../state/timeline-cache.js";
 
 const TIMELINE_PAGE_SIZE = 50;
 const TIMELINE_DOM_LIMIT = 200;
@@ -31,7 +32,15 @@ function envelopeSpaceSessionId(envelope) {
     ?? data?.approval?.spaceSessionId ?? data?.run?.spaceSessionId ?? null;
 }
 
-export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpaceId, shell } = {}) {
+export function mountSpaceView({
+  root,
+  platform,
+  runtime,
+  spaceId: requestedSpaceId,
+  shell,
+  space: projectedSpace = null,
+  timelineCache = null,
+} = {}) {
   let mounted = true;
   let space = null;
   let hydrating = true;
@@ -42,6 +51,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
   let preserveFullRenderScroll = false;
   let activeCompactionJobId = null;
   let observation = null;
+  let latestSeq = 0;
 
   root.dataset.routeScope = "chat";
 
@@ -49,7 +59,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
   statusBar.className = "vera-status-bar";
   statusBar.setAttribute("role", "status");
   statusBar.setAttribute("aria-live", "polite");
-  statusBar.textContent = "连接中…";
+  statusBar.hidden = true;
   const setStatus = (message) => {
     statusBar.textContent = message;
     statusBar.hidden = !message;
@@ -268,7 +278,9 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
       if (timeline.spaceSession?.id) {
         space = { ...space, activeSpaceSessionId: timeline.spaceSession.id };
       }
-      store.hydrate(timeline.items);
+      if (!timelineItemsMatch(store.getOrderedItems(), timeline.items)) {
+        store.hydrate(timeline.items);
+      }
       hasOlder = timeline.items.length === TIMELINE_PAGE_SIZE;
       olderButton.hidden = !hasOlder;
       if (space.archivedAt) showArchivedStatus();
@@ -296,6 +308,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
 
   function handleRuntimeEvent(envelope) {
     if (!mounted) return;
+    if (Number.isFinite(envelope.seq)) latestSeq = Math.max(latestSeq, envelope.seq);
     if (envelope.type === "runtime.degraded") {
       setStatus("连接出现缺口，正在重新同步…");
       return;
@@ -346,8 +359,21 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
 
   const bootstrap = runtime.getBootstrap();
   const initialSpace = requestedSpaceId
-    ? bootstrap.spaces.find((candidate) => candidate.id === requestedSpaceId)
+    ? projectedSpace ?? bootstrap.spaces.find((candidate) => candidate.id === requestedSpaceId)
     : bootstrap.spaces[0];
+  const cachedTimeline = initialSpace?.activeSpaceSessionId
+    ? timelineCache?.get(initialSpace.id, initialSpace.activeSpaceSessionId)
+    : null;
+  latestSeq = cachedTimeline?.seq ?? bootstrap.seq;
+  if (cachedTimeline) {
+    space = initialSpace;
+    observation = bootstrap.observation ?? null;
+    for (const account of bootstrap.accounts ?? []) accountNameById.set(account.id, account.name);
+    store.hydrate([...cachedTimeline.items].reverse());
+    hasOlder = cachedTimeline.hasOlder;
+    olderButton.hidden = !hasOlder;
+    shell?.setSpace(space);
+  }
   const composer = createComposer({
     targets: bootstrap.accounts.filter((account) => initialSpace?.seats.some((seat) => seat.accountId === account.id)),
     onPickAttachment: async (kind) => {
@@ -380,7 +406,8 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
       });
     },
   });
-  const unsubscribeRuntime = runtime.subscribe(handleRuntimeEvent, { since: bootstrap.seq });
+  if (cachedTimeline) composer.setDisabled(Boolean(space.archivedAt));
+  const unsubscribeRuntime = runtime.subscribe(handleRuntimeEvent, { since: latestSeq });
   for (const state of bootstrap.agentStates ?? []) {
     runStatus.handleEvent({ type: "agent.state.updated", data: { agentState: state } }, initialSpace?.id);
   }
@@ -409,7 +436,7 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     }
   });
 
-  void hydrateFromBootstrap(bootstrap, bootstrap.seq).catch((err) => {
+  void hydrateFromBootstrap(bootstrap, latestSeq).catch((err) => {
     handleHydrationError("加载时间线失败", err);
   });
 
@@ -418,6 +445,14 @@ export function mountSpaceView({ root, platform, runtime, spaceId: requestedSpac
     mounted = false;
     hydrationGeneration += 1;
     pendingEvents = [];
+    if (space?.id && space.activeSpaceSessionId) {
+      timelineCache?.set(space.id, {
+        spaceSessionId: space.activeSpaceSessionId,
+        items: store.getOrderedItems(),
+        hasOlder,
+        seq: latestSeq,
+      });
+    }
     unsubscribeRuntime();
     unsubscribeStore();
     nodeByKey.clear();

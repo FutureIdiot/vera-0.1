@@ -378,6 +378,32 @@ test("hash navigation cleans up the previous route before mounting the next", as
   fixture.router.stop();
 });
 
+test("chat mounts share one router-owned timeline cache across navigation", async () => {
+  const caches = [];
+  const fixture = createFixture({
+    hash: "#/spaces/spc_first",
+    spaces: [
+      { id: "spc_first", spaceType: "chat" },
+      { id: "spc_second", spaceType: "chat" },
+    ],
+    loadSpaceView: async () => ({
+      mountSpaceView({ timelineCache }) {
+        caches.push(timelineCache);
+        return () => {};
+      },
+    }),
+  });
+
+  await fixture.router.start();
+  fixture.windowTarget.location.hash = "#/spaces/spc_second";
+  fixture.listeners.get("hashchange")();
+  await flushAsyncWork();
+
+  assert.equal(caches.length, 2);
+  assert.equal(caches[0], caches[1]);
+  fixture.router.stop();
+});
+
 test("unknown routes replace the active view with a lightweight error", async () => {
   let cleanupCount = 0;
   const fixture = createFixture({

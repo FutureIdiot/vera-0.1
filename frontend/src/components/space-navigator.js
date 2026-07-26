@@ -28,7 +28,12 @@ function avatarText(entry) {
 
 export { resolveSpaceCreationTarget } from "./space-navigator-projection.js";
 
-export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {}) {
+export function createSpaceNavigator({
+  platform,
+  runtime,
+  currentSpaceId,
+  onNavigate = () => {},
+} = {}) {
   const http = createHttpClient(platform);
   const client = createSpacesClient(http);
   const projectsClient = createProjectsClient(http);
@@ -79,6 +84,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
   }
 
   function navigate(spaceId) {
+    onNavigate(spaceId);
     window.location.hash = `#/spaces/${encodeURIComponent(spaceId)}`;
   }
 

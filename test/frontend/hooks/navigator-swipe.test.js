@@ -25,7 +25,7 @@ function pointerEvent(clientX, clientY, pointerId = 1) {
   };
 }
 
-test("navigator swipe opens only for a rightward horizontal touch from the edge", () => {
+test("navigator swipe preserves the browser edge gesture and opens from the page body", () => {
   const { element, listeners } = fixture();
   let opens = 0;
   const detach = attachNavigatorSwipe(element, { onOpen: () => { opens += 1; } });
@@ -33,9 +33,9 @@ test("navigator swipe opens only for a rightward horizontal touch from the edge"
   listeners.get("pointerup")(pointerEvent(90, 110));
   listeners.get("pointerdown")(pointerEvent(40, 100));
   listeners.get("pointerup")(pointerEvent(150, 100));
-  listeners.get("pointerdown")(pointerEvent(10, 100));
-  listeners.get("pointermove")(pointerEvent(20, 150));
-  listeners.get("pointerup")(pointerEvent(90, 200));
+  listeners.get("pointerdown")(pointerEvent(80, 100));
+  listeners.get("pointermove")(pointerEvent(90, 150));
+  listeners.get("pointerup")(pointerEvent(160, 200));
   assert.equal(opens, 1);
   detach();
   assert.equal(listeners.size, 0);

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createDaemonClient } from "../../src/agents/daemon-client.js";
+import { activityAgentStatus } from "../../src/agents/daemon-run-handler.js";
 
 const TOKEN = `vat_${"a".repeat(43)}`;
 const KEY = `vak_${"b".repeat(43)}`;
@@ -73,6 +74,7 @@ function requested(input, overrides = {}) {
     data: {
       run: {
         id: "run_a", agentId: "agt_a", accountId: "acc_a", accountSessionId: "acs_a",
+        spaceId: "spc_a",
         runtimeRevision: "rev_a", executionLeaseId: "lease_a", workspaceHostId: "host_a", delegated: false,
         effectiveModel: "model_a", modelVersion: 1,
         spaceSessionId: "sps_a", agentSessionId: input.sessionMode === "main" ? "ags_a" : null,
@@ -93,6 +95,19 @@ async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
+test("public execution activities map to stable AgentState phases", () => {
+  assert.equal(activityAgentStatus({ kind: "reasoning" }), "thinking");
+  assert.equal(activityAgentStatus({ kind: "plan" }), "planning");
+  assert.equal(activityAgentStatus({ kind: "search" }), "searching");
+  assert.equal(activityAgentStatus({ kind: "read" }), "reading");
+  assert.equal(activityAgentStatus({ kind: "edit" }), "coding");
+  assert.equal(activityAgentStatus({ kind: "command", label: "npm test" }), "testing");
+  assert.equal(activityAgentStatus({ kind: "command", summary: "review PR 42" }), "reviewing");
+  assert.equal(activityAgentStatus({ kind: "tool", label: "create subagent" }), "delegating");
+  assert.equal(activityAgentStatus({ kind: "compact" }), "compacting");
+  assert.equal(activityAgentStatus({ kind: "tool" }), "on_task");
+});
+
 test("CLI isolated input stays isolated and does not submit API history", async () => {
   const input = { kind: "cli", sessionMode: "isolated", promptText: "bounded prompt" };
   let received;
@@ -108,6 +123,10 @@ test("CLI isolated input stays isolated and does not submit API history", async 
   assert.deepEqual(received, { input, effectiveModel: "model_b" });
   assert.equal(calls.some((call) => call.url.endsWith("/api-result")), false);
   assert.equal(calls.find((call) => call.url.endsWith("/delta")).body.paragraphEnd, true);
+  const statePatches = calls
+    .filter((call) => call.method === "PATCH" && call.body?.agentState)
+    .map((call) => call.body.agentState.status);
+  assert.deepEqual(statePatches, ["on_task", "typing", "idle"]);
   assert.equal(calls.find((call) => call.method === "PATCH" && call.body?.status === "completed")?.body.status, "completed");
 });
 
@@ -165,6 +184,15 @@ test("requestApproval posts once and resolves only its approval.answered event",
   const approval = calls.find((call) => call.url.endsWith("/approvals"));
   assert.deepEqual(approval.body, { prompt: "Allow?", options: ["allow", "deny"] });
   assert.equal(calls.find((call) => call.url.endsWith("/messages")).body.content, "answer:allow");
+  assert.deepEqual(calls
+    .filter((call) => call.method === "PATCH" && call.body?.agentState)
+    .map((call) => call.body.agentState.status), [
+    "on_task",
+    "needs_you",
+    "on_task",
+    "typing",
+    "idle",
+  ]);
   assert.equal(calls.some((call) => call.method === "PATCH" && call.body?.status === "completed"), true);
 });
 
@@ -220,7 +248,14 @@ test("a rejected output report prevents a completed terminal", async () => {
     if (url.endsWith("/api/agent/memory-tasks/events")) return new Response(stream([]), { status: 200 });
     if (url.endsWith("/api/agent/events")) {
       eventCount += 1;
-      if (eventCount === 1) return new Response(stream([event]), { status: 200 });
+      if (eventCount === 1) {
+        return new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
+            setTimeout(() => controller.close(), 50);
+          },
+        }), { status: 200 });
+      }
       throw new Error("offline");
     }
     if (url.endsWith("/delta")) {

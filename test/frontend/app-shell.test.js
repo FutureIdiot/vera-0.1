@@ -31,10 +31,10 @@ test("chat top bar uses the left control for the directory and the Space title f
   });
 });
 
-test("private header shows Account name and current model while group header shows Space name", () => {
+test("private header shows Account name, current model, and mapped status while groups stay unchanged", () => {
   const accounts = [
-    { id: "acc_a", name: "Coder", model: "gpt-5.6-sol" },
-    { id: "acc_b", name: "Reviewer", model: "claude-sonnet" },
+    { id: "acc_a", name: "Coder", model: "gpt-5.6-sol", presence: "online", activeAgentId: "agt_a" },
+    { id: "acc_b", name: "Reviewer", model: "claude-sonnet", presence: "online" },
   ];
   const privateSpace = { id: "spc_private", name: "Implementation", seats: [{ accountId: "acc_a" }] };
   const groupSpace = {
@@ -43,9 +43,15 @@ test("private header shows Account name and current model while group header sho
     seats: [{ accountId: "acc_a" }, { accountId: "acc_b" }],
   };
 
-  assert.deepEqual(resolveSpaceIdentity(privateSpace, accounts), {
+  assert.deepEqual(resolveSpaceIdentity(privateSpace, accounts, [{
+    agentId: "agt_a",
+    accountId: "acc_a",
+    spaceId: "spc_private",
+    status: "on_task",
+    lastActiveAt: "2026-07-26T00:00:00.000Z",
+  }]), {
     title: "Coder",
-    subtitle: "gpt-5.6-sol",
+    subtitle: "gpt-5.6-sol · working",
   });
   assert.deepEqual(resolveSpaceIdentity(groupSpace, accounts), {
     title: "Release Room",

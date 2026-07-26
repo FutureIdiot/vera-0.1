@@ -79,6 +79,24 @@ test("daemon declarations use independent agentId:accountId:spaceId keys and pub
 });
 
 test("all documented statuses are accepted and legacy gateway inference creates no state", () => {
+  assert.deepEqual(AGENT_STATE_STATUSES, [
+    "idle",
+    "thinking",
+    "typing",
+    "planning",
+    "searching",
+    "reading",
+    "coding",
+    "testing",
+    "reviewing",
+    "on_task",
+    "waiting",
+    "needs_you",
+    "compacting",
+    "delegating",
+    "dreaming",
+    "away",
+  ]);
   const tracker = createAgentStateTracker({ hub: { publish() {} } });
   for (const status of AGENT_STATE_STATUSES) {
     assert.equal(tracker.declare(authority(), declaration({ status })).status, status);

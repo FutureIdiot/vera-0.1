@@ -80,6 +80,22 @@ function safeRunError(error) {
   return { code, message: code === "gateway_unreachable" ? "gateway unreachable" : "daemon execution failed" };
 }
 
+export function activityAgentStatus(activity = {}) {
+  const description = `${activity.label ?? ""} ${activity.summary ?? ""}`.toLowerCase();
+  if (/\b(subagent|delegate|delegating)\b/u.test(description)) return "delegating";
+  if (/(?:\breview(?:ing)?\b|\bpull request\b|\bpr\b)/u.test(description)) return "reviewing";
+  if (/\b(test|testing|verify|verification|lint|build)\b/u.test(description)) return "testing";
+  const byKind = {
+    reasoning: "thinking",
+    plan: "planning",
+    search: "searching",
+    read: "reading",
+    edit: "coding",
+    compact: "compacting",
+  };
+  return byKind[activity.kind] ?? "on_task";
+}
+
 export function createDaemonRunHandler({
   identity, executor, request, getAccountSessionId, getTerminalReason,
   activitySummaryMaxLength = 160,
@@ -157,6 +173,8 @@ export function createDaemonRunHandler({
     const assistantMessageIds = [];
     let reportTail = Promise.resolve();
     let reportError = null;
+    let stateTail = Promise.resolve();
+    let currentAgentStatus = null;
     const enqueue = (task) => {
       const next = reportTail.then(() => {
         if (reportError) throw reportError;
@@ -165,18 +183,40 @@ export function createDaemonRunHandler({
       reportTail = next.catch((error) => { reportError ??= error; });
       return next;
     };
-    const onDelta = (delta, options = {}) => enqueue(() => report(current.id, "/delta", "POST", {
-      delta: String(delta ?? ""), ...(options.paragraphEnd ? { paragraphEnd: true } : {}),
-    }));
-    const onMessage = (message) => enqueue(async () => {
-      const content = typeof message === "string" ? message : message?.content;
-      const response = await report(current.id, "/messages", "POST", { content: String(content ?? "") });
-      const created = response?.message ?? response;
-      if (created?.id) assistantMessageIds.push(created.id);
-      return created ?? null;
+    const agentState = (status) => ({
+      agentId: current.agentId,
+      accountId: current.accountId,
+      spaceId: current.spaceId,
+      status,
+      detail: "",
     });
+    const declareAgentStatus = (status) => {
+      if (status === currentAgentStatus) return stateTail;
+      currentAgentStatus = status;
+      stateTail = stateTail
+        .then(() => report(current.id, "", "PATCH", { agentState: agentState(status) }))
+        .catch(() => null);
+      return stateTail;
+    };
+    const onDelta = (delta, options = {}) => {
+      void declareAgentStatus("typing");
+      return enqueue(() => report(current.id, "/delta", "POST", {
+        delta: String(delta ?? ""), ...(options.paragraphEnd ? { paragraphEnd: true } : {}),
+      }));
+    };
+    const onMessage = (message) => {
+      void declareAgentStatus("typing");
+      return enqueue(async () => {
+        const content = typeof message === "string" ? message : message?.content;
+        const response = await report(current.id, "/messages", "POST", { content: String(content ?? "") });
+        const created = response?.message ?? response;
+        if (created?.id) assistantMessageIds.push(created.id);
+        return created ?? null;
+      });
+    };
     const onActivity = (activity) => {
       const projected = safeActivity(activity, active.activityVisibility);
+      void declareAgentStatus(activityAgentStatus(projected));
       return enqueue(async () => {
         try {
           return await report(current.id, "/activities", "POST", projected);
@@ -187,6 +227,9 @@ export function createDaemonRunHandler({
       });
     };
     const requestApproval = async (approvalRequest) => {
+      await reportTail;
+      if (reportError) throw reportError;
+      void declareAgentStatus("needs_you");
       const response = await report(current.id, "/approvals", "POST", {
         prompt: String(approvalRequest?.prompt ?? ""),
         options: Array.isArray(approvalRequest?.options) ? approvalRequest.options.map(String) : [],
@@ -194,7 +237,7 @@ export function createDaemonRunHandler({
       const approval = response?.approval ?? response;
       if (!approval?.id) throw new DaemonRunError("invalid_response", "gateway did not create Approval");
       if (controller.signal.aborted) return "deny";
-      return new Promise((resolve) => {
+      const answer = await new Promise((resolve) => {
         const onAbort = () => {
           approvalWaiters.delete(approval.id);
           resolve("deny");
@@ -208,6 +251,10 @@ export function createDaemonRunHandler({
           },
         });
       });
+      if (!controller.signal.aborted) {
+        void declareAgentStatus("on_task");
+      }
+      return answer;
     };
     const persistProviderBinding = (providerState, ifVersion = null) => enqueue(async () => {
       if (input.sessionMode !== "main" || input.kind !== "cli") {
@@ -223,6 +270,7 @@ export function createDaemonRunHandler({
       return response?.providerBinding ?? response?.binding ?? response ?? null;
     });
     try {
+      void declareAgentStatus("on_task");
       const result = await execute({
         ...data, signal: controller.signal, onDelta, onMessage, onActivity, requestApproval, persistProviderBinding,
       });
@@ -235,6 +283,7 @@ export function createDaemonRunHandler({
       if (!assistantMessageIds.length && typeof result?.content === "string" && result.content) await onMessage(result.content);
       await reportTail;
       if (reportError) throw reportError;
+      await stateTail;
       if (input.kind === "api" && input.sessionMode === "main") {
         await report(current.id, "/api-result", "PUT", {
           agentSessionId: current.agentSessionId, generation: current.contextGeneration,
@@ -243,10 +292,20 @@ export function createDaemonRunHandler({
           ...(result?.usage ? { usage: result.usage } : {}),
         });
       }
-      await report(current.id, "", "PATCH", { status: "completed" });
+      currentAgentStatus = "idle";
+      await report(current.id, "", "PATCH", {
+        status: "completed",
+        agentState: agentState("idle"),
+      });
     } catch (error) {
       await reportTail;
-      await report(current.id, "", "PATCH", { status: "failed", error: safeRunError(error) }).catch(() => {});
+      await stateTail;
+      currentAgentStatus = "idle";
+      await report(current.id, "", "PATCH", {
+        status: "failed",
+        error: safeRunError(error),
+        agentState: agentState("idle"),
+      }).catch(() => {});
     } finally {
       denyApprovals(current.id);
       activeRuns.delete(current.id);
