@@ -81,9 +81,9 @@
   --vera-bubble-padding: 10px 14px;
   --vera-bubble-max-width: 76%;
   --vera-bubble-group-gap: 2px;
-  --vera-bubble-tail-size: 20px;
-  --vera-bubble-tail-extension: 10px;
-  --vera-bubble-tail-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M0 0C0 11 4 18 20 20H0Z' fill='black'/%3E%3C/svg%3E");
+  --vera-bubble-tail-size: var(--vera-bubble-radius);
+  --vera-bubble-tail-extension: calc(var(--vera-bubble-tail-size) - var(--vera-border-width));
+  --vera-bubble-tail-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M0 0C0 11 7 19 14 19C16 19 16 20 14 20H0Z' fill='black'/%3E%3C/svg%3E");
   --vera-bubble-time-offset: calc(
     var(--vera-font-size-base) - var(--vera-font-size-tiny) + var(--vera-space-xs)
   );

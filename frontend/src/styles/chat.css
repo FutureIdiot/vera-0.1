@@ -123,6 +123,10 @@
   width: var(--vera-bubble-tail-size);
 }
 
+.vera-bubble--agent.vera-bubble--has-tail .vera-bubble__surface {
+  border-bottom-left-radius: 0;
+}
+
 .vera-bubble--agent.vera-bubble--has-tail .vera-bubble__surface::after {
   content: none;
 }
@@ -167,6 +171,10 @@
   background: var(--vera-color-bubble-user-end);
   right: calc(var(--vera-bubble-tail-extension) * -1);
   width: var(--vera-bubble-tail-size);
+}
+
+.vera-bubble--user.vera-bubble--has-tail .vera-bubble__surface {
+  border-bottom-right-radius: 0;
 }
 
 .vera-bubble--user.vera-bubble--has-tail .vera-bubble__surface::after {
