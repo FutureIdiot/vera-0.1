@@ -85,7 +85,7 @@
   --vera-bubble-tail-extension: calc(var(--vera-bubble-tail-size) - var(--vera-border-width));
   --vera-bubble-tail-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M0 0C0 11 7 19 14 19C16 19 16 20 14 20H0Z' fill='black'/%3E%3C/svg%3E");
   --vera-bubble-time-offset: calc(
-    var(--vera-font-size-base) - var(--vera-font-size-tiny) + var(--vera-space-xs)
+    var(--vera-font-size-base) - var(--vera-font-size-tiny) + 8px
   );
   --vera-composer-height: 64px;
   --vera-composer-input-max-height: 160px;
