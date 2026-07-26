@@ -1,20 +1,14 @@
 .vera-navigator__sort {
   align-items: center;
-  background: var(--vera-color-navigator-sticky);
+  background: var(--vera-color-navigator-bg);
   display: flex;
   gap: var(--vera-space-sm);
-  margin: var(--vera-space-lg) calc(var(--vera-space-sm) * -1) var(--vera-space-xs);
+  margin: var(--vera-space-lg) 0 var(--vera-space-xs);
   min-height: var(--vera-touch-target);
-  padding: var(--vera-space-sm);
+  padding: var(--vera-space-sm) var(--vera-navigator-section-inline-padding);
   position: sticky;
   top: 0;
   z-index: 2;
-}
-
-.vera-navigator__sort > strong {
-  font-size: var(--vera-navigator-font-size-label);
-  letter-spacing: var(--vera-navigator-letter-spacing-label);
-  text-transform: uppercase;
 }
 
 .vera-navigator__sort > span {
@@ -23,15 +17,15 @@
 }
 
 .vera-navigator__sort-line {
-  background: var(--vera-color-navigator-border-soft);
+  background: var(--vera-color-navigator-section-divider);
   flex: 1;
-  height: var(--vera-border-width);
+  height: var(--vera-navigator-section-divider-width);
 }
 
 .vera-navigator__sort-button {
   align-items: center;
   background: transparent;
-  border: var(--vera-border-width) solid var(--vera-color-border);
+  border: 0;
   border-radius: var(--vera-control-radius);
   color: var(--vera-color-muted-text);
   display: flex;
@@ -42,11 +36,8 @@
 }
 
 .vera-navigator__sort-button .vera-vector-icon {
-  transition: transform var(--vera-transition-fast);
-}
-
-.vera-navigator__sort-button.is-open .vera-vector-icon {
-  transform: rotate(180deg);
+  height: var(--vera-navigator-sort-icon-size);
+  width: var(--vera-navigator-sort-icon-size);
 }
 
 .vera-navigator__sort-menu {
@@ -117,17 +108,10 @@
   font-size: var(--vera-navigator-font-size-label);
   gap: var(--vera-space-sm);
   min-height: var(--vera-touch-target);
-  margin-top: calc(var(--vera-space-xl) + var(--vera-space-md));
-  padding: 0 var(--vera-space-sm);
+  margin: var(--vera-space-lg) 0 var(--vera-space-xs);
+  padding: 0 var(--vera-navigator-section-inline-padding);
   text-align: left;
   width: 100%;
-}
-
-.vera-navigator__archived::after {
-  background: var(--vera-color-navigator-border-soft);
-  content: "";
-  flex: 1;
-  height: var(--vera-border-width);
 }
 
 .vera-empty {
@@ -135,10 +119,4 @@
   font-size: var(--vera-font-size-small);
   padding: var(--vera-space-xl);
   text-align: center;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .vera-navigator__sort-button .vera-vector-icon {
-    transition: none;
-  }
 }

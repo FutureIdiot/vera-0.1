@@ -43,7 +43,6 @@ test("Account detail derives active Space membership from bootstrap without anot
       {
         id: "spc_active",
         name: "Active Space",
-        topic: "current work",
         archivedAt: null,
         seats: [{ accountId: "acc_a", responseMode: "focused" }, { accountId: "acc_b", responseMode: "default" }],
       },
@@ -67,7 +66,6 @@ test("Account detail derives active Space membership from bootstrap without anot
     assert.deepEqual(requested, [["http://vera.test/api/accounts/acc_a", "GET"]]);
     const membership = findSection(root, "参与的 Space");
     assert.equal(membership.textContent.includes("Active Space"), true);
-    assert.equal(membership.textContent.includes("current work"), true);
     assert.equal(membership.textContent.includes("focused"), true);
     assert.equal(membership.textContent.includes("Archived Space"), false);
     assert.equal(membership.textContent.includes("Other Account Space"), false);

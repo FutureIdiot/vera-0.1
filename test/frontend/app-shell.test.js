@@ -2,12 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  clampNavigatorWidth,
   resolveSpaceIdentity,
   resolveNavigatorState,
   resolveShellHeader,
 } from "../../frontend/src/components/app-shell.js";
 
 const space = { id: "spc_one", name: "One" };
+
+test("navigator width stays inside its tokenized resize bounds", () => {
+  assert.equal(clampNavigatorWidth(280, 320, 720), 320);
+  assert.equal(clampNavigatorWidth(520, 320, 720), 520);
+  assert.equal(clampNavigatorWidth(900, 320, 720), 720);
+  assert.equal(clampNavigatorWidth(300, 320, 280), 320);
+});
 
 test("chat top bar uses the left control for the directory and the Space title for settings", () => {
   assert.deepEqual(resolveShellHeader({ routeName: "space", currentSpace: space }), {

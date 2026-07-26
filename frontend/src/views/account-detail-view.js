@@ -174,7 +174,6 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
       actions.append(open, settings);
       card.append(
         infoRow("名称", space.name ?? "未命名 Space"),
-        infoRow("主题", space.topic || "—"),
         infoRow("响应模式", seat?.responseMode ?? "default"),
         actions,
       );

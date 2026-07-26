@@ -1,7 +1,7 @@
 // k. v0 → v1 一次性迁移（Phase 4.1 启动迁移 + 4.4 seat 去 accountId 反迁移）。
 // 两个 check 各自起独立 gateway 子进程，用预设 fixture 数据目录。
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -49,7 +49,7 @@ export async function run(ctx) {
         {
           id: SPACE_ID,
           name: "legacy space",
-          topic: "",
+          topic: "legacy topic must be removed",
           createdAt: ISO,
           seats: [{ agentId: AGENT_ID, responseMode: "default" }],
         },
@@ -101,6 +101,7 @@ export async function run(ctx) {
       // Phase 5.5：Space 成员身份固定为 Account。
       const space = bs.json.spaces[0];
       assertEqual(space.id, SPACE_ID);
+      assert(!Object.hasOwn(space, "topic"), "migrated Space must not expose topic");
       assert(
         !("agentId" in space.seats[0]) && typeof space.seats[0].accountId === "string",
         "seat should carry Account identity only",
@@ -121,6 +122,8 @@ export async function run(ctx) {
       const legacyStill = await fileExistsAt(legacyStorePath);
       const legacyRenamed = await fileExistsAt(`${legacyStorePath}.legacy`);
       assert(!legacyStill && legacyRenamed, "legacy store.json should be renamed to .legacy");
+      const persistedSpaces = JSON.parse(await readFile(join(migDataDir, "spaces.json"), "utf8"));
+      assert(!Object.hasOwn(persistedSpaces[0], "topic"), "migrated spaces.json must remove topic");
     } finally {
       await killChild(migChild);
       await rm(migDataDir, { recursive: true, force: true });
@@ -150,7 +153,7 @@ export async function run(ctx) {
         {
           id: SPACE_ID,
           name: "split space",
-          topic: "",
+          topic: "split legacy topic must be removed",
           createdAt: ISO,
           seats: [{ agentId: AGENT_ID, responseMode: "default" }],
         },
@@ -199,10 +202,13 @@ export async function run(ctx) {
       assertEqual(account.activeAgentId, null);
       assert(!("agentId" in bs.json.spaces[0].seats[0]), "seat should not carry Agent identity");
       assert(typeof bs.json.spaces[0].seats[0].accountId === "string", "seat should carry Account identity");
+      assert(!Object.hasOwn(bs.json.spaces[0], "topic"), "split migrated Space must not expose topic");
 
       assert(await fileExistsAt(join(migDir, "agents.json.legacy")), "agents.json.legacy backup missing");
       assert(await fileExistsAt(join(migDir, "session-states.json.legacy")), "session-states.json.legacy backup missing");
       assert(await fileExistsAt(join(migDir, "spaces.json.legacy")), "spaces.json.legacy backup missing");
+      const persistedSpaces = JSON.parse(await readFile(join(migDir, "spaces.json"), "utf8"));
+      assert(!Object.hasOwn(persistedSpaces[0], "topic"), "split migrated spaces.json must remove topic");
 
       const post = await httpRequest(
         "POST",

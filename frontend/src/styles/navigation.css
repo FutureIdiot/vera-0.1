@@ -1,5 +1,5 @@
 .vera-navigator {
-  background: var(--vera-color-surface);
+  background: var(--vera-color-navigator-bg);
   border-right: var(--vera-border-width) solid var(--vera-color-border);
   bottom: 0;
   display: grid;
@@ -30,9 +30,44 @@
   z-index: 1;
 }
 
+.vera-navigator__resize-handle {
+  bottom: 0;
+  cursor: col-resize;
+  display: none;
+  position: absolute;
+  right: calc(var(--vera-navigator-resize-handle-width) / -2);
+  top: 0;
+  touch-action: none;
+  width: var(--vera-navigator-resize-handle-width);
+  z-index: 2;
+}
+
+.vera-navigator__resize-handle::after {
+  background: transparent;
+  bottom: 0;
+  content: "";
+  left: 50%;
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  transition: background var(--vera-transition-fast);
+  width: var(--vera-navigator-resize-indicator-width);
+}
+
+.vera-navigator__resize-handle:hover::after,
+.vera-navigator__resize-handle:focus-visible::after,
+.vera-shell.is-navigator-resizing .vera-navigator__resize-handle::after {
+  background: var(--vera-color-navigator-border-soft);
+}
+
+.vera-shell.is-navigator-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .vera-navigator__contacts {
   align-items: center;
-  background: var(--vera-color-navigator-rail);
+  background: var(--vera-color-navigator-rail-bg);
   border-right: var(--vera-border-width) solid var(--vera-color-navigator-border-soft);
   display: flex;
   flex-direction: column;
@@ -153,7 +188,7 @@
 
 .vera-contact__status {
   background: var(--vera-color-success);
-  border: calc(var(--vera-border-width) * 2) solid var(--vera-color-navigator-rail);
+  border: calc(var(--vera-border-width) * 2) solid var(--vera-color-navigator-bg);
   border-radius: 50%;
   bottom: calc(var(--vera-space-2xs) * -1);
   height: var(--vera-navigator-contact-status-size);
@@ -181,8 +216,15 @@
   width: var(--vera-touch-target);
 }
 
+@media (min-width: 768px) {
+  .vera-shell.is-navigator-open .vera-navigator__resize-handle {
+    display: block;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .vera-navigator,
+  .vera-navigator__resize-handle::after,
   .vera-contact,
   .vera-contact::before,
   .vera-contact__avatar {

@@ -13,8 +13,10 @@ export async function run(ctx) {
     assertEqual(s["appearance.theme"], "system");
     assertEqual(s["appearance.themeId"], null);
     assertEqual(s["appearance.fontFamily"], "system");
-    assertEqual(s["appearance.fontSize.phone.chat"], 13);
-    assertEqual(s["appearance.fontSize.desktop.chat"], 14);
+    assertEqual(s["appearance.fontSize.phone.chat"], 12);
+    assertEqual(s["appearance.fontSize.phone.management"], 13);
+    assertEqual(s["appearance.fontSize.desktop.chat"], 13);
+    assertEqual(s["appearance.fontSize.desktop.management"], 14);
     assertEqual(s["appearance.bubbleRadius.phone"], 16);
     assertEqual(s["appearance.bubbleGap.phone"], 4);
     assertEqual(s["appearance.bubbleGap.desktop"], 10);

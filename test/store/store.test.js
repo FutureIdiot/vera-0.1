@@ -46,9 +46,16 @@ test("persists split files to the data dir and reloads on next createStore call"
   await withTempDataDir(async (dataPath) => {
     const store = await createStore({ dataPath, debounceMs: 10 });
     store.insert("projects", { id: "prj_1", name: "Vera" });
+    store.insert("groups", {
+      id: "grp_1",
+      name: "Legacy Group",
+      topic: "legacy group topic",
+      accountIds: [],
+    });
     store.insert("spaces", {
       id: "spc_1",
       name: "vera-dev",
+      topic: "legacy topic",
       createdAt: "2026-07-01T00:00:00.000Z",
     });
     store.insert("spaceSessions", { id: "sps_1", spaceId: "spc_1", status: "active" });
@@ -70,9 +77,21 @@ test("persists split files to the data dir and reloads on next createStore call"
     assert.equal(found.projectId, null);
     assert.equal(found.groupId, null);
     assert.equal(found.updatedAt, found.createdAt);
+    assert.equal(Object.hasOwn(found, "topic"), false);
+    assert.equal(Object.hasOwn(reloaded.find("groups", "grp_1"), "topic"), false);
     assert.equal(reloaded.find("spaceSessions", "sps_1").spaceId, "spc_1");
     assert.equal(reloaded.getEventSeqWatermark(), 123);
     await reloaded.close();
+
+    const persistedSpaces = JSON.parse(await readFile(join(dataPath, "spaces.json"), "utf8"));
+    assert.equal(Object.hasOwn(persistedSpaces[0], "topic"), false);
+    const persistedGroups = JSON.parse(await readFile(join(dataPath, "groups.json"), "utf8"));
+    assert.equal(Object.hasOwn(persistedGroups[0], "topic"), false);
+
+    const reloadedAgain = await createStore({ dataPath, debounceMs: 10 });
+    assert.equal(Object.hasOwn(reloadedAgain.find("spaces", "spc_1"), "topic"), false);
+    assert.equal(Object.hasOwn(reloadedAgain.find("groups", "grp_1"), "topic"), false);
+    await reloadedAgain.close();
   });
 });
 

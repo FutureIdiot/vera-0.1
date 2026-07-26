@@ -16,7 +16,6 @@ export async function run(ctx) {
   await check("c. POST /api/spaces creates space with Account seated", async () => {
     const { status, json } = await httpRequest("POST", "/api/spaces", {
       name: "verify-space",
-      topic: "verify.mjs 黑盒验收",
       seats: [{ accountId: ctx.owningAccount.id, responseMode: "default" }],
     });
     assertEqual(status, 201);
@@ -28,7 +27,18 @@ export async function run(ctx) {
     assertEqual(json.space.spaceType, "chat");
     assertEqual(json.space.projectId, null);
     assertEqual(json.space.groupId, null);
+    assert(!Object.hasOwn(json.space, "topic"), "Space must not expose topic");
     ctx.space = json.space;
+  });
+
+  await check("c.1 POST /api/spaces rejects removed topic field", async () => {
+    const rejected = await httpRequest("POST", "/api/spaces", {
+      name: "removed-topic",
+      topic: "must fail",
+      seats: [{ accountId: ctx.owningAccount.id, responseMode: "default" }],
+    });
+    assertEqual(rejected.status, 400);
+    assertEqual(rejected.json.error.code, "invalid_request");
   });
 
   await check("d. POST /api/spaces/:id/messages returns 201 with message + runs", async () => {

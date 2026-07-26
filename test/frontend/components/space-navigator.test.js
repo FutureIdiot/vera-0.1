@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   filterAndSortSpaces,
   resolveSpaceCreationTarget,
+  sortProjectGroups,
 } from "../../../frontend/src/components/space-navigator-projection.js";
 
 const accounts = [
@@ -30,7 +31,6 @@ test("Space creation inherits the selected contact member set", () => {
   const groups = [{
     id: "grp_ab",
     name: "Alpha Beta",
-    topic: "",
     accountIds: ["acc_b", "acc_a"],
   }];
   assert.deepEqual(resolveSpaceCreationTarget(accounts, groups, "group:grp_ab"), {
@@ -47,7 +47,6 @@ test("Space filtering is a derived projection and does not mutate canonical orde
     {
       id: "spc_old",
       name: "Notes",
-      topic: "Research",
       spaceType: "notebook",
       projectId: "prj_docs",
       updatedAt: "2026-07-25T00:00:00.000Z",
@@ -55,7 +54,6 @@ test("Space filtering is a derived projection and does not mutate canonical orde
     {
       id: "spc_new",
       name: "Chat",
-      topic: "",
       spaceType: "chat",
       projectId: null,
       updatedAt: "2026-07-26T00:00:00.000Z",
@@ -70,4 +68,18 @@ test("Space filtering is a derived projection and does not mutate canonical orde
 
   assert.deepEqual(filtered.map((space) => space.id), ["spc_old"]);
   assert.deepEqual(spaces.map((space) => space.id), ["spc_old", "spc_new"]);
+});
+
+test("Projects sorting always leaves No project last", () => {
+  const groups = [
+    { id: "prj_old", items: [{ updatedAt: "2026-07-24T00:00:00.000Z" }] },
+    { id: null, items: [{ updatedAt: "2026-07-26T00:00:00.000Z" }] },
+    { id: "prj_new", items: [{ updatedAt: "2026-07-25T00:00:00.000Z" }] },
+  ];
+
+  assert.deepEqual(
+    sortProjectGroups(groups).map((group) => group.id),
+    ["prj_new", "prj_old", null],
+  );
+  assert.deepEqual(groups.map((group) => group.id), ["prj_old", null, "prj_new"]);
 });

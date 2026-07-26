@@ -14,9 +14,16 @@ test("Group member updates synchronize every Space seat while preserving remaini
     for (const id of ["acc_a", "acc_b", "acc_c"]) {
       store.insert("accounts", { id, name: id, ownerAgentId: null });
     }
+    assert.throws(
+      () => createGroup(store, {
+        name: "Removed topic",
+        topic: "must fail",
+        accountIds: ["acc_a", "acc_b"],
+      }),
+      (error) => error.code === "invalid_request",
+    );
     const group = createGroup(store, {
       name: "Team",
-      topic: "Initial",
       accountIds: ["acc_a", "acc_b"],
     });
     store.insert("spaces", {
@@ -33,11 +40,14 @@ test("Group member updates synchronize every Space seat while preserving remaini
 
     const result = updateGroup(store, group.id, {
       name: "Team Next",
-      topic: "Updated",
       accountIds: ["acc_a", "acc_c"],
     });
 
     assert.equal(result.group.name, "Team Next");
+    assert.throws(
+      () => updateGroup(store, group.id, { topic: "must fail" }),
+      (error) => error.code === "invalid_request",
+    );
     assert.equal(result.spaces.length, 1);
     assert.deepEqual(result.spaces[0].seats, [
       { accountId: "acc_a", responseMode: "silent", respondTo: ["user"] },

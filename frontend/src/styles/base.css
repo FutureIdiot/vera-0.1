@@ -14,6 +14,8 @@ body {
 }
 
 body {
+  -moz-osx-font-smoothing: var(--vera-font-smoothing-moz);
+  -webkit-font-smoothing: var(--vera-font-smoothing-webkit);
   background: var(--vera-color-background);
   color: var(--vera-color-text);
   font-family: var(--vera-font-family);
@@ -31,6 +33,11 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--vera-color-accent);
 }
 
 :where(a, button, input, select, textarea):focus-visible {

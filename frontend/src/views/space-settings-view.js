@@ -45,11 +45,7 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   name.required = true;
   name.value = space.name;
   name.placeholder = "Space 名称";
-  const topic = document.createElement("textarea");
-  topic.name = "topic";
-  topic.value = space.topic ?? "";
-  topic.placeholder = "这个 Space 在讨论什么";
-  basic.append(basicLegend, name, topic);
+  basic.append(basicLegend, name);
 
   const participants = document.createElement("fieldset");
   const participantLegend = document.createElement("legend");
@@ -129,7 +125,6 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   function applyExternalSpace(nextSpace) {
     space = nextSpace;
     name.value = space.name;
-    topic.value = space.topic ?? "";
     notificationMode.value = space.notifications?.mode ?? "accountMessages";
     includeErrors.input.checked = space.notifications?.includeActivityErrors !== false;
     for (const [accountId, control] of seatControls) {
@@ -164,7 +159,6 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
     try {
       const response = await client.updateSpace(space.id, {
         name: name.value.trim(),
-        topic: topic.value.trim(),
         seats,
         notifications: { mode: notificationMode.value, includeActivityErrors: includeErrors.input.checked },
       });

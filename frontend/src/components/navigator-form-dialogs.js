@@ -74,16 +74,6 @@ export function requestGroupDetails(host, {
     nameInput.setAttribute("aria-label", "群聊名称");
     nameLabel.append(nameText, nameInput);
 
-    const topicLabel = document.createElement("label");
-    topicLabel.className = "vera-dialog__field";
-    const topicText = document.createElement("span");
-    topicText.textContent = "主题";
-    const topicInput = document.createElement("textarea");
-    topicInput.value = initialValue.topic ?? "";
-    topicInput.setAttribute("aria-label", "群聊主题");
-    topicInput.placeholder = "这个群聊关注什么";
-    topicLabel.append(topicText, topicInput);
-
     const members = document.createElement("fieldset");
     members.className = "vera-dialog__members";
     const membersLegend = document.createElement("legend");
@@ -115,7 +105,7 @@ export function requestGroupDetails(host, {
     submit.className = "vera-primary-button";
     submit.textContent = "保存";
     actions.append(cancel, submit);
-    dialog.append(heading, nameLabel, topicLabel, members, error, actions);
+    dialog.append(heading, nameLabel, members, error, actions);
     host.appendChild(dialog);
 
     let finished = false;
@@ -132,7 +122,6 @@ export function requestGroupDetails(host, {
       }
       finish({
         name: nameInput.value.trim(),
-        topic: topicInput.value.trim(),
         accountIds,
       });
     };

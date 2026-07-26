@@ -134,9 +134,10 @@ function assertSpaceMembership(store, groupId, seats) {
   }
 }
 
-// 旧 Space 记录可能缺这些字段，读取时补默认；导航字段另由 store 启动迁移持久补齐。
+// 旧 Space 记录可能缺这些字段，读取时补默认；持久形状另由 store 启动迁移补齐。
 function normalizeSpace(space) {
   const normalized = stripInternal(space);
+  delete normalized.topic;
   normalized.notifications = normalizeNotifications(space.notifications);
   normalized.archivedAt = space.archivedAt ?? null;
   normalized.pinned = space.pinned ?? false;
@@ -163,14 +164,11 @@ export function listSpaces(store, { archived } = {}) {
 export function createSpace(store, body) {
   assertExactObject(
     body,
-    ["name", "topic", "seats", "groupId", "notifications", "pinned", "spaceType", "projectId"],
+    ["name", "seats", "groupId", "notifications", "pinned", "spaceType", "projectId"],
     { required: ["name", "seats"] },
   );
   if (typeof body?.name !== "string" || !body.name.trim()) {
     throw new ApiError("invalid_request", "name is required");
-  }
-  if (body.topic !== undefined && typeof body.topic !== "string") {
-    throw new ApiError("invalid_request", "topic must be a string");
   }
   const seats = normalizeSeats(store, body.seats);
   const groupId = body.groupId ?? null;
@@ -179,7 +177,6 @@ export function createSpace(store, body) {
   const space = {
     id: newSpaceId(),
     name: body.name.trim(),
-    topic: body.topic ?? "",
     seats,
     groupId,
     notifications: normalizeNotifications(body.notifications),
@@ -206,17 +203,13 @@ export function updateSpace(store, id, patch) {
   if (!space) throw new ApiError("not_found", `space ${id} does not exist`);
   assertExactObject(
     patch,
-    ["name", "topic", "seats", "notifications", "pinned", "projectId"],
+    ["name", "seats", "notifications", "pinned", "projectId"],
     { name: "patch", allowEmpty: false },
   );
   const next = {};
   if (patch.name !== undefined) {
     if (typeof patch.name !== "string" || !patch.name.trim()) throw new ApiError("invalid_request", "name must not be empty");
     next.name = patch.name.trim();
-  }
-  if (patch.topic !== undefined) {
-    if (typeof patch.topic !== "string") throw new ApiError("invalid_request", "topic must be a string");
-    next.topic = patch.topic;
   }
   if (patch.seats !== undefined) {
     next.seats = normalizeSeats(store, patch.seats);

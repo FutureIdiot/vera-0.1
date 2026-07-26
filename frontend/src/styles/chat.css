@@ -2,6 +2,8 @@
   display: flex;
   flex: 1;
   flex-direction: column;
+  font-family: var(--vera-font-family);
+  font-weight: var(--vera-font-weight-regular);
   gap: var(--vera-bubble-gap);
   overflow-x: hidden;
   overflow-y: auto;
@@ -58,11 +60,11 @@
 }
 
 .vera-bubble__surface {
-  background: var(--vera-color-bubble-agent-bg);
+  background: var(--vera-color-bubble-bg);
   border: var(--vera-border-width) solid transparent;
   border-radius: var(--vera-bubble-radius);
   box-shadow: var(--vera-shadow-sm);
-  color: var(--vera-color-bubble-agent-text);
+  color: var(--vera-color-bubble-text);
   min-width: 0;
   padding: var(--vera-bubble-padding);
   position: relative;
@@ -108,7 +110,7 @@
   -webkit-mask: var(--vera-bubble-tail-mask) center / 100% 100% no-repeat;
   mask: var(--vera-bubble-tail-mask) center / 100% 100% no-repeat;
   position: absolute;
-  background: var(--vera-color-bubble-agent-bg);
+  background: var(--vera-color-bubble-bg);
   left: calc(var(--vera-bubble-tail-extension) * -1);
   transform: scaleX(-1);
   width: var(--vera-bubble-tail-size);
@@ -123,9 +125,9 @@
 }
 
 .vera-bubble--user .vera-bubble__surface {
-  background: linear-gradient(135deg, var(--vera-color-bubble-user-bg), var(--vera-color-bubble-user-end));
+  background: var(--vera-color-bubble-bg);
   border-radius: var(--vera-bubble-radius);
-  color: var(--vera-color-bubble-user-text);
+  color: var(--vera-color-bubble-text);
 }
 
 .vera-bubble--user.vera-bubble--group-first .vera-bubble__surface {
@@ -159,7 +161,7 @@
   -webkit-mask: var(--vera-bubble-tail-mask) center / 100% 100% no-repeat;
   mask: var(--vera-bubble-tail-mask) center / 100% 100% no-repeat;
   position: absolute;
-  background: var(--vera-color-bubble-user-end);
+  background: var(--vera-color-bubble-bg);
   right: calc(var(--vera-bubble-tail-extension) * -1);
   width: var(--vera-bubble-tail-size);
 }
@@ -188,7 +190,7 @@
 .vera-bubble__author {
   color: var(--vera-color-bubble-author-text);
   font-size: var(--vera-font-size-small);
-  font-weight: 600;
+  font-weight: var(--vera-font-weight-regular);
   margin: 0 0 var(--vera-space-2xs) var(--vera-space-xs);
 }
 
@@ -200,7 +202,7 @@
   display: inline-flex;
   flex: 0 0 var(--vera-avatar-size);
   font-size: var(--vera-font-size-base);
-  font-weight: 700;
+  font-weight: var(--vera-font-weight-regular);
   height: var(--vera-avatar-size);
   justify-content: center;
   text-decoration: none;
@@ -229,6 +231,8 @@
 }
 
 .vera-bubble__content {
+  font-size: var(--vera-font-size-chat-body);
+  font-weight: var(--vera-font-weight-regular);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -257,7 +261,7 @@
   color: color-mix(in srgb, currentColor, transparent 52%);
   display: inline-flex;
   float: right;
-  font-size: var(--vera-font-size-tiny);
+  font-size: var(--vera-font-size-chat-timestamp);
   gap: var(--vera-space-xs);
   line-height: 1;
   margin-inline-start: var(--vera-space-sm);
@@ -506,6 +510,7 @@
 
 .vera-composer {
   background: var(--vera-color-background);
+  bottom: var(--vera-space-2xs);
   padding: var(--vera-space-2xs) var(--vera-space-md) var(--vera-space-sm);
   position: relative;
 }
@@ -513,10 +518,9 @@
 .vera-composer__bar {
   align-items: flex-end;
   backdrop-filter: blur(var(--vera-backdrop-blur));
-  background: var(--vera-color-header);
+  background: var(--vera-color-surface-strong);
   border: var(--vera-border-width) solid color-mix(in srgb, var(--vera-color-border), transparent 35%);
   border-radius: var(--vera-bubble-radius);
-  box-shadow: var(--vera-shadow-lg);
   display: grid;
   gap: var(--vera-space-sm);
   grid-template-columns: auto minmax(0, 1fr) auto auto;
@@ -581,13 +585,13 @@
 }
 
 .vera-composer__send {
-  background: var(--vera-color-accent);
-  color: var(--vera-color-accent-text);
+  background: var(--vera-color-button-bg);
+  color: var(--vera-color-button-text);
   cursor: pointer;
 }
 
 .vera-composer__send:hover:not(:disabled) {
-  background: var(--vera-color-accent-strong);
+  background: var(--vera-color-button-hover);
 }
 
 .vera-composer__send:disabled,

@@ -110,7 +110,7 @@ export async function run(ctx) {
 
     const nullPatch = await httpRequest("PATCH", `/api/spaces/${spaceId}`, null);
     assertEqual(nullPatch.status, 400);
-    const badTopic = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { topic: { text: "no" } });
+    const badTopic = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { topic: "removed" });
     assertEqual(badTopic.status, 400);
     const nullNotifications = await httpRequest("PATCH", `/api/spaces/${spaceId}`, { notifications: null });
     assertEqual(nullNotifications.status, 400);
@@ -118,7 +118,6 @@ export async function run(ctx) {
 
   await check("p.3 Space 设置一次 PATCH 后由活跃列表返回权威形状", async () => {
     const response = await httpRequest("PATCH", `/api/spaces/${spaceId}`, {
-      topic: "F3 settings",
       seats: [{ accountId: owningAccount.id, responseMode: "silent", respondTo: ["user"] }],
       notifications: { mode: "accountMessages", includeActivityErrors: true },
       pinned: false,
@@ -128,7 +127,7 @@ export async function run(ctx) {
     const listed = await httpRequest("GET", "/api/spaces");
     const space = listed.json.spaces.find((candidate) => candidate.id === spaceId);
     assert(space, "updated Space should remain active");
-    assertEqual(space.topic, "F3 settings");
+    assert(!Object.hasOwn(space, "topic"), "Space must not expose topic");
     assertEqual(space.seats[0].respondTo[0], "user");
     assertEqual(space.pinned, false);
     assertEqual(space.spaceType, "garage");

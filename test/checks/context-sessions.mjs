@@ -25,7 +25,6 @@ export async function run(ctx) {
   await check("p5-c1.1 Space creation establishes one active SpaceSession", async () => {
     const created = await httpRequest("POST", "/api/spaces", {
       name: "p5-c1-context-space",
-      topic: "SpaceSession isolation",
       seats: [{ accountId: ctx.owningAccount.id, responseMode: "default" }],
     });
     assertEqual(created.status, 201);

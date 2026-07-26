@@ -3,12 +3,11 @@ import { createVectorIcon, setIconButtonContent } from "./vector-icon.js";
 import {
   activityTime,
   filterAndSortSpaces,
-  formatSpaceActivity,
-  projectMeta,
+  sortProjectGroups,
 } from "./space-navigator-projection.js";
 
 const SORT_OPTIONS = [
-  { id: "recents", label: "最近", hint: "按最近活动排序" },
+  { id: "recents", label: "Recents", hint: "按最近活动排序" },
   { id: "projects", label: "Projects", hint: "按 Project 分组" },
   { id: "spacetypes", label: "Space Types", hint: "按 Space Type 分组" },
 ];
@@ -34,7 +33,7 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
   let sortMode = "recents";
   let sortOpen = false;
 
-  function renderHeader({ entry, visibleSpaces, canCreateSpace }) {
+  function renderHeader({ entry, canCreateSpace }) {
     const header = document.createElement("header");
     header.className = "vera-navigator__header";
     const identity = document.createElement("div");
@@ -50,10 +49,7 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
     titleLine.className = "vera-navigator__title-line";
     const title = document.createElement("strong");
     title.textContent = entry?.label ?? "Space 目录";
-    const badge = document.createElement("span");
-    badge.className = "vera-navigator__badge";
-    badge.textContent = entry?.kind === "group" ? "Group" : "Direct";
-    titleLine.append(title, badge);
+    titleLine.appendChild(title);
     if (entry?.kind === "group") {
       titleLine.appendChild(makeNavigatorIconButton(
         "edit",
@@ -62,28 +58,9 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
         () => void actions.editGroup(entry.group),
       ));
     }
-    const subtitle = document.createElement("span");
-    subtitle.className = "vera-navigator__subtitle";
-    subtitle.textContent = entry?.kind === "group"
-      ? `${entry.topic || "暂无主题"} · ${entry.accountIds.length} Accounts`
-      : `${entry?.accountIds[0] ?? "未选择"} · ${visibleSpaces.length} Spaces`;
-    copy.append(titleLine, subtitle);
+    copy.appendChild(titleLine);
     identity.append(avatar, copy);
     header.appendChild(identity);
-
-    const counts = document.createElement("div");
-    counts.className = "vera-navigator__type-counts";
-    for (const type of SPACE_TYPES) {
-      const count = visibleSpaces.filter((space) => space.spaceType === type.id).length;
-      if (count < 1) continue;
-      const chip = document.createElement("span");
-      chip.className = `vera-type-chip is-${type.id}`;
-      chip.append(createVectorIcon(type.icon), document.createTextNode(type.label));
-      const number = document.createElement("span");
-      number.textContent = String(count);
-      chip.appendChild(number);
-      counts.appendChild(chip);
-    }
 
     const tools = document.createElement("div");
     tools.className = "vera-navigator__tools";
@@ -93,7 +70,6 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
     const search = document.createElement("input");
     search.type = "search";
     search.value = query;
-    search.placeholder = "筛选 Spaces";
     search.setAttribute("aria-label", "筛选 Spaces");
     search.addEventListener("input", () => {
       query = search.value;
@@ -105,21 +81,25 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
       });
     });
     searchWrap.appendChild(search);
-    const createButton = makeNavigatorButton(
+    const createButton = makeNavigatorIconButton(
+      "compose",
       "vera-navigator__create",
+      "新建 Space",
       () => void actions.createSpace(),
-      "新 Space",
     );
-    createButton.prepend(createVectorIcon("plus"));
     createButton.disabled = !canCreateSpace;
     tools.append(searchWrap, createButton);
-    header.append(counts, tools);
+    header.appendChild(tools);
     return header;
   }
 
   function renderSpaceRow(space, projects, currentSpaceId, { isArchived = false } = {}) {
     const row = document.createElement("article");
-    row.className = `vera-space-row${space.id === currentSpaceId ? " is-active" : ""}`;
+    row.className = [
+      "vera-space-row",
+      space.id === currentSpaceId ? "is-active" : "",
+      isArchived ? "is-archived" : "",
+    ].filter(Boolean).join(" ");
     const open = makeNavigatorButton("vera-space-row__open", () => actions.navigate(space.id));
     const icon = document.createElement("span");
     icon.className = `vera-space-row__type is-${space.spaceType}`;
@@ -128,24 +108,29 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
     copy.className = "vera-space-row__copy";
     const name = document.createElement("strong");
     name.textContent = space.name;
-    const preview = document.createElement("span");
-    preview.className = "vera-space-row__preview";
-    const topic = document.createElement("span");
-    topic.textContent = space.topic || "暂无主题";
-    const time = document.createElement("time");
-    time.className = "vera-space-row__time";
-    time.dateTime = space.updatedAt ?? space.createdAt ?? "";
-    time.textContent = formatSpaceActivity(space);
-    preview.append(topic, document.createTextNode(" · "), time);
-    copy.append(name, preview);
+    copy.append(name);
     open.append(icon, copy);
+    const rowLead = document.createElement("div");
+    rowLead.className = "vera-space-row__lead";
+    rowLead.appendChild(open);
 
     const rowActions = document.createElement("div");
     rowActions.className = "vera-space-row__actions";
+    let trailingArchive = null;
     if (isArchived) {
+      rowLead.prepend(makeNavigatorIconButton(
+        "retry",
+        "vera-space-row__action is-icon vera-space-row__restore",
+        "恢复 Space",
+        () => void actions.restoreSpace(space),
+      ));
       rowActions.append(
-        makeNavigatorButton("vera-space-row__action", () => void actions.restoreSpace(space), "恢复"),
-        makeNavigatorButton("vera-space-row__action is-danger", () => void actions.deleteSpace(space), "删除"),
+        makeNavigatorIconButton(
+          "trash",
+          "vera-space-row__action is-icon",
+          "永久删除 Space",
+          () => void actions.deleteSpace(space),
+        ),
       );
     } else {
       const pin = makeNavigatorIconButton(
@@ -154,31 +139,28 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
         space.pinned ? "取消置顶" : "置顶",
         () => void actions.togglePin(space),
       );
-      const edit = makeNavigatorIconButton(
-        "edit",
-        "vera-space-row__action is-icon",
-        "编辑 Space",
-        () => void actions.editSpace(space),
-      );
-      const archive = makeNavigatorIconButton(
+      trailingArchive = makeNavigatorIconButton(
         "archive",
-        "vera-space-row__action is-icon is-danger",
+        "vera-space-row__action is-icon is-danger is-trailing",
         "归档 Space",
         () => void actions.archiveSpace(space),
       );
-      rowActions.append(pin, edit, archive);
+      rowLead.prepend(pin);
     }
 
-    const project = projectMeta(projects, space.projectId);
-    const projectView = document.createElement("span");
-    projectView.className =
-      `vera-space-row__project is-palette-${Math.max(0, projects.findIndex((item) => item.id === project.id)) % 4}`;
-    const dot = document.createElement("span");
-    dot.className = "vera-space-row__project-dot";
-    const projectName = document.createElement("span");
-    projectName.textContent = project.name;
-    projectView.append(dot, projectName);
-    row.append(open, rowActions, projectView);
+    row.append(rowLead, rowActions);
+    const projectIndex = projects.findIndex((item) => item.id === space.projectId);
+    if (projectIndex >= 0) {
+      const projectView = document.createElement("span");
+      projectView.className = `vera-space-row__project is-palette-${projectIndex % 4}`;
+      const dot = document.createElement("span");
+      dot.className = "vera-space-row__project-dot";
+      const projectName = document.createElement("span");
+      projectName.textContent = projects[projectIndex].name;
+      projectView.append(dot, projectName);
+      row.appendChild(projectView);
+    }
+    if (trailingArchive) row.appendChild(trailingArchive);
     return row;
   }
 
@@ -186,19 +168,20 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
     icon = null,
     emptyText = "",
     className = "",
+    showHeading = true,
   } = {}) {
     const section = document.createElement("section");
     section.className = `vera-space-section ${className}`.trim();
-    const heading = document.createElement("div");
-    heading.className = "vera-space-section__heading";
-    if (icon) heading.appendChild(createVectorIcon(icon));
-    const text = document.createElement("strong");
-    text.textContent = label;
-    const count = document.createElement("span");
-    count.className = "vera-space-section__count";
-    count.textContent = String(items.length);
-    heading.append(text, count);
-    section.appendChild(heading);
+    if (showHeading) {
+      const heading = document.createElement("div");
+      heading.className = "vera-space-section__heading";
+      if (icon) heading.appendChild(createVectorIcon(icon));
+      const text = document.createElement("strong");
+      text.className = "vera-navigator__section-title";
+      text.textContent = label;
+      heading.appendChild(text);
+      section.appendChild(heading);
+    }
     if (items.length) {
       const rows = document.createElement("div");
       rows.className = "vera-space-section__rows";
@@ -217,20 +200,19 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
     hostElement.appendChild(section);
   }
 
-  function renderSortBar(hostElement, count) {
+  function renderSortBar(hostElement) {
     const bar = document.createElement("div");
     bar.className = "vera-navigator__sort";
     const current = SORT_OPTIONS.find((option) => option.id === sortMode);
     const label = document.createElement("strong");
-    label.textContent = current.label;
-    const hint = document.createElement("span");
-    hint.textContent = sortMode === "recents" ? "默认排序" : "分组";
+    label.className = "vera-navigator__section-title";
+    label.textContent = "ALL";
     const line = document.createElement("span");
     line.className = "vera-navigator__sort-line";
-    const total = document.createElement("span");
-    total.textContent = `${count} Spaces`;
+    const currentSort = document.createElement("span");
+    currentSort.textContent = current.label;
     const menuButton = makeNavigatorIconButton(
-      "chevron-down",
+      "sort",
       "vera-navigator__sort-button",
       "切换排序",
       () => {
@@ -238,8 +220,8 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
         render();
       },
     );
-    menuButton.classList.toggle("is-open", sortOpen);
-    bar.append(label, hint, line, total, menuButton);
+    menuButton.setAttribute("aria-expanded", String(sortOpen));
+    bar.append(label, line, currentSort, menuButton);
     if (sortOpen) {
       const menu = document.createElement("div");
       menu.className = "vera-navigator__sort-menu";
@@ -280,25 +262,25 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
       canCreateSpace,
     } = getSnapshot();
     host.replaceChildren();
-    host.appendChild(renderHeader({ entry, visibleSpaces, canCreateSpace }));
+    host.appendChild(renderHeader({ entry, canCreateSpace }));
     const filtered = filterAndSortSpaces(visibleSpaces, projects, query);
     const scroll = document.createElement("div");
     scroll.className = "vera-navigator__scroll";
     const pinned = filtered.filter((space) => space.pinned);
     const rest = filtered.filter((space) => !space.pinned);
-    appendSection(scroll, "Pinned", pinned, projects, currentSpaceId, {
-      icon: "pin",
-      emptyText: "没有置顶 Space。悬停在 Space 上即可置顶。",
+    appendSection(scroll, "PINNED", pinned, projects, currentSpaceId, {
       className: "is-pinned",
     });
-    renderSortBar(scroll, rest.length);
+    renderSortBar(scroll);
     if (sortMode === "recents") {
-      appendSection(scroll, "全部 Spaces", rest, projects, currentSpaceId);
+      appendSection(scroll, "", rest, projects, currentSpaceId, {
+        className: "is-all",
+        showHeading: false,
+      });
     } else if (sortMode === "projects") {
-      const projectGroups = [...projects, { id: null, name: "No project" }]
+      const projectGroups = sortProjectGroups([...projects, { id: null, name: "No project" }]
         .map((project) => ({ ...project, items: rest.filter((space) => space.projectId === project.id) }))
-        .filter((group) => group.items.length)
-        .sort((left, right) => activityTime(right.items[0]) - activityTime(left.items[0]));
+        .filter((group) => group.items.length));
       for (const group of projectGroups) {
         appendSection(scroll, group.name, group.items, projects, currentSpaceId, { className: "is-group" });
       }
@@ -322,15 +304,25 @@ export function createSpaceNavigatorContent({ host, getSnapshot, actions } = {})
     const archivedToggle = makeNavigatorButton(
       "vera-navigator__archived",
       () => void actions.toggleArchived(),
-      archivedSpaces === null ? "查看已归档 Spaces" : "收起已归档 Spaces",
     );
+    archivedToggle.setAttribute(
+      "aria-label",
+      archivedSpaces === null ? "展开 ARCHIVED" : "收起 ARCHIVED",
+    );
+    const archivedLabel = document.createElement("strong");
+    archivedLabel.className = "vera-navigator__section-title";
+    archivedLabel.textContent = "ARCHIVED";
+    const archivedLine = document.createElement("span");
+    archivedLine.className = "vera-navigator__sort-line";
+    archivedToggle.append(archivedLabel, archivedLine);
     scroll.appendChild(archivedToggle);
     if (archivedSpaces) {
       const sortedArchived = [...archivedSpaces]
         .sort((left, right) => activityTime(right) - activityTime(left));
-      appendSection(scroll, "Archived", sortedArchived, projects, currentSpaceId, {
+      appendSection(scroll, "", sortedArchived, projects, currentSpaceId, {
         emptyText: "此联系人或群组没有已归档 Space。",
         className: "is-archived",
+        showHeading: false,
       });
     }
     host.appendChild(scroll);

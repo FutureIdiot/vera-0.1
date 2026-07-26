@@ -30,7 +30,7 @@ const THEME_COLOR_MAP = {
   error: "--vera-color-error",
 };
 
-const SYSTEM_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+const SYSTEM_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 function cssValue(key, value) {
   if (key.includes("fontSize") || key.includes("Radius") || key.includes("Gap") || key.includes("Margin")) {
@@ -41,7 +41,7 @@ function cssValue(key, value) {
 
 export function applyAppearanceSettings(settings, root = document.documentElement, { preservePalette = false } = {}) {
   const theme = settings?.["appearance.theme"];
-  if (theme === "light" || theme === "dark") root.dataset.theme = theme;
+  if (theme === "light" || theme === "dark" || theme === "custom") root.dataset.theme = theme;
   else delete root.dataset.theme;
 
   const font = settings?.["appearance.fontFamily"];

@@ -60,7 +60,6 @@ async function fixture(kind, fn) {
   const space = store.insert("spaces", {
     id: `spc_${kind}`,
     name: "runtime",
-    topic: "daemon",
     seats: [{ accountId: account.id, responseMode: "default" }],
     createdAt: "2026-07-19T00:00:00.000Z",
   });

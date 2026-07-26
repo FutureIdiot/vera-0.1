@@ -23,6 +23,7 @@ const MANAGEMENT_ROUTES = new Set([
   "path-settings",
   "control-center",
 ]);
+const NAVIGATOR_WIDTH_STORAGE_KEY = "vera.ui.navigator-width";
 
 export function isSpaceRouteName(routeName) {
   return routeName === "space" || routeName === "spaces";
@@ -109,12 +110,17 @@ export function resolveNavigatorState({ routeName, navigatorOpen = false } = {})
   return { visible: isSpaceRouteName(routeName) && navigatorOpen };
 }
 
+export function clampNavigatorWidth(width, minWidth, maxWidth) {
+  return Math.min(Math.max(width, minWidth), Math.max(minWidth, maxWidth));
+}
+
 export function createAppShell({ root, platform, runtime } = {}) {
   const spacesClient = createSpacesClient(createHttpClient(platform));
   let currentSpace = runtime.getBootstrap().spaces[0] ?? null;
   let activeRouteName = "space";
   let navigatorOpen = false;
   let managementHeader = null;
+  let shellDestroyed = false;
 
   const shell = document.createElement("section");
   shell.className = "vera-shell";
@@ -192,10 +198,103 @@ export function createAppShell({ root, platform, runtime } = {}) {
     runtime,
     currentSpaceId: currentSpace?.id,
   });
+  let navigatorWidth = null;
+  let resizePointerId = null;
+  let resizeChanged = false;
 
   header.append(leading, participants, identity, actions, connection);
   shell.append(navigator.element, header, main);
   root.replaceChildren(shell);
+
+  function readNavigatorResizeBounds() {
+    const styles = getComputedStyle(shell);
+    const minWidth = Number.parseFloat(styles.getPropertyValue("--vera-navigator-min-width"));
+    const configuredMaxWidth = Number.parseFloat(styles.getPropertyValue("--vera-navigator-max-width"));
+    const maxViewportRatio = Number.parseFloat(
+      styles.getPropertyValue("--vera-navigator-max-viewport-ratio"),
+    );
+    return {
+      minWidth,
+      maxWidth: Math.min(configuredMaxWidth, window.innerWidth * maxViewportRatio),
+    };
+  }
+
+  function setNavigatorWidth(width) {
+    const { minWidth, maxWidth } = readNavigatorResizeBounds();
+    navigatorWidth = clampNavigatorWidth(width, minWidth, maxWidth);
+    shell.style.setProperty("--vera-navigator-width", `${Math.round(navigatorWidth)}px`);
+    navigator.resizeHandle.setAttribute("aria-valuemin", String(Math.round(minWidth)));
+    navigator.resizeHandle.setAttribute("aria-valuemax", String(Math.round(maxWidth)));
+    navigator.resizeHandle.setAttribute("aria-valuenow", String(Math.round(navigatorWidth)));
+  }
+
+  function currentNavigatorWidth() {
+    return navigatorWidth ?? navigator.element.getBoundingClientRect().width;
+  }
+
+  function persistNavigatorWidth() {
+    if (navigatorWidth === null) return;
+    void platform.secureStorage
+      ?.set(NAVIGATOR_WIDTH_STORAGE_KEY, String(Math.round(navigatorWidth)))
+      .catch(() => {});
+  }
+
+  function stopNavigatorResize(event) {
+    if (event && event.pointerId !== resizePointerId) return;
+    if (resizeChanged) persistNavigatorWidth();
+    resizePointerId = null;
+    resizeChanged = false;
+    shell.classList.remove("is-navigator-resizing");
+  }
+
+  function onNavigatorResizePointerDown(event) {
+    if (!event.isPrimary || event.pointerType === "touch") return;
+    resizePointerId = event.pointerId;
+    resizeChanged = false;
+    navigator.resizeHandle.setPointerCapture(event.pointerId);
+    shell.classList.add("is-navigator-resizing");
+    event.preventDefault();
+  }
+
+  function onNavigatorResizePointerMove(event) {
+    if (event.pointerId !== resizePointerId) return;
+    setNavigatorWidth(event.clientX - shell.getBoundingClientRect().left);
+    resizeChanged = true;
+    event.preventDefault();
+  }
+
+  function onNavigatorResizeKeyDown(event) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const styles = getComputedStyle(shell);
+    const step = Number.parseFloat(styles.getPropertyValue("--vera-navigator-resize-step"));
+    const { minWidth, maxWidth } = readNavigatorResizeBounds();
+    const nextWidth = event.key === "Home"
+      ? minWidth
+      : event.key === "End"
+        ? maxWidth
+        : currentNavigatorWidth() + (event.key === "ArrowLeft" ? -step : step);
+    setNavigatorWidth(nextWidth);
+    persistNavigatorWidth();
+    event.preventDefault();
+  }
+
+  navigator.resizeHandle.addEventListener("pointerdown", onNavigatorResizePointerDown);
+  navigator.resizeHandle.addEventListener("pointermove", onNavigatorResizePointerMove);
+  navigator.resizeHandle.addEventListener("pointerup", stopNavigatorResize);
+  navigator.resizeHandle.addEventListener("pointercancel", stopNavigatorResize);
+  navigator.resizeHandle.addEventListener("keydown", onNavigatorResizeKeyDown);
+  void platform.secureStorage
+    ?.get(NAVIGATOR_WIDTH_STORAGE_KEY)
+    .then((storedWidth) => {
+      if (shellDestroyed || navigatorWidth !== null) return;
+      const width = Number.parseFloat(storedWidth);
+      if (!Number.isFinite(width) || width <= 0) return;
+      navigatorWidth = width;
+      if (getComputedStyle(navigator.resizeHandle).display !== "none") {
+        setNavigatorWidth(navigatorWidth);
+      }
+    })
+    .catch(() => {});
 
   function isSpaceRoute() {
     return isSpaceRouteName(activeRouteName);
@@ -343,7 +442,16 @@ export function createAppShell({ root, platform, runtime } = {}) {
   const onKeyDown = (event) => {
     if (event.key === "Escape" && navigatorOpen) closeNavigator();
   };
-  const onResize = () => applyNavigatorState();
+  const onResize = () => {
+    if (navigatorWidth !== null) {
+      if (getComputedStyle(navigator.resizeHandle).display === "none") {
+        shell.style.removeProperty("--vera-navigator-width");
+      } else {
+        setNavigatorWidth(navigatorWidth);
+      }
+    }
+    applyNavigatorState();
+  };
   const detachNavigatorSwipe = attachNavigatorSwipe(shell, {
     onOpen: openNavigator,
     onClose: closeNavigator,
@@ -385,8 +493,14 @@ export function createAppShell({ root, platform, runtime } = {}) {
     toggleNavigator,
     getCurrentSpace() { return currentSpace; },
     destroy() {
+      shellDestroyed = true;
       unsubscribeRuntime();
       detachNavigatorSwipe();
+      navigator.resizeHandle.removeEventListener("pointerdown", onNavigatorResizePointerDown);
+      navigator.resizeHandle.removeEventListener("pointermove", onNavigatorResizePointerMove);
+      navigator.resizeHandle.removeEventListener("pointerup", stopNavigatorResize);
+      navigator.resizeHandle.removeEventListener("pointercancel", stopNavigatorResize);
+      navigator.resizeHandle.removeEventListener("keydown", onNavigatorResizeKeyDown);
       navigator.destroy();
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);

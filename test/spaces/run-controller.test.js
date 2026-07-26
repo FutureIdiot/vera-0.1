@@ -103,7 +103,6 @@ async function fixture(fn, { kind = "cli", suffix = "a" } = {}) {
   const space = store.insert("spaces", {
     id: `spc_${suffix}`,
     name: `Space ${suffix}`,
-    topic: "context test",
     seats: [{ accountId: account.id, responseMode: "default" }],
     createdAt: "2026-07-15T00:00:00.000Z",
   });

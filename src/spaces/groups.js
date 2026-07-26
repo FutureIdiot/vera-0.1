@@ -29,11 +29,6 @@ function normalizeName(value) {
   return value.trim();
 }
 
-function normalizeTopic(value) {
-  if (typeof value !== "string") throw new ApiError("invalid_request", "topic must be a string");
-  return value.trim();
-}
-
 function normalizeAccountIds(store, value) {
   if (!Array.isArray(value)) throw new ApiError("invalid_request", "accountIds must be an array");
   const accountIds = [...new Set(value)];
@@ -97,12 +92,11 @@ export function getGroupOrThrow(store, id) {
 }
 
 export function createGroup(store, body) {
-  assertExactObject(body, ["name", "topic", "accountIds"], { required: ["name", "accountIds"] });
+  assertExactObject(body, ["name", "accountIds"], { required: ["name", "accountIds"] });
   const now = new Date().toISOString();
   return stripInternal(store.insert("groups", {
     id: newGroupId(),
     name: normalizeName(body.name),
-    topic: normalizeTopic(body.topic ?? ""),
     accountIds: normalizeAccountIds(store, body.accountIds),
     createdAt: now,
     updatedAt: now,
@@ -112,10 +106,9 @@ export function createGroup(store, body) {
 export function updateGroup(store, id, patch) {
   const group = store.find("groups", id);
   if (!group) throw new ApiError("not_found", `group ${id} does not exist`);
-  assertExactObject(patch, ["name", "topic", "accountIds"], { name: "patch", allowEmpty: false });
+  assertExactObject(patch, ["name", "accountIds"], { name: "patch", allowEmpty: false });
   const next = {};
   if (patch.name !== undefined) next.name = normalizeName(patch.name);
-  if (patch.topic !== undefined) next.topic = normalizeTopic(patch.topic);
   if (patch.accountIds !== undefined) next.accountIds = normalizeAccountIds(store, patch.accountIds);
   const membershipChanged = next.accountIds
     && (

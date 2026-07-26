@@ -52,7 +52,13 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
   contacts.setAttribute("aria-label", "最近联系人和群组");
   const spacesPanel = document.createElement("section");
   spacesPanel.className = "vera-navigator__spaces";
-  panel.append(contacts, spacesPanel);
+  const resizeHandle = document.createElement("div");
+  resizeHandle.className = "vera-navigator__resize-handle";
+  resizeHandle.setAttribute("role", "separator");
+  resizeHandle.setAttribute("aria-label", "调整导航宽度");
+  resizeHandle.setAttribute("aria-orientation", "vertical");
+  resizeHandle.tabIndex = 0;
+  panel.append(contacts, spacesPanel, resizeHandle);
 
   function selectedKey() {
     return navigatorState.snapshot().selectedDirectoryKey;
@@ -143,24 +149,6 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       const response = await client.createSpace({ ...details, ...target });
       runtime.mergeSpace(response.space);
       navigate(response.space.id);
-    } catch (err) {
-      showError(err.message);
-    }
-  }
-
-  async function editSpace(space) {
-    const details = await requestSpaceDetails(panel, {
-      title: "编辑 Space",
-      initialValue: space,
-      projects: runtime.getBootstrap().projects ?? [],
-      onCreateProject: createProject,
-      allowSpaceType: false,
-      ...dialogOptions(),
-    });
-    if (!details?.name) return;
-    try {
-      const response = await client.updateSpace(space.id, details);
-      runtime.mergeSpace(response.space);
     } catch (err) {
       showError(err.message);
     }
@@ -320,7 +308,6 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
       navigate,
       createSpace,
       editGroup: editGroupDirectory,
-      editSpace,
       togglePin,
       archiveSpace,
       restoreSpace,
@@ -382,6 +369,7 @@ export function createSpaceNavigator({ platform, runtime, currentSpaceId } = {})
 
   return {
     element: panel,
+    resizeHandle,
     focusFirst() { panel.querySelector("button")?.focus(); },
     cancelDialogs,
     setCurrentSpace(spaceId) {

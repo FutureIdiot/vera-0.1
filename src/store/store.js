@@ -110,10 +110,14 @@ function normalizeRunExecutionFields(data, markDirty) {
   return changed;
 }
 
-function normalizeSpaceNavigationFields(data, markDirty) {
+function normalizeSpaceFields(data, markDirty) {
   let changed = false;
   const timestamp = new Date().toISOString();
   for (const space of data.spaces) {
+    if ("topic" in space) {
+      delete space.topic;
+      changed = true;
+    }
     if (!("pinned" in space)) {
       space.pinned = false;
       changed = true;
@@ -146,6 +150,11 @@ function normalizeSpaceGroupFields(data, markDirty) {
   const legacyGroupsByMembers = new Map(
     data.groups.map((group) => [[...group.accountIds].sort().join(","), group]),
   );
+  for (const group of data.groups) {
+    if (!("topic" in group)) continue;
+    delete group.topic;
+    groupsChanged = true;
+  }
 
   for (const space of data.spaces) {
     if ("groupId" in space) {
@@ -178,7 +187,6 @@ function normalizeSpaceGroupFields(data, markDirty) {
       group = {
         id: newGroupId(),
         name,
-        topic: "",
         accountIds,
         createdAt: space.createdAt ?? timestamp,
         updatedAt: space.updatedAt ?? space.createdAt ?? timestamp,
@@ -334,7 +342,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     }
     normalizeAccountWorkspaceBindings();
     normalizeRunExecutionFields(data, markDirty);
-    normalizeSpaceNavigationFields(data, markDirty);
+    normalizeSpaceFields(data, markDirty);
     normalizeSpaceGroupFields(data, markDirty);
     markAllDirty();
     await flush();
@@ -461,7 +469,7 @@ export async function createStore({ dataPath, debounceMs = 200 } = {}) {
     }
     normalizeAccountWorkspaceBindings();
     const runsNormalized = normalizeRunExecutionFields(data, markDirty);
-    const spacesNormalized = normalizeSpaceNavigationFields(data, markDirty);
+    const spacesNormalized = normalizeSpaceFields(data, markDirty);
     const groupsNormalized = normalizeSpaceGroupFields(data, markDirty);
     if (sessionStates) await retireLegacySessionStatesFile(legacySessionStatesPath);
     delete data.sessionStates;
