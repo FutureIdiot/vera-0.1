@@ -269,10 +269,33 @@ export function createDaemonRunHandler({
       });
       return response?.providerBinding ?? response?.binding ?? response ?? null;
     });
+    const rotateProviderBinding = async ({ reason } = {}) => {
+      if (input.sessionMode !== "main" || input.kind !== "cli") {
+        throw new DaemonRunError("invalid_event", "only a main CLI run can rotate its binding");
+      }
+      await reportTail;
+      if (reportError) throw reportError;
+      const response = await report(current.id, "/provider-binding-rotation", "POST", {
+        generation: current.contextGeneration,
+        reason,
+      });
+      if (!Number.isInteger(response?.generation) || response.generation < 1 ||
+          typeof response.promptText !== "string" || response.providerBinding !== null) {
+        throw new DaemonRunError("invalid_response", "gateway returned an invalid binding rotation");
+      }
+      current.contextGeneration = response.generation;
+      knownGenerations.set(current.agentSessionId, response.generation);
+      return {
+        generation: response.generation,
+        prompt: { text: response.promptText },
+        providerBinding: null,
+      };
+    };
     try {
       void declareAgentStatus("on_task");
       const result = await execute({
-        ...data, signal: controller.signal, onDelta, onMessage, onActivity, requestApproval, persistProviderBinding,
+        ...data, signal: controller.signal, onDelta, onMessage, onActivity, requestApproval,
+        persistProviderBinding, rotateProviderBinding,
       });
       if (controller.signal.aborted) {
         const code = getTerminalReason?.() === "gateway_unreachable" ? "gateway_unreachable" : "cancelled";
@@ -295,6 +318,9 @@ export function createDaemonRunHandler({
       currentAgentStatus = "idle";
       await report(current.id, "", "PATCH", {
         status: "completed",
+        ...(input.kind === "cli" && input.sessionMode === "main" && result?.usage
+          ? { usage: result.usage }
+          : {}),
         agentState: agentState("idle"),
       });
     } catch (error) {
@@ -302,8 +328,8 @@ export function createDaemonRunHandler({
       await stateTail;
       currentAgentStatus = "idle";
       await report(current.id, "", "PATCH", {
-        status: "failed",
-        error: safeRunError(error),
+        status: error?.code === "cancelled" ? "cancelled" : "failed",
+        ...(error?.code === "cancelled" ? {} : { error: safeRunError(error) }),
         agentState: agentState("idle"),
       }).catch(() => {});
     } finally {

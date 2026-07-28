@@ -7,6 +7,7 @@ import { createCodexAdapter } from "../src/adapters/codex-adapter.js";
 import { createOllamaAdapter } from "../src/adapters/ollama-adapter.js";
 import { createOpencodeAdapter } from "../src/adapters/opencode-adapter.js";
 import { createClaudeCodeAdapter } from "../src/adapters/claude-code-adapter.js";
+import { createAntigravityAdapter } from "../src/adapters/antigravity-adapter.js";
 
 function required(env, name) {
   const value = env[name]?.trim();
@@ -22,11 +23,14 @@ function json(env, name) {
   }
 }
 
-function adapterFor(runtime, config) {
+export function adapterFor(runtime, config) {
   if (runtime.kind === "cli" && runtime.provider === "codex") return createCodexAdapter({ config: config.codex });
   if (runtime.kind === "cli" && runtime.provider === "opencode") return createOpencodeAdapter({ config: config.opencode });
   if (runtime.kind === "cli" && runtime.provider === "claude-code") {
     return createClaudeCodeAdapter({ config: config.claudeCode });
+  }
+  if (runtime.kind === "cli" && runtime.provider === "antigravity") {
+    return createAntigravityAdapter({ config: config.antigravity });
   }
   if (runtime.kind === "api" && runtime.provider === "ollama") return createOllamaAdapter({ config: config.ollama });
   throw Object.assign(new Error("runtime executor is unavailable"), { code: "unavailable" });
@@ -58,6 +62,7 @@ export async function main({ env = process.env, fetchImpl = globalThis.fetch, ex
         onDelta: context.onDelta,
         onActivity: context.onActivity,
         persistProviderBinding: context.persistProviderBinding,
+        rotateProviderBinding: context.rotateProviderBinding,
       });
     },
     shutdown: () => adapter.shutdown?.(),

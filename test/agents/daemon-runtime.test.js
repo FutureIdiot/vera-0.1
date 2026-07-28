@@ -98,7 +98,7 @@ test("daemon Run endpoints authenticate the current Session lease and delegate s
     const calls = [];
     const lifecycle = Object.fromEntries([
       "createSubagent", "updateRun", "createMessage", "appendDelta",
-      "upsertActivity", "createApproval", "submitCompactionResult",
+      "upsertActivity", "createApproval", "rotateProviderBinding", "submitCompactionResult",
     ].map((name) => [name, async (input) => { calls.push({ name, input }); return { ok: name }; }]));
     const daemonRuntime = createDaemonRuntime({ store, hub, config, controlService, runLifecycle: lifecycle });
     const router = createRouter();
@@ -113,13 +113,19 @@ test("daemon Run endpoints authenticate the current Session lease and delegate s
 
     const requests = [
       ["POST", "/api/agent/runs/run_runtime/subagents", { task: "inspect" }, 201],
+      ["POST", "/api/agent/runs/run_runtime/provider-binding-rotation", {
+        generation: 1, reason: "missing",
+      }, 200],
       ["POST", "/api/agent/runs/run_runtime/messages", { content: "hello" }, 201],
       ["POST", "/api/agent/runs/run_runtime/delta", { delta: "hel" }, 200],
       ["POST", "/api/agent/runs/run_runtime/activities", {
         phase: "coding", kind: "status", summary: "正在编码", callId: "call-1",
       }, 200],
       ["POST", "/api/agent/runs/run_runtime/approvals", { prompt: "allow?", options: ["allow", "deny"] }, 201],
-      ["PATCH", "/api/agent/runs/run_runtime", { status: "completed" }, 200],
+      ["PATCH", "/api/agent/runs/run_runtime", {
+        status: "completed",
+        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+      }, 200],
       ["PUT", `/api/agent/compactions/ccj_runtime/targets/${agentId}`, {
         agentSessionId: "ags_runtime", fromGeneration: 1, status: "failed",
         error: { code: "context_capacity", message: "failed safely" },
@@ -130,10 +136,10 @@ test("daemon Run endpoints authenticate the current Session lease and delegate s
       assert.equal(response.status, expected, `${method} ${path}`);
     }
     assert.deepEqual(calls.map((call) => call.name), [
-      "createSubagent", "createMessage", "appendDelta", "upsertActivity", "createApproval", "updateRun",
-      "submitCompactionResult",
+      "createSubagent", "rotateProviderBinding", "createMessage", "appendDelta", "upsertActivity",
+      "createApproval", "updateRun", "submitCompactionResult",
     ]);
-    assert.ok(calls.slice(0, 6).every((call) => call.input.run.id === "run_runtime"));
+    assert.ok(calls.slice(0, 7).every((call) => call.input.run.id === "run_runtime"));
     assert.equal(calls.at(-1).input.target.accountId, accountId);
 
     const invalidSession = await request(router, "POST", "/api/agent/runs/run_runtime/delta", { delta: "x" }, {

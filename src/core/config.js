@@ -50,6 +50,14 @@ const DEFAULTS = {
     watchdogMs: 30 * 60 * 1000,
     permissionMode: "auto",
   },
+  antigravity: {
+    binary: "agy",
+    projectId: null,
+    mode: "accept-edits",
+    watchdogMs: 30 * 60 * 1000,
+    contextWindowTokens: 32768,
+    maxInputBytes: 131072,
+  },
   ollama: {
     watchdogMs: 30 * 60 * 1000,
     digestTimeoutMs: 5 * 60 * 1000,
@@ -268,6 +276,25 @@ export function loadConfig(env = process.env) {
       )
         ? env.VERA_CLAUDE_CODE_PERMISSION_MODE
         : DEFAULTS.claudeCode.permissionMode,
+    },
+    antigravity: {
+      binary: env.VERA_ANTIGRAVITY_BIN || DEFAULTS.antigravity.binary,
+      projectId: env.VERA_ANTIGRAVITY_PROJECT_ID?.trim() || DEFAULTS.antigravity.projectId,
+      mode: ["accept-edits", "plan"].includes(env.VERA_ANTIGRAVITY_MODE)
+        ? env.VERA_ANTIGRAVITY_MODE
+        : DEFAULTS.antigravity.mode,
+      watchdogMs: positiveInt(
+        env.VERA_ANTIGRAVITY_WATCHDOG_MS,
+        DEFAULTS.antigravity.watchdogMs,
+      ),
+      contextWindowTokens: positiveInt(
+        env.VERA_ANTIGRAVITY_CONTEXT_WINDOW_TOKENS,
+        DEFAULTS.antigravity.contextWindowTokens,
+      ),
+      maxInputBytes: positiveInt(
+        env.VERA_ANTIGRAVITY_MAX_INPUT_BYTES,
+        DEFAULTS.antigravity.maxInputBytes,
+      ),
     },
     ollama: {
       watchdogMs: positiveInt(env.VERA_OLLAMA_WATCHDOG_MS, DEFAULTS.ollama.watchdogMs),

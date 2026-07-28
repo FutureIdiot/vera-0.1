@@ -1,6 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { boundApiMessages, checkpointForAgent, checkpointTurnText, estimateTokens } from "../../src/spaces/run-context.js";
+import {
+  boundApiMessages,
+  checkpointForAgent,
+  checkpointTurnText,
+  effectiveContextLimit,
+  estimateTokens,
+} from "../../src/spaces/run-context.js";
+
+test("provider context profile overrides the global default without exceeding its byte gate", () => {
+  const config = {
+    context: { defaultLimitTokens: 16384 },
+    antigravity: { contextWindowTokens: 32768, maxInputBytes: 131072 },
+  };
+  assert.equal(
+    effectiveContextLimit(config, { provider: "antigravity" }),
+    32768,
+  );
+  config.antigravity.maxInputBytes = 64000;
+  assert.equal(
+    effectiveContextLimit(config, { provider: "antigravity" }),
+    16000,
+  );
+});
 
 test("Agent checkpoint excludes Messages from blocked Agents", () => {
   const records = {

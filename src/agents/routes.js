@@ -124,6 +124,15 @@ export function registerAgentRoutes(router, {
         }),
       );
 
+      router.post(
+        "/api/agent/runs/:id/provider-binding-rotation",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 200, await daemonRuntime.rotateProviderBinding(
+            params.id, await readJsonBody(req), req.headers,
+          ));
+        }),
+      );
+
       router.put(
         "/api/agent/runs/:id/api-result",
         asHandler(async ({ req, res, params }) => {

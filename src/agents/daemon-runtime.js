@@ -177,7 +177,7 @@ export function createDaemonRuntime({
   }
 
   async function updateRun(runId, body, headers) {
-    strictObject(body, { allowed: ["status", "error", "agentState"] });
+    strictObject(body, { allowed: ["status", "error", "agentState", "usage"] });
     if (Object.keys(body).length === 0) invalid("run update must not be empty");
     const authority = await runAuthority(runId, headers);
     if (body.status !== undefined && !TERMINAL_RUN_STATUSES.has(body.status)) {
@@ -188,6 +188,17 @@ export function createDaemonRuntime({
     });
     if (body.status !== "failed" && body.error !== undefined) invalid("error is only valid for failed Runs");
     const isApiMain = authority.run.role !== "subagent" && authority.agent.runtimeProfile?.kind === "api";
+    if (body.usage !== undefined) {
+      strictObject(body.usage, {
+        allowed: ["inputTokens", "outputTokens", "thinkingTokens", "cacheReadTokens", "totalTokens"],
+        required: ["inputTokens"],
+        name: "usage",
+      });
+      if (Object.values(body.usage).some((value) => !Number.isFinite(value) || value < 0) ||
+          body.status !== "completed" || isApiMain || authority.run.role === "subagent") {
+        invalid("usage is only valid for a completed main CLI Run");
+      }
+    }
     if (body.status === "completed" && isApiMain) {
       const committed = Number.isInteger(authority.run.apiResultVersion) || store.list("apiHistories").some((history) =>
         history.agentSessionId === authority.run.agentSessionId &&
@@ -284,6 +295,7 @@ export function createDaemonRuntime({
     upsertActivity: (id, body, headers) => submitOutput("upsertActivity", id, body, headers),
     createApproval: (id, body, headers) => submitOutput("createApproval", id, body, headers),
     saveProviderBinding: runResults.saveProviderBinding,
+    rotateProviderBinding: runResults.rotateProviderBinding,
     saveApiResult: runResults.saveApiResult,
     submitCompaction: runResults.submitCompaction,
   };

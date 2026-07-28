@@ -41,6 +41,7 @@ import { createMockAdapter } from "./adapters/mock-adapter.js";
 import { createOllamaAdapter } from "./adapters/ollama-adapter.js";
 import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 import { createCodexAdapter } from "./adapters/codex-adapter.js";
+import { createAntigravityAdapter } from "./adapters/antigravity-adapter.js";
 import { createContextCompactionService } from "./spaces/context-compactions.js";
 import { recoverInterruptedRuns } from "./spaces/run-controller.js";
 import { createFilesService } from "./memory/files-service.js";
@@ -143,6 +144,7 @@ const adapters = {
   ollama: createOllamaAdapter({ config: config.ollama }),
   opencode: createOpencodeAdapter({ config: config.opencode }),
   codex: createCodexAdapter({ config: config.codex }),
+  antigravity: createAntigravityAdapter({ config: config.antigravity }),
 };
 const memoryDigestAdapters = {
   ollama: adapters.ollama,
@@ -255,6 +257,7 @@ const daemonRunLifecycle = createDaemonRunLifecycle({
   config,
   agentStates,
   memoryDigestScheduler,
+  memoryRetrieval,
   contextCompaction,
   observation,
 });

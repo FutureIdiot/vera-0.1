@@ -100,6 +100,27 @@ export function createDaemonRunResults({
     });
   }
 
+  async function rotateProviderBinding(runId, body, headers) {
+    strictObject(body, {
+      allowed: ["generation", "reason"],
+      required: ["generation", "reason"],
+    });
+    if (!Number.isInteger(body.generation) || body.generation < 1 ||
+        !["missing", "invalid"].includes(body.reason)) {
+      invalid("provider binding rotation generation or reason is invalid");
+    }
+    const authority = await runAuthority(runId, headers);
+    if (authority.agent.runtimeProfile?.kind !== "cli" || authority.run.role !== "main" ||
+        authority.run.agentSessionId == null) {
+      throw new ApiError("forbidden", "Provider binding rotation requires a main CLI Execution");
+    }
+    assertRunAuthority(authority, authority.run);
+    return invoke("rotateProviderBinding", {
+      ...authority,
+      input: structuredClone(body),
+    });
+  }
+
   async function saveApiResult(runId, body, headers) {
     strictObject(body, {
       allowed: ["agentSessionId", "generation", "baseHistoryVersion", "assistantMessageIds", "toolTranscript", "usage"],
@@ -212,5 +233,5 @@ export function createDaemonRunResults({
     return updated;
   }
 
-  return { saveProviderBinding, saveApiResult, submitCompaction };
+  return { saveProviderBinding, rotateProviderBinding, saveApiResult, submitCompaction };
 }

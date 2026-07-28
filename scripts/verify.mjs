@@ -51,6 +51,7 @@ import * as memoryRetrieval from "../test/checks/memory-retrieval.mjs";
 import * as contextSessions from "../test/checks/context-sessions.mjs";
 import * as ollamaAdapter from "../test/checks/ollama-adapter.mjs";
 import * as codexAdapter from "../test/checks/codex-adapter.mjs";
+import * as antigravityAdapter from "../test/checks/antigravity-adapter.mjs";
 import * as files from "../test/checks/files.mjs";
 import * as security from "../test/checks/security.mjs";
 
@@ -163,6 +164,8 @@ async function main() {
   await ollamaAdapter.runReal(ctx);
   await codexAdapter.run(ctx);
   await codexAdapter.runReal(ctx);
+  await antigravityAdapter.run(ctx);
+  await antigravityAdapter.runReal(ctx);
   await contextSessions.run(ctx);
   await files.run(ctx);
   await f1Extensions.run(ctx);

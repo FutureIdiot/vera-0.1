@@ -9,7 +9,8 @@ export function estimateTokens(value) {
 }
 
 export function effectiveContextLimit(config, runtime) {
-  const configured = config.context.defaultLimitTokens;
+  const configured = config?.[runtime.provider]?.contextWindowTokens ??
+    config.context.defaultLimitTokens;
   const byteLimit = config?.[runtime.provider]?.maxInputBytes;
   return Number.isFinite(byteLimit) && byteLimit > 0
     ? Math.min(configured, Math.floor(byteLimit / 4))

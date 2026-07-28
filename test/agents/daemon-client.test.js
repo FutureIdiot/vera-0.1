@@ -16,7 +16,10 @@ function stream(frames) {
   });
 }
 
-function fixture({ envelopes = [], memoryEnvelopes = [], executor, memoryExecutor, eventResponses, loginStatus = 200, maxConnectionFailures = 3 } = {}) {
+function fixture({
+  envelopes = [], memoryEnvelopes = [], executor, memoryExecutor, eventResponses,
+  bindingRotationResponse = null, runtime = null, loginStatus = 200, maxConnectionFailures = 3,
+} = {}) {
   const calls = [];
   let loginCount = 0;
   let eventsCount = 0;
@@ -42,6 +45,12 @@ function fixture({ envelopes = [], memoryEnvelopes = [], executor, memoryExecuto
     if (url.endsWith("/api/agent/memory-tasks/events")) {
       return new Response(stream(memoryEnvelopes), { status: 200 });
     }
+    if (url.endsWith("/provider-binding-rotation") && bindingRotationResponse) {
+      return new Response(JSON.stringify(bindingRotationResponse), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
     if (url.includes("/messages")) {
       return new Response(JSON.stringify({ id: `msg_${calls.length}`, content: body.content }), { status: 201 });
     }
@@ -51,7 +60,7 @@ function fixture({ envelopes = [], memoryEnvelopes = [], executor, memoryExecuto
     gatewayUrl: "https://gateway.test",
     agentId: "agt_a",
     accountId: "acc_a",
-    runtime: {
+    runtime: runtime ?? {
       hostId: "host_a", kind: "api", provider: "ollama", model: "model_a", revision: "rev_a",
       runtimeCapabilities: { models: ["model_a", "model_b"] },
     },
@@ -128,6 +137,59 @@ test("CLI isolated input stays isolated and does not submit API history", async 
     .map((call) => call.body.agentState.status);
   assert.deepEqual(statePatches, ["on_task", "typing", "idle"]);
   assert.equal(calls.find((call) => call.method === "PATCH" && call.body?.status === "completed")?.body.status, "completed");
+});
+
+test("CLI main rotation updates generation before binding CAS and submits provider usage", async () => {
+  const input = {
+    kind: "cli",
+    sessionMode: "main",
+    promptText: "old prompt",
+    providerBinding: { version: 1, providerState: { conversationId: "stale" } },
+  };
+  let rotated;
+  const { client, calls } = fixture({
+    envelopes: [requested(input)],
+    runtime: {
+      hostId: "host_a",
+      kind: "cli",
+      provider: "antigravity",
+      model: "model_a",
+      revision: "rev_a",
+      runtimeCapabilities: { models: ["model_a", "model_b"] },
+    },
+    bindingRotationResponse: {
+      generation: 3,
+      promptText: "new prompt",
+      providerBinding: null,
+    },
+    executor: async (context) => {
+      rotated = await context.rotateProviderBinding({ reason: "missing" });
+      await context.persistProviderBinding({ conversationId: "fresh" }, null);
+      return {
+        content: "done",
+        usage: { inputTokens: 10000, outputTokens: 4, totalTokens: 10004 },
+      };
+    },
+  });
+  await client.start();
+  await client.wait();
+  await settle();
+
+  assert.deepEqual(rotated, {
+    generation: 3,
+    prompt: { text: "new prompt" },
+    providerBinding: null,
+  });
+  const rotation = calls.find((call) => call.url.endsWith("/provider-binding-rotation"));
+  assert.deepEqual(rotation.body, { generation: 2, reason: "missing" });
+  const binding = calls.find((call) => call.url.includes("/provider-bindings/"));
+  assert.equal(binding.body.generation, 3);
+  const completed = calls.find((call) => call.method === "PATCH" && call.body?.status === "completed");
+  assert.deepEqual(completed.body.usage, {
+    inputTokens: 10000,
+    outputTokens: 4,
+    totalTokens: 10004,
+  });
 });
 
 test("requestApproval posts once and resolves only its approval.answered event", async () => {

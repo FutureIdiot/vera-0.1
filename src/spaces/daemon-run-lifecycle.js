@@ -8,6 +8,18 @@ import { projectAgent } from "../agents/agents.js";
 import { projectAccount } from "../agents/accounts.js";
 import { createApprovalRequest, expirePendingApprovalsForRun } from "./approvals.js";
 import { createRunOutput } from "./run-output.js";
+import { compilePrompt } from "./view-compiler.js";
+import {
+  assessContextPressure,
+  rotateContextGeneration,
+  updateContextPressure,
+} from "./context-state.js";
+import {
+  checkpointForAgent,
+  effectiveContextLimit,
+  estimateTokens,
+  latestCheckpoint,
+} from "./run-context.js";
 
 function stripInternal({ _seq, ...record }) {
   return structuredClone(record);
@@ -35,11 +47,13 @@ export function createDaemonRunLifecycle({
   config,
   agentStates = null,
   memoryDigestScheduler = null,
+  memoryRetrieval = null,
   contextCompaction = null,
   observation = null,
 } = {}) {
   if (!store || !hub || !config) throw new Error("createDaemonRunLifecycle requires store, hub, and config");
   const outputs = new Map();
+  const bindingRotations = new Map();
 
   function outputFor(run, agent, account) {
     let output = outputs.get(run.id);
@@ -192,6 +206,23 @@ export function createDaemonRunLifecycle({
       ...output.bubbles.replyMessageIds,
       ...store.list("messages").filter((message) => message.runId === current.id).map((message) => message.id),
     ])];
+    let shouldCompact = false;
+    if (input.status === "completed" && current.role === "main" &&
+        agent.runtimeProfile?.kind === "cli" && Number.isFinite(input.usage?.inputTokens)) {
+      const runtime = {
+        ...(agent.runtimeProfile ?? {}),
+        model: current.effectiveModel,
+        connection: structuredClone(agent.runtimeBinding?.connection ?? {}),
+      };
+      const agentSession = updateContextPressure(store, {
+        agentSessionId: current.agentSessionId,
+        generation: current.contextGeneration,
+        estimatedInputTokens: input.usage.inputTokens,
+        effectiveLimitTokens: effectiveContextLimit(config, runtime),
+        measurement: "provider_reported",
+      });
+      shouldCompact = assessContextPressure(agentSession, config.context).shouldCompact;
+    }
     const patch = {
       status: input.status,
       endedAt: new Date().toISOString(),
@@ -200,12 +231,95 @@ export function createDaemonRunLifecycle({
     if (input.status === "failed") patch.error = input.error ?? { code: "internal", message: "run failed" };
     const updated = store.update("runs", current.id, patch);
     outputs.delete(current.id);
+    bindingRotations.delete(current.id);
     hub.publish("run.ended", { run: stripInternal(updated) });
     for (const messageId of replyMessageIds) {
       const message = store.find("messages", messageId);
       if (message?.status === "completed") memoryDigestScheduler?.onMessageCommitted?.(message);
     }
+    if (shouldCompact && contextCompaction) {
+      void contextCompaction.compactAgent({
+        spaceId: current.spaceId,
+        agentId: current.agentId,
+        requestId: `auto:${current.agentSessionId}:${current.contextGeneration}:${current.id}`,
+      }).catch(() => {});
+    }
     return { run: stripInternal(updated) };
+  }
+
+  async function rotateProviderBinding({ account, agent, run, input }) {
+    const prior = bindingRotations.get(run.id);
+    if (prior) {
+      if (prior.fromGeneration === input.generation) return structuredClone(prior.response);
+      throw new ApiError("conflict", "provider binding rotation generation is stale");
+    }
+    const current = store.find("runs", run.id);
+    if (!current || current.status !== "running" || current.role !== "main" ||
+        agent.runtimeProfile?.kind !== "cli" ||
+        current.contextGeneration !== input.generation) {
+      throw new ApiError("conflict", "provider binding rotation does not match the active CLI Run");
+    }
+    if (store.list("messages").some((message) => message.runId === current.id)) {
+      throw new ApiError("conflict", "provider binding can rotate only before the first reply");
+    }
+    const space = store.find("spaces", current.spaceId);
+    const triggerMessage = store.find("messages", current.triggerMessageId);
+    if (!space || !triggerMessage) {
+      throw new ApiError("conflict", "provider binding rotation context is unavailable");
+    }
+    const checkpoint = checkpointForAgent(store, {
+      spaceSessionId: current.spaceSessionId,
+      agentId: agent.id,
+      recentTurnLimit: config.context.checkpointRecentTurns,
+      maxChars: config.viewCompiler.groupDeltaMaxChars,
+    });
+    const nextSession = rotateContextGeneration(store, {
+      agentSessionId: current.agentSessionId,
+      fromGeneration: current.contextGeneration,
+      checkpoint,
+    });
+    store.update("runs", current.id, { contextGeneration: nextSession.generation });
+    await memoryRetrieval?.ensureSession?.({
+      agentId: agent.id,
+      agentSessionId: nextSession.id,
+      generation: nextSession.generation,
+    });
+    const runtime = {
+      ...(agent.runtimeProfile ?? {}),
+      model: current.effectiveModel,
+      connection: structuredClone(agent.runtimeBinding?.connection ?? {}),
+    };
+    const prompt = await compilePrompt({
+      store,
+      space,
+      agent,
+      account,
+      triggerMessage,
+      memoryRetrieval,
+      spaceSessionId: current.spaceSessionId,
+      agentSessionId: nextSession.id,
+      generation: nextSession.generation,
+      includeResidentIndex: true,
+      apiHistory: null,
+      checkpoint: latestCheckpoint(store, nextSession.id),
+      runId: current.id,
+      config,
+    });
+    if (estimateTokens(prompt.text) > Math.floor(
+      effectiveContextLimit(config, runtime) * config.context.hardRatio,
+    )) {
+      throw new ApiError("context_capacity", "current message exceeds the AgentSession context capacity");
+    }
+    const response = {
+      generation: nextSession.generation,
+      promptText: prompt.text,
+      providerBinding: null,
+    };
+    bindingRotations.set(current.id, {
+      fromGeneration: input.generation,
+      response: structuredClone(response),
+    });
+    return response;
   }
 
   function cancelRun(runId) {
@@ -229,6 +343,7 @@ export function createDaemonRunLifecycle({
       error: { code: "cancelled", message: "Run cancelled by owner" },
     });
     outputs.delete(current.id);
+    bindingRotations.delete(current.id);
     hub.publish("run.ended", { run: stripInternal(updated) });
     if (account && agent) {
       for (const messageId of replyMessageIds) {
@@ -246,6 +361,7 @@ export function createDaemonRunLifecycle({
     appendDelta,
     upsertActivity,
     createApproval,
+    rotateProviderBinding,
     cancelRun,
     submitCompactionResult: contextCompaction
       ? ({ job, target, input }) => contextCompaction.submitDaemonResult({ job, target, input })
