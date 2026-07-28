@@ -92,7 +92,7 @@ test("Antigravity stream persists and resumes one conversation without duplicate
   const tool = first.activities.filter((item) => item.label === "run_command").at(-1);
   assert.equal(tool.kind, "command");
   assert.equal(tool.toolStatus, "completed");
-  assert.match(tool.detail, /Vera-0\.0\.1/u);
+  assert.equal(tool.detail.includes(process.cwd()), true);
 
   const second = context(fake.binary, { providerBinding: firstResult.providerBinding });
   const secondResult = await instance.run(second.ctx);
