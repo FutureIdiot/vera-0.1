@@ -188,6 +188,28 @@ test("providers without public reasoning detail stay as the same non-expandable 
   });
 });
 
+test("provider quota errors render the redacted native reason in Chat", () => {
+  withFakeDocument(() => {
+    const activity = renderActivity({
+      id: "act_quota",
+      phase: "error",
+      kind: "error",
+      label: "quota_exhausted",
+      summary: "Codex: You've hit your usage limit. Try again at 5:06 PM.",
+      detail: "错误代码：quota_exhausted",
+      toolStatus: "failed",
+    }, { canExpand: true });
+
+    assert.equal(
+      activity.querySelector(".vera-activity__summary").textContent,
+      "Codex: You've hit your usage limit. Try again at 5:06 PM.",
+    );
+    assert.equal(activity.querySelector(".vera-vector-icon").dataset.icon, "error");
+    assert.equal(activity.querySelector(".vera-activity__toggle").getAttribute("aria-label"), "错误摘要");
+    assert.equal(activity.querySelector(".vera-activity__detail").textContent, "");
+  });
+});
+
 test("unified Activity kinds select their own vector icons without provider labels", () => {
   withFakeDocument(() => {
     const activity = renderActivity({

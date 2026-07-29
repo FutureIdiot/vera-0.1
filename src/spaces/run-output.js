@@ -12,6 +12,22 @@ function truncate(text, maxLength) {
   return `${text.slice(0, maxLength)}\n…(输出截断)`;
 }
 
+export function runFailureActivity(error = {}) {
+  const code = typeof error.code === "string" && error.code ? error.code : "internal";
+  const message = typeof error.message === "string" && error.message
+    ? error.message
+    : "Run 执行失败。";
+  return {
+    phase: "error",
+    kind: "error",
+    label: code,
+    summary: message,
+    detail: `错误代码：${code}`,
+    toolStatus: "failed",
+    callId: `run-error:${code}`,
+  };
+}
+
 export function createRunOutput({
   store, hub, config, spaceId, spaceSessionId, runId, agent, account, effectiveModel, delegated,
   projectActivity = (activity) => activity,

@@ -21,6 +21,7 @@ import {
   summarizeToolActivity,
 } from "../core/activity-events.js";
 import { killProcessTree, spawnProcess } from "../core/spawn.js";
+import { publicProviderRunError } from "./provider-run-error.js";
 
 const USAGE_FIELDS = {
   input_tokens: "inputTokens",
@@ -325,7 +326,7 @@ export function createAntigravityAdapter({ config = {} } = {}) {
       }
       if (eventError) throw eventError;
       if (exit.code !== 0 || !resultEvent || resultEvent.status !== "SUCCESS") {
-        throw new AdapterError("provider_error", "Antigravity CLI execution failed");
+        throw publicProviderRunError("Antigravity", { payload: resultEvent, stderr });
       }
       if (!conversationId) {
         throw new AdapterError("provider_error", "Antigravity CLI did not return a conversation id");

@@ -84,7 +84,7 @@ export function postMessage({
     throw new ApiError("invalid_request", "author and non-empty content or fileIds are required");
   }
   const controlCommand = content.trim();
-  if (controlCommand === "/new" || controlCommand === "/compact") {
+  if (["/new", "/compact", "/resume"].includes(controlCommand)) {
     throw new ApiError(
       "control_command_required",
       `${controlCommand} is a context control command and must use its dedicated endpoint`,

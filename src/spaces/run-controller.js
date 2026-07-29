@@ -26,7 +26,7 @@ import {
   estimateTokens,
   latestCheckpoint,
 } from "./run-context.js";
-import { createRunOutput } from "./run-output.js";
+import { createRunOutput, runFailureActivity } from "./run-output.js";
 
 const abortControllers = new Map();
 
@@ -418,13 +418,23 @@ export function executeRun({
         }).catch(() => {});
       }
     } catch (error) {
-      bubbles.finish();
       if (error instanceof AdapterError) {
         status = error.code === "cancelled" ? "cancelled" : "failed";
         runError = error;
       } else {
         status = "failed";
         runError = error;
+      }
+      if (status === "failed") {
+        bubbles.fail();
+        onActivity(runFailureActivity({
+          code: runError?.code ?? "internal",
+          message: runError instanceof AdapterError || runError instanceof ApiError
+            ? runError.message
+            : "Run 执行失败。",
+        }));
+      } else {
+        bubbles.finish();
       }
     }
     await finishRunning({ status, error: runError, bubbles });

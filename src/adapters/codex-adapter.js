@@ -33,6 +33,7 @@ import {
 import { projectCodexDigestSchema } from "./codex-digest-schema.js";
 import { normalizeCodexDreamProposals, projectCodexDreamSchema } from "./codex-dream-schema.js";
 import { compactCodexThread } from "./codex-app-server.js";
+import { publicProviderRunError } from "./provider-run-error.js";
 
 export { projectCodexDigestSchema } from "./codex-digest-schema.js";
 
@@ -178,6 +179,12 @@ export function createCodexAdapter({ config = {} }) {
     let stderr = "";
     let buffer = "";
     let eventError = null;
+    let failureEvent = null;
+    const consumeLine = (line) => {
+      const event = JSON.parse(line);
+      if (event?.type === "error" || event?.error) failureEvent = event;
+      onEvent(event);
+    };
     try {
       if (signal?.aborted) throw new AdapterError("cancelled", digest ? "memory digest cancelled" : "Codex run cancelled");
       if (shutdownController.signal.aborted) {
@@ -209,7 +216,7 @@ export function createCodexAdapter({ config = {} }) {
           buffer = buffer.slice(index + 1);
           if (!line) continue;
           try {
-            onEvent(JSON.parse(line));
+            consumeLine(line);
           } catch (error) {
             eventError = error;
             terminate();
@@ -233,7 +240,7 @@ export function createCodexAdapter({ config = {} }) {
       });
       const tail = buffer.trim();
       if (tail && !eventError) {
-        try { onEvent(JSON.parse(tail)); } catch (error) { eventError = error; }
+        try { consumeLine(tail); } catch (error) { eventError = error; }
       }
       if (signal?.aborted) throw new AdapterError("cancelled", digest ? "memory digest cancelled" : "Codex run cancelled");
       if (timeoutController.signal.aborted) {
@@ -244,8 +251,9 @@ export function createCodexAdapter({ config = {} }) {
       }
       if (eventError) throw eventError;
       if (exit.code !== 0) {
-        const error = new AdapterError(digest ? "executor_failed" : "provider_error",
-          digest ? "Codex memory digest executor failed" : "Codex CLI execution failed");
+        const error = digest
+          ? new AdapterError("executor_failed", "Codex memory digest executor failed")
+          : publicProviderRunError("Codex", { payload: failureEvent, stderr });
         error.missingThread = !digest && missingThread(stderr);
         throw error;
       }

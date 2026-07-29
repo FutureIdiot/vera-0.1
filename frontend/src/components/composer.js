@@ -6,7 +6,7 @@ import { createVectorIcon, setIconButtonContent } from "./vector-icon.js";
 export const DEFAULT_COMMANDS = Object.freeze([
   { command: "/new", description: "开始新的 SpaceSession", available: true },
   { command: "/compact", description: "压缩当前上下文", available: true },
-  { command: "/resume", description: "恢复最近会话", available: false },
+  { command: "/resume", description: "选择并恢复旧 Session", available: true },
   { command: "/forge", description: "编排 Agent 协作流程", available: false },
   { command: "/clear", description: "清理当前聊天", available: false },
   { command: "/export", description: "导出当前对话", available: false },
@@ -285,6 +285,14 @@ export function createComposer({
     }
   }
 
+  function openSessionHistory() {
+    closeMenus();
+    historyExpanded = true;
+    renderSessionMenu();
+    sessionMenu.hidden = false;
+    void loadSessionHistory();
+  }
+
   function renderSessionMenu() {
     sessionMenu.replaceChildren();
     const heading = document.createElement("div");
@@ -537,6 +545,13 @@ export function createComposer({
     event.preventDefault();
     const content = input.value.trim();
     if (foregroundRuns.length > 0 || (!content && attachments.length === 0) || disabled || submitting) return;
+    if (content === "/resume") {
+      input.value = "";
+      resizeInput();
+      updateSendState();
+      openSessionHistory();
+      return;
+    }
     submitting = true;
     updateSendState();
     error.hidden = true;

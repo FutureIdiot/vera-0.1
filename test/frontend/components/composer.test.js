@@ -36,11 +36,11 @@ test("composer prefers the longest Account name at the same mention position", (
 test("composer exposes real commands and keeps future command interfaces disabled", () => {
   assert.deepEqual(
     DEFAULT_COMMANDS.filter((item) => item.available).map((item) => item.command),
-    ["/new", "/compact"],
+    ["/new", "/compact", "/resume"],
   );
   assert.deepEqual(
     DEFAULT_COMMANDS.filter((item) => !item.available).map((item) => item.command),
-    ["/resume", "/forge", "/clear", "/export", "/theme", "/help"],
+    ["/forge", "/clear", "/export", "/theme", "/help"],
   );
 });
 
@@ -137,6 +137,46 @@ test("composer uses icon-only Session and plus controls, and resumes from Histor
     assert.equal(attachmentMenu.children.length, 2);
     assert.equal(attachmentMenu.children[0].children[1].textContent, "图片");
     assert.equal(attachmentMenu.children[1].children[1].textContent, "文件");
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test("bare /resume opens the same History selector without sending a Message", async () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    createElement: (tagName) => new FakeElement(tagName),
+    createElementNS: (_namespace, tagName) => new FakeElement(tagName),
+  };
+  const sent = [];
+  const resumed = [];
+  try {
+    const composer = createComposer({
+      onSend: async (...args) => { sent.push(args); },
+      onListSessions: async () => ({
+        sessions: [{
+          id: "sps_old",
+          status: "archived",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }],
+      }),
+      onResumeSession: async (id) => { resumed.push(id); },
+    });
+    composer.setSessionContext({
+      spaceSession: { id: "sps_current", createdAt: "2026-01-02T00:00:00.000Z" },
+    });
+    composer.input.value = "  /resume  ";
+    composer.element.listeners.get("submit")({ preventDefault() {} });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const sessionMenu = composer.element.children[4];
+    assert.equal(sessionMenu.hidden, false);
+    assert.equal(composer.input.value, "");
+    assert.deepEqual(sent, []);
+    const oldSession = sessionMenu.children.at(-1);
+    assert.equal(oldSession.children[0].textContent.length > 0, true);
+    await oldSession.listeners.get("click")();
+    assert.deepEqual(resumed, ["sps_old"]);
   } finally {
     globalThis.document = previousDocument;
   }

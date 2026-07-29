@@ -192,6 +192,49 @@ test("completed main CLI usage updates context pressure and schedules compaction
   });
 });
 
+test("failed public Root persists the concrete provider error and marks partial output failed", async () => {
+  await fixture(async ({ store, hub, agent, account, run }) => {
+    const lifecycle = createDaemonRunLifecycle({ store, hub, config: CONFIG });
+    lifecycle.appendDelta({
+      account,
+      agent,
+      run,
+      input: { delta: "已经生成的部分回答", paragraphEnd: false },
+    });
+    const since = hub.currentSeq();
+    const result = lifecycle.updateRun({
+      account,
+      agent,
+      run,
+      input: {
+        status: "failed",
+        error: {
+          code: "quota_exhausted",
+          message: "Antigravity: credits exhausted; resets in 2h",
+        },
+      },
+    });
+
+    assert.equal(result.run.status, "failed");
+    assert.deepEqual(result.run.error, {
+      code: "quota_exhausted",
+      message: "Antigravity: credits exhausted; resets in 2h",
+    });
+    const reply = store.list("messages").find((message) => message.runId === run.id);
+    assert.equal(reply.content, "已经生成的部分回答");
+    assert.equal(reply.status, "failed");
+    const activity = store.list("activities").find((item) =>
+      item.runId === run.id && item.kind === "error");
+    assert.equal(activity.summary, "Antigravity: credits exhausted; resets in 2h");
+    assert.equal(activity.detail, "错误代码：quota_exhausted");
+    assert.equal(activity.toolStatus, "failed");
+    assert.deepEqual(
+      hub.replaySince(since).map((event) => event.type),
+      ["message.completed", "activity.created", "run.ended"],
+    );
+  });
+});
+
 test("API Root exposes a commit checkpoint before terminal history completion", async () => {
   await fixture(async ({ store, hub, agent, account, run }) => {
     store.update("agents", agent.id, {

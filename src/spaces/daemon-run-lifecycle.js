@@ -4,7 +4,7 @@
 
 import { ApiError } from "../core/errors.js";
 import { createApprovalRequest, expirePendingApprovalsForRun } from "./approvals.js";
-import { createRunOutput } from "./run-output.js";
+import { createRunOutput, runFailureActivity } from "./run-output.js";
 import { compilePrompt } from "./view-compiler.js";
 import {
   assessContextPressure,
@@ -196,7 +196,13 @@ export function createDaemonRunLifecycle({
       }
     }
     const output = current.outputPolicy === "space" ? outputFor(current, agent, account) : null;
-    output?.bubbles.finish();
+    if (input.status === "failed") {
+      const error = input.error ?? { code: "internal", message: "Run 执行失败。" };
+      output?.bubbles.fail();
+      output?.onActivity(runFailureActivity(error));
+    } else {
+      output?.bubbles.finish();
+    }
     expirePendingApprovalsForRun(store, hub, current.id);
     const replyMessageIds = [...new Set([
       ...(current.replyMessageIds ?? []),

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { createDaemonClient } from "../../src/agents/daemon-client.js";
 import { activityAgentStatus } from "../../src/agents/daemon-run-handler.js";
+import { AdapterError } from "../../src/core/errors.js";
 
 const TOKEN = `vat_${"a".repeat(43)}`;
 const KEY = `vak_${"b".repeat(43)}`;
@@ -456,6 +457,39 @@ test("invalid mixed wire input never reaches executor and fails the Run", async 
   assert.equal(executed, false);
   const patch = calls.find((call) => call.method === "PATCH");
   assert.deepEqual(patch.body, { status: "failed", error: { code: "internal", message: "daemon execution failed" } });
+});
+
+test("adapter public quota errors keep their stable code and redacted native message across the daemon boundary", async () => {
+  const event = requested(
+    { kind: "cli", sessionMode: "main", promptText: "quota", providerBinding: null },
+    { effectiveModel: "m" },
+  );
+  const { client, calls } = fixture({
+    envelopes: [event],
+    runtime: {
+      hostId: "host_a",
+      kind: "cli",
+      provider: "codex",
+      model: "m",
+      revision: "rev_a",
+      runtimeCapabilities: { models: ["m"] },
+    },
+    executor: async () => {
+      throw new AdapterError(
+        "quota_exhausted",
+        "Codex: You've hit your usage limit. Try again at 5:06 PM.",
+      );
+    },
+  });
+  await client.start();
+  await client.wait();
+  await settle();
+
+  const failed = calls.find((call) => call.method === "PATCH" && call.body?.status === "failed");
+  assert.deepEqual(failed.body.error, {
+    code: "quota_exhausted",
+    message: "Codex: You've hit your usage limit. Try again at 5:06 PM.",
+  });
 });
 
 test("a Run model outside the daemon inventory never reaches the executor", async () => {

@@ -81,6 +81,21 @@ if (model === "fake-provider-error") {
   process.stderr.write("provider endpoint secret detail\\n");
   process.exit(2);
 }
+if (model === "fake-quota-error") {
+  process.stdout.write(JSON.stringify({
+    type: "error",
+    error: {
+      code: "insufficient_quota",
+      message: "You've hit your usage limit. Try again at 5:06 PM. token=SECRET",
+    }
+  }) + "\\n");
+  process.stderr.write("details at https://example.invalid/private?token=SECRET\\n");
+  process.exit(2);
+}
+if (model === "fake-rate-error") {
+  process.stderr.write("HTTP 429: too many requests; retry after 12 seconds; Bearer SECRET\\n");
+  process.exit(2);
+}
 if (resumed && threadId === "stale-thread") {
   process.stderr.write("Error: thread/resume: thread/resume failed: no rollout found for thread id stale-thread (code -32600)\\n");
   process.exit(1);

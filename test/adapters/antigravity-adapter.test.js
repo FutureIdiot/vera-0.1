@@ -139,7 +139,7 @@ test("invalid binding and silent provider conversation replacement rotate before
   assert.equal(calls.at(-1).prompt, "ROTATED missing");
 });
 
-test("fragmented JSONL and result fallback work while provider errors remain redacted", async (t) => {
+test("fragmented JSONL and result fallback work while structured provider errors stay concrete", async (t) => {
   const fake = await createFakeAntigravity(t);
   const instance = adapter(fake.binary);
   t.after(() => instance.shutdown());
@@ -151,12 +151,33 @@ test("fragmented JSONL and result fallback work while provider errors remain red
   const failed = context(fake.binary, { runtime: runtime(fake.binary, "fake-provider-error") });
   await assert.rejects(() => instance.run(failed.ctx), (error) =>
     error.code === "provider_error" &&
-    !error.message.includes("google") &&
-    !error.message.includes("http"));
+    error.message === "Antigravity: verify at https://accounts.google.com/secret-link");
   const missing = context(fake.binary, { runtime: runtime(fake.binary, "fake-no-result") });
   await assert.rejects(() => instance.run(missing.ctx), (error) => error.code === "provider_error");
   const wrongCwd = context(fake.binary, { runtime: runtime(fake.binary, "fake-wrong-cwd") });
   await assert.rejects(() => instance.run(wrongCwd.ctx), (error) => error.code === "provider_error");
+});
+
+test("Antigravity preserves actionable native quota and rate-limit errors while redacting credentials", async (t) => {
+  const fake = await createFakeAntigravity(t);
+  const instance = adapter(fake.binary);
+  t.after(() => instance.shutdown());
+  const quota = context(fake.binary, { runtime: runtime(fake.binary, "fake-quota-error") });
+  await assert.rejects(
+    () => instance.run(quota.ctx),
+    (error) => error.code === "quota_exhausted" &&
+      error.message ===
+        "Antigravity: credits exhausted for user@example.com; resets in 2h",
+  );
+  const rate = context(fake.binary, { runtime: runtime(fake.binary, "fake-rate-error") });
+  await assert.rejects(
+    () => instance.run(rate.ctx),
+    (error) => error.code === "rate_limited" &&
+      error.message ===
+        "Antigravity: Too many requests. Retry after 30 seconds. " +
+          "https://example.invalid/private?token=[redacted]" &&
+      !/SECRET/iu.test(error.message),
+  );
 });
 
 test("headless permission soft-deny resumes once without creating an Approval or rotating", async (t) => {

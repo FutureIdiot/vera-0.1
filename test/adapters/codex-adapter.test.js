@@ -198,6 +198,31 @@ test("invalid binding and explicit missing thread rotate, while ordinary provide
   assert.deepEqual(ordinaryRotateReasons, []);
 });
 
+test("Codex preserves actionable native quota and rate-limit errors while redacting secrets", async (t) => {
+  const fake = await createFakeCodex(t);
+  const adapter = createCodexAdapter({ config: { binary: fake.binary } });
+  const quota = makeCtx(fake.binary, {
+    runtime: account(fake.binary, { model: "fake-quota-error" }),
+  });
+  await assert.rejects(
+    () => adapter.run(quota.ctx),
+    (error) => error.code === "quota_exhausted" &&
+      error.message ===
+        "Codex: You've hit your usage limit. Try again at 5:06 PM. token=[redacted]" &&
+      !/SECRET|example/iu.test(error.message),
+  );
+  const rate = makeCtx(fake.binary, {
+    runtime: account(fake.binary, { model: "fake-rate-error" }),
+  });
+  await assert.rejects(
+    () => adapter.run(rate.ctx),
+    (error) => error.code === "rate_limited" &&
+      error.message ===
+        "Codex: HTTP 429: too many requests; retry after 12 seconds; Bearer [redacted]" &&
+      !/SECRET/iu.test(error.message),
+  );
+});
+
 test("Codex discovers model-specific usable context windows from the installed CLI catalog", async (t) => {
   const fake = await createFakeCodex(t);
   const adapter = createCodexAdapter({ config: { binary: fake.binary } });

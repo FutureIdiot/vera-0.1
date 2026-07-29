@@ -72,11 +72,15 @@ export async function run(ctx) {
     }
   });
 
-  await check("p5-c1.3 exact /new and /compact are rejected by the Message endpoint", async () => {
+  await check("p5-c1.3 exact /new, /compact and /resume are rejected by the Message endpoint", async () => {
     const before = await httpRequest("GET", `/api/spaces/${space.id}/timeline?limit=500`);
     assertEqual(before.status, 200);
     const attempts = [];
-    for (const command of ["/new", "  /new \n", "/compact", "\t/compact\n"]) {
+    for (const command of [
+      "/new", "  /new \n",
+      "/compact", "\t/compact\n",
+      "/resume", " \t/resume\n",
+    ]) {
       const rejected = await httpRequest("POST", `/api/spaces/${space.id}/messages`, {
         author: { type: "user" },
         target: { type: "broadcast" },

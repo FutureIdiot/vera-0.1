@@ -67,6 +67,28 @@ if (model === "fake-provider-error") {
   } });
   return;
 }
+if (model === "fake-quota-error") {
+  write({ event: "result", result: {
+    conversation_id: conversation, status: "ERROR", response: "",
+    error: {
+      code: "quota_exhausted",
+      message: "credits exhausted for user@example.com; resets in 2h",
+    },
+    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+  } });
+  return;
+}
+if (model === "fake-rate-error") {
+  write({ event: "result", result: {
+    conversation_id: conversation, status: "ERROR", response: "",
+    error: {
+      type: "rate_limit_exceeded",
+      message: "Too many requests. Retry after 30 seconds. https://example.invalid/private?token=SECRET",
+    },
+    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+  } });
+  return;
+}
 const writePermissionDenied = (error = {
   name: "PermissionUserDeniedError",
   message: "User denied permission to run command: printf VERA_PERMISSION_PROBE",

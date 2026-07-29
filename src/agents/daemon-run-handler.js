@@ -2,9 +2,11 @@
 // reconnect policy remain owned by daemon-client.
 
 import { inferToolActivityKind, normalizeActivityKind } from "../core/activity-events.js";
+import { AdapterError } from "../core/errors.js";
 
 const RUN_ERROR_CODES = new Set([
-  "cancelled", "timed_out", "unavailable", "provider_error", "internal", "gateway_unreachable",
+  "cancelled", "timed_out", "unavailable", "quota_exhausted", "rate_limited",
+  "provider_error", "internal", "gateway_unreachable",
 ]);
 
 class DaemonRunError extends Error {
@@ -86,7 +88,9 @@ function validateRunEvent(data, current) {
 
 function safeRunError(error) {
   const code = RUN_ERROR_CODES.has(error?.code) ? error.code : "internal";
-  return { code, message: code === "gateway_unreachable" ? "gateway unreachable" : "daemon execution failed" };
+  if (code === "gateway_unreachable") return { code, message: "gateway unreachable" };
+  if (error instanceof AdapterError) return { code, message: error.message };
+  return { code, message: "daemon execution failed" };
 }
 
 export function activityAgentStatus(activity = {}) {

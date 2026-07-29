@@ -54,7 +54,7 @@ export function createBubbleStream({
     return true;
   }
 
-  function close(finalText) {
+  function close(finalText, status = "completed") {
     if (!current) return;
     const authoritative = store.find("messages", current.id);
     if (!acceptsOutput() || authoritative?.status !== "streaming") {
@@ -63,10 +63,10 @@ export function createBubbleStream({
     }
     const updated = store.update("messages", current.id, {
       content: finalText,
-      status: "completed",
+      status,
     });
     hub.publish("message.completed", { message: stripInternal(updated) });
-    onMessageCompleted?.(updated, { agentRouting });
+    if (status === "completed") onMessageCompleted?.(updated, { agentRouting });
     current = null;
   }
 
@@ -112,9 +112,30 @@ export function createBubbleStream({
     }
   }
 
+  function fail(fallbackContent) {
+    if (!acceptsOutput()) {
+      current = null;
+      return;
+    }
+    if (replyMessageIds.length === 0 && !splitter.peek() && fallbackContent) {
+      delta(fallbackContent);
+    }
+    const rest = splitter.flush();
+    for (const text of rest) {
+      if (!current) open();
+      close(text, "failed");
+    }
+    const messageId = replyMessageIds.at(-1);
+    const message = messageId ? store.find("messages", messageId) : null;
+    if (!message || message.status === "failed") return;
+    const updated = store.update("messages", message.id, { status: "failed" });
+    hub.publish("message.completed", { message: stripInternal(updated) });
+  }
+
   return {
     delta,
     finish,
+    fail,
     get replyMessageIds() {
       return replyMessageIds;
     },
