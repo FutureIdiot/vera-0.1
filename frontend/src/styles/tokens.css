@@ -104,6 +104,7 @@
   --vera-composer-height: 48px;
   --vera-composer-control-size: 36px;
   --vera-composer-input-max-height: 160px;
+  --vera-session-ring-track-opacity: 0.24;
   --vera-activity-detail-max-height: 192px;
   --vera-activity-icon-size: 16px;
   --vera-composer-text-optical-offset: 2px;
@@ -113,6 +114,13 @@
   --vera-touch-target: 44px;
   --vera-icon-size: 20px;
   --vera-action-size: 30px;
+  --vera-settings-group-radius: calc(var(--vera-control-radius) + var(--vera-space-xs));
+  --vera-switch-width: 44px;
+  --vera-switch-height: 24px;
+  --vera-switch-padding: 2px;
+  --vera-switch-thumb-size: calc(var(--vera-switch-height) - (var(--vera-switch-padding) * 2));
+  --vera-switch-thumb-travel: calc(var(--vera-switch-width) - var(--vera-switch-height));
+  --vera-switch-disabled-opacity: 0.5;
   --vera-avatar-size: 36px;
   --vera-header-avatar-size: 28px;
   --vera-contact-rail-width: 68px;

@@ -33,7 +33,12 @@
 .vera-status-card { min-width: 0; }
 .vera-management-section h2,
 .vera-status-card h2 { font-size: var(--vera-font-size-base); margin: 0 0 var(--vera-space-sm); }
-.vera-settings-list { border-block: var(--vera-border-width) solid var(--vera-color-border); }
+.vera-settings-list {
+  background: var(--vera-color-surface-soft);
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  border-radius: var(--vera-settings-group-radius);
+  overflow: hidden;
+}
 .vera-settings-row,
 .vera-account-row { align-items: center; color: inherit; display: flex; gap: var(--vera-space-md); justify-content: space-between; min-height: var(--vera-touch-target); padding: var(--vera-space-md) var(--vera-space-sm); text-decoration: none; }
 .vera-settings-row + .vera-settings-row,
@@ -43,6 +48,32 @@
 .vera-settings-row small,
 .vera-account-row small,
 .vera-field small { color: var(--vera-color-muted-text); }
+.vera-settings-list > .vera-management-notice { padding: var(--vera-space-md); }
+
+.vera-switch {
+  background: var(--vera-color-surface-strong);
+  border: 0;
+  border-radius: var(--vera-switch-height);
+  flex: 0 0 auto;
+  height: var(--vera-switch-height);
+  padding: var(--vera-switch-padding);
+  transition: background var(--vera-transition-fast);
+  width: var(--vera-switch-width);
+}
+.vera-switch[aria-checked="true"] { background: var(--vera-color-accent); }
+.vera-switch:disabled { opacity: var(--vera-switch-disabled-opacity); }
+.vera-switch__thumb {
+  background: var(--vera-color-accent-text);
+  border-radius: 50%;
+  display: block;
+  height: var(--vera-switch-thumb-size);
+  transform: translateX(0);
+  transition: transform var(--vera-transition-fast);
+  width: var(--vera-switch-thumb-size);
+}
+.vera-switch[aria-checked="true"] .vera-switch__thumb {
+  transform: translateX(var(--vera-switch-thumb-travel));
+}
 
 .vera-management-form fieldset,
 .vera-management-section,

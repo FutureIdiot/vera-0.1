@@ -66,6 +66,7 @@ export function mountSpaceView({
   let activeForgeDialog = null;
   let forgePollTimer = null;
   let currentForgeContext = null;
+  let sessionContextRefreshGeneration = 0;
   let observation = null;
   let latestSeq = 0;
 
@@ -450,6 +451,21 @@ export function mountSpaceView({
     shell?.setSpace(space);
   }
 
+  async function refreshSessionContext() {
+    const spaceId = space?.id;
+    const spaceSessionId = space?.activeSpaceSessionId;
+    if (!spaceId || !spaceSessionId) return;
+    const generation = ++sessionContextRefreshGeneration;
+    const timeline = await spaces.fetchTimeline(spaceId, { limit: 1 });
+    if (!mounted || generation !== sessionContextRefreshGeneration ||
+        space?.id !== spaceId || space?.activeSpaceSessionId !== spaceSessionId ||
+        timeline.spaceSession?.id !== spaceSessionId) return;
+    composer?.setSessionContext({
+      spaceSession: timeline.spaceSession,
+      agentSessions: timeline.agentSessions,
+    });
+  }
+
   async function refreshCompactionStatus() {
     if (!mounted || !space || !activeCompactionJobId) return;
     const expectedJobId = activeCompactionJobId;
@@ -592,9 +608,16 @@ export function mountSpaceView({
       return;
     }
     if (envelope.type === "agent-session.compaction.updated" &&
-        envelope.data?.spaceId === space?.id && envelope.data?.jobId === activeCompactionJobId) {
-      void refreshCompactionStatus();
+        envelope.data?.spaceId === space?.id &&
+        envelope.data?.spaceSessionId === space?.activeSpaceSessionId) {
+      void refreshSessionContext().catch(() => {});
+      if (envelope.data?.jobId === activeCompactionJobId) void refreshCompactionStatus();
       return;
+    }
+    if (envelope.type === "run.ended" &&
+        envelope.data?.run?.spaceId === space?.id &&
+        envelope.data?.run?.spaceSessionId === space?.activeSpaceSessionId) {
+      void refreshSessionContext().catch(() => {});
     }
     if (envelope.type === "context-forge.updated" &&
         envelope.data?.spaceId === space?.id &&

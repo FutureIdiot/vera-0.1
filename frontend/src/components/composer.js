@@ -1,7 +1,11 @@
 // 底部输入框：发消息（POST /api/spaces/:id/messages，广播）。
 // 只负责收集输入、调用 onSend，不知道 gateway 的 URL 形状。
 
-import { createVectorIcon, setIconButtonContent } from "./vector-icon.js";
+import {
+  createVectorIcon,
+  setIconButtonContent,
+  setSessionIconUsage,
+} from "./vector-icon.js";
 
 export const DEFAULT_COMMANDS = Object.freeze([
   { command: "/new", description: "开始新的 SpaceSession", available: true },
@@ -10,8 +14,15 @@ export const DEFAULT_COMMANDS = Object.freeze([
   { command: "/clear", description: "清空本设备当前时间线", available: true },
   { command: "/export", description: "导出当前 Session 的 Markdown", available: true },
   { command: "/forge", description: "提炼当前 Session 并创建新窗口", available: true },
+  { command: "/help", description: "查看命令与输入帮助", available: true },
   { command: "/theme", description: "切换主题", available: false },
-  { command: "/help", description: "查看命令帮助", available: false },
+]);
+
+const COMPOSER_HELP = Object.freeze([
+  { label: "@Account", description: "把消息定向给指定 Account" },
+  { label: "Session", description: "查看 Context 容量并恢复旧 Session" },
+  { label: "+", description: "添加图片或文件" },
+  { label: "■", description: "中止当前正在运行的工作" },
 ]);
 
 function mentionMatchesAt(content, index, targets) {
@@ -115,6 +126,12 @@ export function createComposer({
   attachmentMenu.setAttribute("role", "menu");
   attachmentMenu.setAttribute("aria-label", "添加附件");
 
+  const helpMenu = document.createElement("div");
+  helpMenu.className = "vera-composer__menu vera-composer__help-menu";
+  helpMenu.hidden = true;
+  helpMenu.setAttribute("role", "dialog");
+  helpMenu.setAttribute("aria-label", "命令与输入帮助");
+
   const bar = document.createElement("div");
   bar.className = "vera-composer__bar";
   const attachmentControls = document.createElement("div");
@@ -147,7 +164,17 @@ export function createComposer({
   error.className = "vera-composer__error";
   error.setAttribute("role", "alert");
   error.hidden = true;
-  form.append(commandMenu, mentionMenu, stopMenu, bar, sessionMenu, attachmentMenu, attachmentList, error);
+  form.append(
+    commandMenu,
+    mentionMenu,
+    stopMenu,
+    bar,
+    sessionMenu,
+    attachmentMenu,
+    helpMenu,
+    attachmentList,
+    error,
+  );
 
   function renderAttachments() {
     attachmentList.replaceChildren();
@@ -193,6 +220,7 @@ export function createComposer({
     stopMenu.hidden = true;
     sessionMenu.hidden = true;
     attachmentMenu.hidden = true;
+    helpMenu.hidden = true;
     activeMenu = null;
     activeIndex = 0;
   }
@@ -375,6 +403,52 @@ export function createComposer({
     attachmentMenu.append(image, file);
   }
 
+  function helpRow(labelText, descriptionText, { command = false } = {}) {
+    const row = document.createElement("div");
+    row.className = "vera-composer__help-row";
+    const label = document.createElement(command ? "code" : "strong");
+    label.textContent = labelText;
+    const description = document.createElement("span");
+    description.textContent = descriptionText;
+    row.append(label, description);
+    return row;
+  }
+
+  function openHelp() {
+    closeMenus();
+    helpMenu.replaceChildren();
+    const heading = document.createElement("div");
+    heading.className = "vera-composer__help-heading";
+    const title = document.createElement("strong");
+    title.textContent = "Help";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "vera-text-button";
+    close.textContent = "关闭";
+    close.addEventListener("click", closeMenus);
+    heading.append(title, close);
+
+    const commandHeading = document.createElement("small");
+    commandHeading.className = "vera-composer__help-section-title";
+    commandHeading.textContent = "可用命令";
+    const commandRows = document.createElement("div");
+    commandRows.className = "vera-composer__help-rows";
+    for (const item of commands.filter((candidate) => candidate.available)) {
+      commandRows.appendChild(helpRow(item.command, item.description, { command: true }));
+    }
+
+    const inputHeading = document.createElement("small");
+    inputHeading.className = "vera-composer__help-section-title";
+    inputHeading.textContent = "输入操作";
+    const inputRows = document.createElement("div");
+    inputRows.className = "vera-composer__help-rows";
+    for (const item of COMPOSER_HELP) {
+      inputRows.appendChild(helpRow(item.label, item.description));
+    }
+    helpMenu.append(heading, commandHeading, commandRows, inputHeading, inputRows);
+    helpMenu.hidden = false;
+  }
+
   function setActiveItem(menu, index) {
     const items = [...menu.querySelectorAll(".vera-composer__menu-item:not(:disabled)")];
     if (items.length === 0) return;
@@ -517,6 +591,11 @@ export function createComposer({
   });
   input.addEventListener("click", updateSuggestions);
   input.addEventListener("keydown", (event) => {
+    if (!helpMenu.hidden && event.key === "Escape") {
+      event.preventDefault();
+      closeMenus();
+      return;
+    }
     if (activeMenu && !activeMenu.hidden) {
       const selectable = [...activeMenu.querySelectorAll(".vera-composer__menu-item:not(:disabled)")];
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -550,6 +629,13 @@ export function createComposer({
       resizeInput();
       updateSendState();
       openSessionHistory();
+      return;
+    }
+    if (content === "/help") {
+      input.value = "";
+      resizeInput();
+      updateSendState();
+      openHelp();
       return;
     }
     submitting = true;
@@ -615,6 +701,7 @@ export function createComposer({
       })
       .filter(Number.isFinite);
     const peak = ratios.length > 0 ? Math.max(...ratios) : null;
+    setSessionIconUsage(session.children[0], peak);
     session.title = peak === null
       ? "查看 Session"
       : `查看 Session · ${Math.round(Math.max(0, peak) * 100)}%`;

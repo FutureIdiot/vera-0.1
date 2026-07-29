@@ -732,7 +732,7 @@
   border: var(--vera-border-width) solid var(--vera-color-border);
   border-radius: var(--vera-control-radius);
   bottom: calc(100% + var(--vera-space-xs));
-  box-shadow: var(--vera-shadow-lg);
+  box-shadow: none;
   left: var(--vera-space-md);
   max-height: calc(var(--vera-touch-target) * 7);
   overflow-y: auto;
@@ -817,6 +817,68 @@
   );
 }
 
+.vera-composer__help-menu {
+  box-shadow: none;
+  left: var(--vera-space-md);
+  right: auto;
+  width: min(
+    calc(100% - var(--vera-space-md) * 2),
+    calc(var(--vera-touch-target) * 9)
+  );
+}
+
+.vera-composer__help-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-height: var(--vera-touch-target);
+  padding-left: var(--vera-space-md);
+}
+
+.vera-composer__help-heading .vera-text-button {
+  color: var(--vera-color-muted-text);
+}
+
+.vera-composer__help-section-title {
+  color: var(--vera-color-muted-text);
+  display: block;
+  font-size: var(--vera-font-size-tiny);
+  font-weight: var(--vera-font-weight-semibold);
+  padding: var(--vera-space-sm) var(--vera-space-md);
+}
+
+.vera-composer__help-rows {
+  border-block:
+    var(--vera-border-width) solid
+    color-mix(in srgb, var(--vera-color-border), transparent 45%);
+}
+
+.vera-composer__help-row {
+  align-items: baseline;
+  display: grid;
+  gap: var(--vera-space-sm);
+  grid-template-columns: minmax(calc(var(--vera-touch-target) * 2), auto) minmax(0, 1fr);
+  min-height: var(--vera-touch-target);
+  padding: var(--vera-space-sm) var(--vera-space-md);
+}
+
+.vera-composer__help-row + .vera-composer__help-row {
+  border-top:
+    var(--vera-border-width) solid
+    color-mix(in srgb, var(--vera-color-border), transparent 45%);
+}
+
+.vera-composer__help-row :is(code, strong) {
+  color: var(--vera-color-text);
+  font: inherit;
+  font-weight: var(--vera-font-weight-semibold);
+}
+
+.vera-composer__help-row > span {
+  color: var(--vera-color-muted-text);
+  font-size: var(--vera-font-size-small);
+}
+
 .vera-composer__session-heading {
   display: grid;
   gap: var(--vera-space-2xs);
@@ -863,8 +925,25 @@
   padding: var(--vera-space-md);
 }
 
-.vera-composer__session-button .vera-vector-icon {
+.vera-composer__session-button .vera-session-ring__track {
+  opacity: var(--vera-session-ring-track-opacity);
+}
+
+.vera-composer__session-button .vera-session-ring__remaining {
+  opacity: 0;
   stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    opacity var(--vera-transition-fast),
+    stroke-dashoffset var(--vera-transition-base);
+}
+
+.vera-composer__session-button
+  .vera-vector-icon[data-context-available="true"]
+  .vera-session-ring__remaining {
+  opacity: 1;
 }
 
 .vera-forge-dialog {
@@ -969,7 +1048,8 @@
   .vera-bubble__surface,
   .vera-bubble__action,
   .vera-composer__tool,
-  .vera-composer__send {
+  .vera-composer__send,
+  .vera-session-ring__remaining {
     transition: none;
   }
 }

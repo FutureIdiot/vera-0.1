@@ -1,6 +1,6 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createAgentsClient } from "../api/agents-client.js";
-import { createNotice, setBusy } from "../components/management-ui.js";
+import { createNotice } from "../components/management-ui.js";
 
 const SKILL_PROJECTION = {
   kind: "skill",
@@ -95,41 +95,51 @@ export async function mountCapabilityDirectoryView({ root, platform, agentId, sh
     description.textContent = item.summary ?? "";
     copy.append(label, description);
 
-    const toggleWrap = document.createElement("span");
-    const toggle = document.createElement("input");
-    toggle.type = "checkbox";
-    toggle.checked = Boolean(item.enabled);
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "vera-switch";
+    toggle.setAttribute("role", "switch");
     toggle.disabled = !item.canToggle;
-    toggle.title = item.toggleUnavailableReason ?? (item.enabled ? "已启用" : "已停用");
-    toggle.setAttribute("aria-label", `${item.name} ${item.enabled ? "已启用" : "已停用"}`);
-    toggleWrap.appendChild(toggle);
+
+    const thumb = document.createElement("span");
+    thumb.className = "vera-switch__thumb";
+    thumb.setAttribute("aria-hidden", "true");
+    toggle.appendChild(thumb);
+
+    function syncToggle() {
+      const enabled = Boolean(item.enabled);
+      toggle.setAttribute("aria-checked", String(enabled));
+      toggle.setAttribute("aria-label", `${item.name}，${enabled ? "已启用" : "已停用"}`);
+      toggle.title = item.toggleUnavailableReason ?? (enabled ? "已启用" : "已停用");
+    }
+    syncToggle();
 
     if (item.canToggle) {
-      toggle.addEventListener("change", async () => {
-        setBusy(toggle, true);
+      toggle.addEventListener("click", async () => {
+        const requestedEnabled = !item.enabled;
+        toggle.disabled = true;
+        toggle.setAttribute("aria-busy", "true");
+        feedback.hidden = true;
         try {
           const updated = await agentsClient.updateUnitBinding(agentId, item.id, {
-            enabled: toggle.checked,
+            enabled: requestedEnabled,
             ifMatch: item.version,
           });
-          // Update local version so next toggle works
           item.version = updated.binding.version;
           item.enabled = updated.binding.enabled;
-          feedback.textContent = `${item.name} 已${updated.binding.enabled ? "启用" : "停用"}`;
-          feedback.dataset.tone = "success";
-          feedback.hidden = false;
         } catch (err) {
-          toggle.checked = !toggle.checked; // revert
           feedback.textContent = err.message;
           feedback.dataset.tone = "danger";
           feedback.hidden = false;
         } finally {
-          setBusy(toggle, false);
+          syncToggle();
+          toggle.removeAttribute("aria-busy");
+          toggle.disabled = !item.canToggle;
         }
       });
     }
 
-    row.append(copy, toggleWrap);
+    row.append(copy, toggle);
     return row;
   }
 

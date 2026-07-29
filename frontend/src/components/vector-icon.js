@@ -109,7 +109,8 @@ const ICONS = {
     ["path", { d: "M4 4l17 8-17 8 3-8zM7 12h14" }],
   ],
   session: [
-    ["path", { d: "M12 4a8 8 0 11-7.4 4.9" }],
+    ["circle", { cx: "12", cy: "12", r: "8", class: "vera-session-ring__track" }],
+    ["circle", { cx: "12", cy: "12", r: "8", class: "vera-session-ring__remaining" }],
   ],
   settings: [
     ["circle", { cx: "12", cy: "12", r: "3" }],
@@ -138,6 +139,7 @@ const ICONS = {
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+const SESSION_RING_CIRCUMFERENCE = 16 * Math.PI;
 
 export function createVectorIcon(name) {
   const definition = ICONS[name];
@@ -154,6 +156,17 @@ export function createVectorIcon(name) {
     svg.appendChild(child);
   }
   return svg;
+}
+
+export function setSessionIconUsage(icon, usageRatio) {
+  if (icon?.dataset?.icon !== "session") return;
+  const remaining = icon.children?.[1];
+  if (!remaining) return;
+  const available = Number.isFinite(usageRatio);
+  const used = available ? Math.min(1, Math.max(0, usageRatio)) : 0;
+  icon.dataset.contextAvailable = available ? "true" : "false";
+  remaining.setAttribute("stroke-dasharray", String(SESSION_RING_CIRCUMFERENCE));
+  remaining.setAttribute("stroke-dashoffset", String(SESSION_RING_CIRCUMFERENCE * used));
 }
 
 export function setIconButtonContent(button, iconName, accessibleText) {

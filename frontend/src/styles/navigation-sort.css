@@ -44,7 +44,7 @@
   background: var(--vera-color-surface);
   border: var(--vera-border-width) solid var(--vera-color-border);
   border-radius: var(--vera-navigator-section-radius);
-  box-shadow: var(--vera-shadow-lg);
+  box-shadow: none;
   display: grid;
   padding: var(--vera-space-xs);
   position: absolute;
