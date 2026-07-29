@@ -808,6 +808,7 @@
 }
 
 .vera-composer__attachment-menu {
+  box-shadow: none;
   left: calc(var(--vera-space-md) + var(--vera-composer-control-size) + var(--vera-space-2xs));
   right: auto;
   width: min(
