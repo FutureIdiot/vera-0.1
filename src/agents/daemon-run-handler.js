@@ -105,6 +105,9 @@ export function createDaemonRunHandler({
     throw new DaemonRunError("invalid_config", "Run handler dependencies are unavailable");
   }
   const execute = typeof executor === "function" ? executor : executor.execute.bind(executor);
+  const executeCatchup = typeof executor?.executeCatchup === "function"
+    ? executor.executeCatchup.bind(executor)
+    : execute;
   const activeRuns = new Map();
   const handledRuns = new Set();
   const approvalWaiters = new Map();
@@ -153,6 +156,64 @@ export function createDaemonRunHandler({
       if (runId !== null && waiter.runId !== runId) continue;
       approvalWaiters.delete(approvalId);
       waiter.resolve("deny");
+    }
+  }
+
+  async function executeCatchupTask(data, task, signal) {
+    if (!task || typeof task.id !== "string" || !Array.isArray(task.sourceMessageIds) ||
+        !task.input || task.input.sessionMode !== "isolated" ||
+        !["cli", "api"].includes(task.input.kind)) {
+      return;
+    }
+    const fragments = [];
+    const collect = (value) => {
+      const content = typeof value === "string" ? value : value?.content;
+      if (typeof content === "string" && content) fragments.push(content);
+      return Promise.resolve(null);
+    };
+    try {
+      const result = await executeCatchup({
+        ...data,
+        taskKind: "catchup",
+        run: {
+          ...data.run,
+          role: "catchup",
+          agentSessionId: null,
+          contextGeneration: null,
+        },
+        input: task.input,
+        workspace: null,
+        signal,
+        onDelta: collect,
+        onMessage: collect,
+        onActivity: () => Promise.resolve(null),
+        requestApproval: () => Promise.resolve("deny"),
+        persistProviderBinding: () => {
+          throw new DaemonRunError("invalid_event", "catch-up cannot persist a provider binding");
+        },
+        rotateProviderBinding: () => {
+          throw new DaemonRunError("invalid_event", "catch-up cannot rotate a provider binding");
+        },
+      });
+      const summary = typeof result?.content === "string" && result.content.trim()
+        ? result.content.trim()
+        : fragments.join("").trim();
+      if (!summary) throw new DaemonRunError("provider_error", "catch-up returned no summary");
+      await request(`/api/agent/run-catchups/${encodeURIComponent(task.id)}/result`, {
+        method: "PUT",
+        body: { status: "succeeded", summary },
+      });
+    } catch (error) {
+      await request(`/api/agent/run-catchups/${encodeURIComponent(task.id)}/result`, {
+        method: "PUT",
+        body: {
+          status: "failed",
+          error: {
+            code: error?.code === "unavailable" ? "unavailable" : "provider_error",
+            message: "isolated catch-up summary failed",
+          },
+        },
+      }).catch(() => {});
     }
   }
 
@@ -316,13 +377,14 @@ export function createDaemonRunHandler({
         });
       }
       currentAgentStatus = "idle";
-      await report(current.id, "", "PATCH", {
+      const terminal = await report(current.id, "", "PATCH", {
         status: "completed",
         ...(input.kind === "cli" && input.sessionMode === "main" && result?.usage
           ? { usage: result.usage }
           : {}),
         agentState: agentState("idle"),
       });
+      await executeCatchupTask(data, terminal?.catchupTask, controller.signal);
     } catch (error) {
       await reportTail;
       await stateTail;

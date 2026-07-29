@@ -45,6 +45,7 @@ function createIconButton(icon, label, className) {
 
 export function createComposer({
   onSend,
+  onStop,
   onPickAttachment,
   onVoice,
   targets = [],
@@ -53,6 +54,10 @@ export function createComposer({
   let currentTargets = [...targets];
   let attachments = [];
   let disabled = false;
+  let submitting = false;
+  let stopping = false;
+  let foregroundRuns = [];
+  let isGroupChat = false;
   let activeMenu = null;
   let activeIndex = 0;
 
@@ -68,6 +73,12 @@ export function createComposer({
   mentionMenu.className = "vera-composer__menu";
   mentionMenu.hidden = true;
   mentionMenu.setAttribute("role", "listbox");
+
+  const stopMenu = document.createElement("div");
+  stopMenu.className = "vera-composer__menu vera-composer__stop-menu";
+  stopMenu.hidden = true;
+  stopMenu.setAttribute("role", "listbox");
+  stopMenu.setAttribute("aria-label", "选择要中止的 Account");
 
   const bar = document.createElement("div");
   bar.className = "vera-composer__bar";
@@ -101,7 +112,7 @@ export function createComposer({
   error.className = "vera-composer__error";
   error.setAttribute("role", "alert");
   error.hidden = true;
-  form.append(commandMenu, mentionMenu, bar, attachmentList, error);
+  form.append(commandMenu, mentionMenu, stopMenu, bar, attachmentList, error);
 
   function renderAttachments() {
     attachmentList.replaceChildren();
@@ -126,7 +137,14 @@ export function createComposer({
   }
 
   function updateSendState() {
-    send.disabled = disabled || (!input.value.trim() && attachments.length === 0);
+    const stoppingMode = foregroundRuns.length > 0;
+    send.type = stoppingMode ? "button" : "submit";
+    setIconButtonContent(send, stoppingMode ? "stop" : "send", stoppingMode ? "中止工作" : "发送消息");
+    send.setAttribute("aria-label", stoppingMode ? "中止工作" : "发送消息");
+    send.title = stoppingMode ? "中止工作" : "发送消息";
+    send.disabled = stoppingMode
+      ? disabled || stopping || typeof onStop !== "function"
+      : disabled || submitting || (!input.value.trim() && attachments.length === 0);
   }
 
   function resizeInput() {
@@ -137,6 +155,7 @@ export function createComposer({
   function closeMenus() {
     commandMenu.hidden = true;
     mentionMenu.hidden = true;
+    stopMenu.hidden = true;
     activeMenu = null;
     activeIndex = 0;
   }
@@ -214,6 +233,44 @@ export function createComposer({
     if (activeMenu) setActiveItem(activeMenu, 0);
   }
 
+  function runName(run) {
+    return run.accountNameSnapshot ?? currentTargets.find((target) => target.id === run.accountId)?.name ?? "Account";
+  }
+
+  async function stopRuns(runs) {
+    const selected = runs.filter(Boolean);
+    if (selected.length === 0 || stopping) return;
+    stopping = true;
+    closeMenus();
+    updateSendState();
+    error.hidden = true;
+    try {
+      await Promise.all(selected.map((run) => onStop?.(run.id)));
+    } catch (err) {
+      error.textContent = err.message || "中止失败，请重试";
+      error.hidden = false;
+    } finally {
+      stopping = false;
+      updateSendState();
+    }
+  }
+
+  function renderStopMenu() {
+    stopMenu.replaceChildren();
+    for (const run of foregroundRuns) {
+      const detail = run.effectiveModel ? `${run.effectiveModel} · 工作中` : "工作中";
+      stopMenu.appendChild(menuButton(runName(run), detail, {
+        onSelect: () => void stopRuns([run]),
+      }));
+    }
+    commandMenu.hidden = true;
+    mentionMenu.hidden = true;
+    stopMenu.hidden = foregroundRuns.length === 0;
+    activeMenu = stopMenu.hidden ? null : stopMenu;
+    activeIndex = 0;
+    if (activeMenu) setActiveItem(activeMenu, 0);
+  }
+
   function updateSuggestions() {
     const cursor = input.selectionStart ?? input.value.length;
     const before = input.value.slice(0, cursor);
@@ -248,6 +305,11 @@ export function createComposer({
   image.addEventListener("click", () => void pick("image"));
   attach.addEventListener("click", () => void pick("file"));
   voice.addEventListener("click", () => void onVoice?.());
+  send.addEventListener("click", () => {
+    if (foregroundRuns.length === 0) return;
+    if (isGroupChat) renderStopMenu();
+    else void stopRuns(foregroundRuns);
+  });
 
   input.addEventListener("input", () => {
     resizeInput();
@@ -283,8 +345,9 @@ export function createComposer({
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const content = input.value.trim();
-    if ((!content && attachments.length === 0) || disabled) return;
-    send.disabled = true;
+    if (foregroundRuns.length > 0 || (!content && attachments.length === 0) || disabled || submitting) return;
+    submitting = true;
+    updateSendState();
     error.hidden = true;
     closeMenus();
     Promise.resolve(onSend?.(content, resolveMessageTarget(content, currentTargets), attachments.map((file) => file.id)))
@@ -300,6 +363,7 @@ export function createComposer({
         error.hidden = false;
       })
       .finally(() => {
+        submitting = false;
         updateSendState();
         input.focus();
       });
@@ -319,5 +383,14 @@ export function createComposer({
     updateSendState();
   }
 
-  return { element: form, input, setTargets, setDisabled };
+  function setForegroundRuns(runs = [], options = {}) {
+    foregroundRuns = runs
+      .filter((run) => run?.role === "main" && ["pending", "running"].includes(run.status) && !run.backgroundedAt)
+      .map((run) => structuredClone(run));
+    isGroupChat = Boolean(options.isGroupChat);
+    if (foregroundRuns.length === 0 || !isGroupChat) stopMenu.hidden = true;
+    updateSendState();
+  }
+
+  return { element: form, input, setTargets, setDisabled, setForegroundRuns };
 }

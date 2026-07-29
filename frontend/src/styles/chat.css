@@ -186,11 +186,137 @@
   border-color: var(--vera-color-bubble-streaming-border);
 }
 
+.vera-bubble--entering {
+  animation:
+    vera-bubble-enter
+    var(--vera-bubble-enter-duration)
+    var(--vera-bubble-enter-easing)
+    both;
+}
+
+@keyframes vera-bubble-enter {
+  from {
+    opacity: var(--vera-bubble-enter-opacity);
+    transform: translateY(var(--vera-bubble-enter-distance));
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .vera-bubble__author {
   color: var(--vera-color-bubble-author-text);
   font-size: var(--vera-font-size-small);
   font-weight: var(--vera-font-weight-regular);
   margin: 0 0 var(--vera-space-2xs) var(--vera-space-xs);
+}
+
+.vera-bubble__work-status {
+  color: var(--vera-color-accent);
+  font-size: var(--vera-font-size-small);
+  margin: 0 0 var(--vera-space-2xs) var(--vera-space-xs);
+}
+
+.vera-run-progress__header {
+  align-items: center;
+  color: var(--vera-color-bubble-author-text);
+  display: flex;
+  font-size: var(--vera-font-size-small);
+  gap: var(--vera-space-xs);
+  margin: 0 0 var(--vera-space-2xs) var(--vera-space-xs);
+  min-height: var(--vera-action-size);
+}
+
+.vera-run-progress__identity {
+  white-space: nowrap;
+}
+
+.vera-run-progress__status {
+  color: var(--vera-color-accent);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vera-run-progress__background {
+  background: transparent;
+  border: 0;
+  border-radius: var(--vera-control-radius);
+  color: var(--vera-color-accent);
+  font-size: var(--vera-font-size-tiny);
+  margin-left: auto;
+  padding: var(--vera-space-2xs) var(--vera-space-xs);
+  transition: background var(--vera-transition-fast), color var(--vera-transition-fast);
+  white-space: nowrap;
+}
+
+.vera-run-progress__background:hover:not(:disabled) {
+  background: var(--vera-color-surface-strong);
+}
+
+.vera-run-progress__background:disabled {
+  opacity: var(--vera-run-progress-disabled-opacity);
+}
+
+.vera-run-progress__surface {
+  min-width: calc(
+    (var(--vera-run-progress-dot-size) * 3)
+    + (var(--vera-run-progress-dot-gap) * 2)
+  );
+}
+
+.vera-run-progress__dots {
+  align-items: center;
+  color: var(--vera-color-accent);
+  display: inline-flex;
+  gap: var(--vera-run-progress-dot-gap);
+  min-height: var(--vera-run-progress-dot-size);
+}
+
+.vera-run-progress__dot {
+  animation: vera-run-progress-dot var(--vera-run-progress-dot-cycle) ease-in-out infinite;
+  background: currentColor;
+  border-radius: 50%;
+  display: block;
+  height: var(--vera-run-progress-dot-size);
+  opacity: var(--vera-run-progress-dot-opacity-rest);
+  width: var(--vera-run-progress-dot-size);
+}
+
+.vera-run-progress__dot:nth-child(2) {
+  animation-delay: var(--vera-run-progress-dot-delay);
+}
+
+.vera-run-progress__dot:nth-child(3) {
+  animation-delay: calc(var(--vera-run-progress-dot-delay) * 2);
+}
+
+@keyframes vera-run-progress-dot {
+  0%,
+  60%,
+  100% {
+    opacity: var(--vera-run-progress-dot-opacity-rest);
+    transform: translateY(0);
+  }
+
+  30% {
+    opacity: var(--vera-run-progress-dot-opacity-active);
+    transform: translateY(var(--vera-run-progress-dot-travel));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vera-run-progress__dot {
+    animation: none;
+    opacity: var(--vera-run-progress-dot-opacity-reduced);
+  }
+
+  .vera-bubble--entering {
+    animation: none;
+  }
 }
 
 .vera-bubble__avatar {
@@ -476,35 +602,6 @@
   background: var(--vera-color-error);
   border-color: var(--vera-color-error);
   color: var(--vera-color-accent-text);
-}
-
-.vera-work-status {
-  align-items: center;
-  align-self: center;
-  background: var(--vera-color-accent-soft);
-  border: var(--vera-border-width) solid color-mix(in srgb, var(--vera-color-accent), transparent 70%);
-  border-radius: var(--vera-control-radius);
-  color: var(--vera-color-muted-text);
-  display: flex;
-  font-size: var(--vera-font-size-small);
-  gap: var(--vera-space-sm);
-  justify-content: space-between;
-  margin: 0 var(--vera-window-margin) var(--vera-space-xs);
-  min-height: var(--vera-touch-target);
-  padding: 0 var(--vera-space-sm) 0 var(--vera-space-md);
-}
-
-.vera-work-status__cancel {
-  align-items: center;
-  background: var(--vera-color-error-soft);
-  border: 0;
-  border-radius: var(--vera-control-radius);
-  color: var(--vera-color-error);
-  display: inline-flex;
-  height: var(--vera-action-size);
-  justify-content: center;
-  padding: 0;
-  width: var(--vera-action-size);
 }
 
 .vera-composer {

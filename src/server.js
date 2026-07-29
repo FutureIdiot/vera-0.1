@@ -57,6 +57,8 @@ import { registerMemoryTaskRoutes } from "./memory/memory-task-routes.js";
 import { createGatewayUpdateControl } from "./core/gateway-updates.js";
 import { registerSystemUpdateRoutes } from "./api/system-update-routes.js";
 import { createObservationService, registerObservationRoutes } from "./spaces/observation.js";
+import { createRunBackgroundService } from "./spaces/run-background.js";
+import { scheduleDeferredMessage } from "./spaces/messages.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
@@ -251,6 +253,7 @@ memoryDigestScheduler.start();
 memoryDreamService.start();
 memoryDreamScheduler.start();
 
+const runBackground = createRunBackgroundService({ store, hub, config });
 const daemonRunLifecycle = createDaemonRunLifecycle({
   store,
   hub,
@@ -260,6 +263,7 @@ const daemonRunLifecycle = createDaemonRunLifecycle({
   memoryRetrieval,
   contextCompaction,
   observation,
+  runBackground,
 });
 daemonRuntime = createDaemonRuntime({
   store,
@@ -281,7 +285,14 @@ const daemonScheduler = createDaemonRunScheduler({
   memoryDigestScheduler,
   contextCompaction,
   observation,
+  runBackground,
 });
+runBackground.setResumeDeferred((record) => scheduleDeferredMessage({
+  store,
+  daemonScheduler,
+  runBackground,
+  record,
+}));
 
 const router = createRouter();
 
@@ -319,6 +330,7 @@ registerMemoryTaskRoutes(router, {
 registerSpaceRoutes(router, {
   store, hub, config, daemonScheduler, daemonRuntime, daemonRunLifecycle,
   memoryDigestScheduler, contextCompaction, memory, files, observation,
+  runBackground, controlService,
 });
 registerObservationRoutes(router, { observation });
 registerFilesRoutes(router, { files, hub });

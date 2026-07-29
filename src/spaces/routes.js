@@ -46,6 +46,7 @@ function stripInternal({ _seq, ...rest }) {
 export function registerSpaceRoutes(router, {
   store, hub, config, daemonScheduler, memoryDigestScheduler,
   daemonRuntime, daemonRunLifecycle, contextCompaction, memory, files, observation,
+  runBackground, controlService,
 }) {
   router.get(
     "/api/groups",
@@ -355,6 +356,7 @@ export function registerSpaceRoutes(router, {
         memoryDigestScheduler,
         files,
         observation,
+        runBackground,
         spaceId: params.id,
         body,
       });
@@ -385,6 +387,44 @@ export function registerSpaceRoutes(router, {
       }
       const current = store.find("runs", params.id);
       sendJson(res, 200, { run: stripInternal(current) });
+    }),
+  );
+
+  router.post(
+    "/api/runs/:id/background",
+    asHandler(async ({ res, params }) => {
+      if (!runBackground) throw new ApiError("conflict", "Run backgrounding is unavailable");
+      sendJson(res, 200, { run: runBackground.backgroundRun(params.id) });
+    }),
+  );
+
+  router.put(
+    "/api/agent/run-catchups/:id/result",
+    asHandler(async ({ req, res, params }) => {
+      if (!runBackground || !controlService?.authenticateCurrentAccountSession) {
+        throw new ApiError("conflict", "Run catch-up is unavailable");
+      }
+      const authority = await controlService.authenticateCurrentAccountSession(req.headers);
+      const body = await readJsonBody(req);
+      const allowed = body?.status === "succeeded"
+        ? new Set(["status", "summary"])
+        : new Set(["status", "error"]);
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+          Object.keys(body).some((key) => !allowed.has(key)) ||
+          (body.status === "succeeded" && (
+            Object.keys(body).length !== 2 || typeof body.summary !== "string"
+          )) ||
+          (body.status === "failed" && (
+            Object.keys(body).length !== 2 ||
+            !body.error || typeof body.error !== "object" || Array.isArray(body.error) ||
+            Object.keys(body.error).sort().join(",") !== "code,message" ||
+            typeof body.error.code !== "string" || typeof body.error.message !== "string"
+          )) ||
+          !["succeeded", "failed"].includes(body.status)) {
+        throw new ApiError("invalid_request", "catch-up result fields are invalid");
+      }
+      const catchup = runBackground.submitResult(params.id, authority, body);
+      sendJson(res, 200, { catchup });
     }),
   );
 

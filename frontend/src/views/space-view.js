@@ -9,7 +9,7 @@ import {
 import { renderActivity, applyActivity } from "../components/activity-item.js";
 import { renderApprovalCard, applyApprovalCard } from "../components/approval-card.js";
 import { createComposer } from "../components/composer.js";
-import { createRunStatus } from "../components/run-status.js";
+import { createRunProgress } from "../components/run-progress.js";
 import { createFilesClient, FILE_ACCEPT } from "../api/files-client.js";
 import { timelineItemsMatch } from "../state/timeline-cache.js";
 
@@ -86,23 +86,50 @@ export function mountSpaceView({
   olderButton.hidden = true;
   const spaces = createSpacesClient(createHttpClient(platform));
   const files = createFilesClient(createHttpClient(platform));
-  const runStatus = createRunStatus({
-    onCancel: async (runIds) => {
-      try { await Promise.all(runIds.map((runId) => spaces.cancelRun(runId))); }
-      catch (err) { setStatus(`取消失败：${err.message}`); }
+  const accountNameById = new Map();
+  let composer = null;
+  let runProgress = null;
+  async function backgroundRun(runId) {
+    const result = await spaces.backgroundRun(runId);
+    runProgress?.handleEvent({ type: "run.backgrounded", data: { run: result.run } });
+    return result;
+  }
+  async function cancelActiveRun(runId) {
+    const result = await spaces.cancelRun(runId);
+    runProgress?.handleEvent({ type: "run.ended", data: { run: result.run } });
+    return result;
+  }
+  runProgress = createRunProgress({
+    accountName: (id) => accountNameById.get(id),
+    onBackground: backgroundRun,
+    onError: (err) => setStatus(`Run操作失败：${err.message}`),
+    onRunsChanged: (runs) => {
+      composer?.setForegroundRuns(runs, { isGroupChat: (space?.seats?.length ?? 0) > 1 });
+      refreshAllMessageBubbles();
     },
   });
-  root.append(statusBar, olderButton, timelineEl, runStatus.element);
+  root.append(statusBar, olderButton, timelineEl);
   const store = createTimelineStore({ maxItems: TIMELINE_DOM_LIMIT });
   const nodeByKey = new Map();
-  const accountNameById = new Map();
   const bubbleCtx = { accountName: (id) => accountNameById.get(id) };
   const messageContext = (items, index) => {
     const isGroupChat = (space?.seats?.length ?? 0) > 1;
+    const item = items[index];
+    const latestForRun = item?.runId && !items.slice(index + 1).some((candidate) =>
+      candidate.itemType === "message" && candidate.runId === item.runId);
+    const runAction = latestForRun ? runProgress.actionForRun(item.runId) : null;
     return {
       ...bubbleCtx,
       isGroupChat,
       grouping: resolveMessageGrouping(items, index, { isGroupChat }),
+      workStatus: latestForRun ? runProgress.statusForRun(item.runId) : "",
+      onActionError: (error) => setStatus(`Run操作失败：${error.message}`),
+      ...(runAction?.kind === "background"
+        ? { onBackground: () => backgroundRun(runAction.run.id) }
+        : {}),
+      ...(runAction?.kind === "stop"
+        ? { onStop: () => cancelActiveRun(runAction.run.id) }
+        : {}),
     };
   };
   const activityContext = () => ({
@@ -169,6 +196,14 @@ export function mountSpaceView({
     timelineEl.scrollTop = timelineEl.scrollHeight;
   }
 
+  function animateNewMessageBubble(element, item) {
+    if (item.author?.type !== "account") return;
+    element.classList.add("vera-bubble--entering");
+    element.addEventListener("animationend", () => {
+      element.classList.remove("vera-bubble--entering");
+    }, { once: true });
+  }
+
   function fullRender(items) {
     timelineEl.replaceChildren();
     nodeByKey.clear();
@@ -179,6 +214,7 @@ export function mountSpaceView({
       nodeByKey.set(keyOf(item), element);
       timelineEl.appendChild(element);
     }
+    runProgress.attach(timelineEl);
     if (preserveFullRenderScroll) preserveFullRenderScroll = false;
     else scrollToBottom();
   }
@@ -203,6 +239,7 @@ export function mountSpaceView({
       const element = renderItem(item, items, itemIndex);
       if (!element) return;
       nodeByKey.set(changedKey, element);
+      if (item.itemType === "message") animateNewMessageBubble(element, item);
       timelineEl.appendChild(element);
     }
     if (removedKeys.length) refreshAllMessageBubbles(items);
@@ -226,7 +263,17 @@ export function mountSpaceView({
     const timeline = await spaces.fetchTimeline(space.id, { limit: TIMELINE_PAGE_SIZE });
     if (!mounted) return;
     if (timeline.spaceSession?.id) space = { ...space, activeSpaceSessionId: timeline.spaceSession.id };
+    runProgress.setContext({
+      spaceId: space.id,
+      spaceSessionId: space.activeSpaceSessionId,
+      isGroupChat: space.seats.length > 1,
+    });
     store.hydrate(timeline.items);
+    runProgress.hydrate({
+      runs: timeline.runs,
+      agentStates: runtime.getBootstrap().agentStates,
+      messageRunIds: timeline.items.filter((item) => item.itemType === "message").map((item) => item.runId).filter(Boolean),
+    });
     hasOlder = timeline.items.length === TIMELINE_PAGE_SIZE;
     olderButton.hidden = !hasOlder;
     setStatus(timeline.items.length ? "" : "还没有消息，发一条开始。");
@@ -268,19 +315,35 @@ export function mountSpaceView({
       space = allSpaces.spaces.find((candidate) => candidate.id === requestedSpaceId) ?? null;
     }
     if (!space) {
+      runProgress.setContext({ spaceId: null, spaceSessionId: null });
       store.hydrate([]);
       setStatus(requestedSpaceId ? "Space 不存在。" : "还没有 Space，请先创建一个。");
       composer.setDisabled(true);
       shell?.setSpace(null);
     } else {
+      runProgress.setContext({
+        spaceId: space.id,
+        spaceSessionId: space.activeSpaceSessionId,
+        isGroupChat: space.seats.length > 1,
+      });
       const timeline = await spaces.fetchTimeline(space.id, { limit: TIMELINE_PAGE_SIZE });
       if (!mounted || generation !== hydrationGeneration) return;
       if (timeline.spaceSession?.id) {
         space = { ...space, activeSpaceSessionId: timeline.spaceSession.id };
       }
+      runProgress.setContext({
+        spaceId: space.id,
+        spaceSessionId: space.activeSpaceSessionId,
+        isGroupChat: space.seats.length > 1,
+      });
       if (!timelineItemsMatch(store.getOrderedItems(), timeline.items)) {
         store.hydrate(timeline.items);
       }
+      runProgress.hydrate({
+        runs: timeline.runs,
+        agentStates: bootstrap.agentStates,
+        messageRunIds: timeline.items.filter((item) => item.itemType === "message").map((item) => item.runId).filter(Boolean),
+      });
       hasOlder = timeline.items.length === TIMELINE_PAGE_SIZE;
       olderButton.hidden = !hasOlder;
       if (space.archivedAt) showArchivedStatus();
@@ -296,7 +359,10 @@ export function mountSpaceView({
     const queued = pendingEvents.filter((envelope) => envelope.seq > baselineSeq);
     pendingEvents = [];
     hydrating = false;
-    for (const envelope of queued) ingestForCurrentSpace(envelope);
+    for (const envelope of queued) {
+      runProgress.handleEvent(envelope);
+      ingestForCurrentSpace(envelope);
+    }
   }
 
   function handleHydrationError(prefix, err) {
@@ -315,7 +381,7 @@ export function mountSpaceView({
     }
     if (envelope.type === "runtime.reset") {
       setStatus("连接重置，重新同步…");
-      runStatus.reset();
+      runProgress.reset();
       void hydrateFromBootstrap(envelope.data.bootstrap, envelope.seq, { clearPending: true }).catch((err) => {
         handleHydrationError("重新同步失败", err);
       });
@@ -323,6 +389,11 @@ export function mountSpaceView({
     }
     if (envelope.type === "space.updated" && envelope.data?.space?.id === space?.id) {
       space = envelope.data.space;
+      runProgress.setContext({
+        spaceId: space.id,
+        spaceSessionId: space.activeSpaceSessionId,
+        isGroupChat: space.seats.length > 1,
+      });
       shell?.setSpace(space);
       composer.setDisabled(Boolean(space.archivedAt));
       composer.setTargets(runtime.getBootstrap().accounts.filter((account) => space.seats.some((seat) => seat.accountId === account.id)));
@@ -339,7 +410,7 @@ export function mountSpaceView({
     }
     if (envelope.type === "space-session.created" && envelope.data?.spaceId === space?.id) {
       space = { ...space, activeSpaceSessionId: envelope.data.spaceSession.id };
-      runStatus.reset();
+      runProgress.reset();
       void reloadActiveTimeline().catch((err) => handleHydrationError("新对话加载失败", err));
       return;
     }
@@ -352,9 +423,14 @@ export function mountSpaceView({
       void reloadActiveTimeline().catch((err) => handleHydrationError("附件状态刷新失败", err));
       return;
     }
-    runStatus.handleEvent(envelope, space?.id);
-    if (hydrating) pendingEvents.push(envelope);
-    else ingestForCurrentSpace(envelope);
+    if (hydrating) {
+      pendingEvents.push(envelope);
+      return;
+    }
+    const keepLatestVisible = isNearBottom();
+    const progressChanged = runProgress.handleEvent(envelope);
+    ingestForCurrentSpace(envelope);
+    if (progressChanged && keepLatestVisible) scrollToBottom();
   }
 
   const bootstrap = runtime.getBootstrap();
@@ -374,7 +450,7 @@ export function mountSpaceView({
     olderButton.hidden = !hasOlder;
     shell?.setSpace(space);
   }
-  const composer = createComposer({
+  composer = createComposer({
     targets: bootstrap.accounts.filter((account) => initialSpace?.seats.some((seat) => seat.accountId === account.id)),
     onPickAttachment: async (kind) => {
       if (!space) throw new Error("当前没有可上传附件的 Space");
@@ -398,19 +474,21 @@ export function mountSpaceView({
         void refreshCompactionStatus();
         return;
       }
-      await spaces.postMessage(space.id, {
+      const result = await spaces.postMessage(space.id, {
         author: { type: "user" },
         target,
         content,
         fileIds,
       });
+      runProgress.registerRuns(result.runs);
     },
+    onStop: cancelActiveRun,
+  });
+  composer.setForegroundRuns(runProgress.foregroundRuns(), {
+    isGroupChat: (space?.seats?.length ?? 0) > 1,
   });
   if (cachedTimeline) composer.setDisabled(Boolean(space.archivedAt));
   const unsubscribeRuntime = runtime.subscribe(handleRuntimeEvent, { since: latestSeq });
-  for (const state of bootstrap.agentStates ?? []) {
-    runStatus.handleEvent({ type: "agent.state.updated", data: { agentState: state } }, initialSpace?.id);
-  }
   root.appendChild(composer.element);
 
   olderButton.addEventListener("click", async () => {
@@ -455,6 +533,7 @@ export function mountSpaceView({
     }
     unsubscribeRuntime();
     unsubscribeStore();
+    runProgress.reset();
     nodeByKey.clear();
     root.replaceChildren();
     delete root.dataset.routeScope;

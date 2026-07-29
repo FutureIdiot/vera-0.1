@@ -22,6 +22,10 @@ function stateTime(state) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+export function agentStatusLabel(status) {
+  return STATUS_LABELS[status] ?? "idle";
+}
+
 export function resolvePrivateAccountStatus({
   account,
   spaceId,
@@ -34,5 +38,5 @@ export function resolvePrivateAccountStatus({
   const activeState = account.activeAgentId
     ? candidates.find((state) => state.agentId === account.activeAgentId)
     : null;
-  return STATUS_LABELS[(activeState ?? candidates[0])?.status ?? "idle"] ?? "idle";
+  return agentStatusLabel((activeState ?? candidates[0])?.status ?? "idle");
 }

@@ -8,6 +8,9 @@ import { createOllamaAdapter } from "../src/adapters/ollama-adapter.js";
 import { createOpencodeAdapter } from "../src/adapters/opencode-adapter.js";
 import { createClaudeCodeAdapter } from "../src/adapters/claude-code-adapter.js";
 import { createAntigravityAdapter } from "../src/adapters/antigravity-adapter.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 function required(env, name) {
   const value = env[name]?.trim();
@@ -64,6 +67,36 @@ export async function main({ env = process.env, fetchImpl = globalThis.fetch, ex
         persistProviderBinding: context.persistProviderBinding,
         rotateProviderBinding: context.rotateProviderBinding,
       });
+    },
+    async executeCatchup(context) {
+      const directory = await mkdtemp(join(tmpdir(), "vera-catchup-"));
+      try {
+        const { input, run } = context;
+        const executionRuntime = { ...runtime, model: run.effectiveModel };
+        const rejectCatchupTool = (activity = {}) => {
+          if (["reasoning", "status", "usage"].includes(activity.kind)) return;
+          throw Object.assign(new Error("catch-up tools are disabled"), { code: "provider_error" });
+        };
+        return await adapter.run({
+          runtime: executionRuntime,
+          workspacePath: directory,
+          agent: context.agent,
+          account: context.account,
+          sessionMode: "isolated",
+          prompt: input.kind === "cli" ? { text: input.promptText } : { apiMessages: input.messages },
+          providerBinding: null,
+          historyVersion: null,
+          spaceSessionId: run.spaceSessionId,
+          agentSessionId: null,
+          contextGeneration: null,
+          accountId: run.accountId,
+          signal: context.signal,
+          onDelta: context.onDelta,
+          onActivity: rejectCatchupTool,
+        });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
     },
     shutdown: () => adapter.shutdown?.(),
   };

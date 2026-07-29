@@ -50,6 +50,7 @@ export function createDaemonRunLifecycle({
   memoryRetrieval = null,
   contextCompaction = null,
   observation = null,
+  runBackground = null,
 } = {}) {
   if (!store || !hub || !config) throw new Error("createDaemonRunLifecycle requires store, hub, and config");
   const outputs = new Map();
@@ -232,6 +233,9 @@ export function createDaemonRunLifecycle({
     const updated = store.update("runs", current.id, patch);
     outputs.delete(current.id);
     bindingRotations.delete(current.id);
+    const catchupTask = runBackground?.finishRun?.(updated, {
+      runtimeKind: agent.runtimeProfile?.kind,
+    }) ?? null;
     hub.publish("run.ended", { run: stripInternal(updated) });
     for (const messageId of replyMessageIds) {
       const message = store.find("messages", messageId);
@@ -244,7 +248,10 @@ export function createDaemonRunLifecycle({
         requestId: `auto:${current.agentSessionId}:${current.contextGeneration}:${current.id}`,
       }).catch(() => {});
     }
-    return { run: stripInternal(updated) };
+    return {
+      run: stripInternal(updated),
+      ...(catchupTask ? { catchupTask } : {}),
+    };
   }
 
   async function rotateProviderBinding({ account, agent, run, input }) {
@@ -344,6 +351,29 @@ export function createDaemonRunLifecycle({
     });
     outputs.delete(current.id);
     bindingRotations.delete(current.id);
+    const hasOtherActiveRun = store.list("runs").some((candidate) =>
+      candidate.id !== updated.id &&
+      candidate.agentId === updated.agentId &&
+      candidate.accountId === updated.accountId &&
+      candidate.spaceId === updated.spaceId &&
+      ["pending", "running"].includes(candidate.status));
+    if (account && agent && !hasOtherActiveRun) {
+      declareState({
+        account,
+        agent,
+        run: current,
+        declaration: {
+          agentId: agent.id,
+          accountId: account.id,
+          spaceId: current.spaceId,
+          status: "idle",
+          detail: "",
+        },
+      });
+    }
+    runBackground?.finishRun?.(updated, {
+      runtimeKind: agent?.runtimeProfile?.kind,
+    });
     hub.publish("run.ended", { run: stripInternal(updated) });
     if (account && agent) {
       for (const messageId of replyMessageIds) {

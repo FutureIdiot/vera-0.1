@@ -40,6 +40,7 @@ export function authorizeDaemonExecution({
   session,
   workspaceHostId,
   runtimeRevision,
+  backgroundEligibilityMs = null,
 }) {
   const run = store.find("runs", runId);
   if (!run || !["pending", "running"].includes(run.status)) {
@@ -75,11 +76,15 @@ export function authorizeDaemonExecution({
     throw new ApiError("account_busy", "Account has another active Execution");
   }
 
+  const leaseAcquiredAt = new Date().toISOString();
   const claimed = store.update("runs", run.id, {
     status: "running",
     executionLeaseId: newExecutionLeaseId(),
     workspaceHostId,
-    leaseAcquiredAt: new Date().toISOString(),
+    leaseAcquiredAt,
+    backgroundEligibleAt: Number.isFinite(backgroundEligibilityMs)
+      ? new Date(Date.parse(leaseAcquiredAt) + backgroundEligibilityMs).toISOString()
+      : run.backgroundEligibleAt ?? null,
   });
   hub?.publish("run.started", { run: stripInternal(claimed) });
   return { execution: executionSummary(claimed), claimed: true };

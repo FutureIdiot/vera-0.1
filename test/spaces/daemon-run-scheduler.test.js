@@ -26,6 +26,7 @@ const CONFIG = {
     hardRatio: 0.95,
     checkpointRecentTurns: 4,
   },
+  runBackground: { eligibilityMs: 10000 },
 };
 
 async function fixture(kind, fn) {
@@ -131,6 +132,10 @@ for (const kind of ["cli", "api"]) {
       const running = store.find("runs", run.id);
       assert.equal(running.status, "running");
       assert.match(running.executionLeaseId, /^exl_/u);
+      assert.equal(
+        Date.parse(running.backgroundEligibleAt) - Date.parse(running.leaseAcquiredAt),
+        10000,
+      );
       assert.equal(dispatch.accountId, account.id);
       assert.equal(dispatch.event.type, "run.requested");
       assert.equal(dispatch.event.data.input.kind, kind);

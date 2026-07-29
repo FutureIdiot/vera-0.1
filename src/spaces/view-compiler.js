@@ -6,7 +6,7 @@
 // 三条铁律：
 //   1. 只 inject Message，Activity 永不进 prompt（包括本人）。
 //   2. 群聊视角以署名声告段注入 ctx.prompt.text 头部，不伪装一对一 user 历史轮次。
-//   3. 编译层无状态——每次 run 临时查 messages 派生 delta，幂等，不维护水位。
+//   3. 普通编译无状态；唯一例外是调用方传入的一次性后台catch-up摘要与终态水位。
 //
 // 物理拼装顺序：[常驻索引块]?\n\n[群聊声告段]?\n\n[触发消息正文]\n\n[本轮Memory检索块]?
 // 缺哪段哪段连同其后的空行一起省略；最终 text 永远至少含触发消息正文。
@@ -45,11 +45,12 @@ function findLastOwnMarker(messages, agentId) {
 // 单向静默（ground truth 2.3「响应规则统一语义」/ api-contract Space 段）。marker 仍
 // 是该 Agent 最后自我发言（不受 blockAccountIds 影响）；定向 @ 穿透 blockAccountIds 是
 // messages.js 那层判定（run 仍创建），编译层这层只过滤声告段。
-function pickCandidates({ messages, marker, agentId, triggerMessage, blockAccountIds }) {
+function pickCandidates({ messages, marker, agentId, triggerMessage, blockAccountIds, afterSeq = null }) {
   const blocked = Array.isArray(blockAccountIds) && blockAccountIds.length > 0 ? new Set(blockAccountIds) : null;
   const candidates = [];
   for (const m of messages) {
     if (m.id === triggerMessage.id) continue; // 双保险，排除触发自身
+    if (Number.isFinite(afterSeq) && (m._seq ?? 0) <= afterSeq) continue;
     if (m.author?.type === "account" && m.executingAgentId === agentId) continue; // 排除自我气泡
     if (blocked && m.author?.type === "account" && blocked.has(m.author.accountId)) continue;
     if (marker) {
@@ -122,7 +123,7 @@ function buildGroupDelta({ kept, truncated, config, store, agentId }) {
 export async function compilePrompt({
   store, space, seat, agent, account, triggerMessage, memoryRetrieval,
   agentSessionId, generation, spaceSessionId, includeResidentIndex = false,
-  apiHistory = null, checkpoint = null, runId, config,
+  apiHistory = null, checkpoint = null, runId, config, groupCatchup = null,
 }) {
   // seat 可由调用方传入（messages.js 已知当前 seat），也可由编译层自己从 space.seats
   // 找——run-controller 不传 seat 时走后者。blockAccountIds 来自 seat。
@@ -144,13 +145,21 @@ export async function compilePrompt({
   const spaceMessages = store.list("messages").filter((m) =>
     m.spaceId === space.id && m.spaceSessionId === spaceSessionId);
   const marker = findLastOwnMarker(spaceMessages, agent.id);
-  const candidates = pickCandidates({ messages: spaceMessages, marker, agentId: agent.id, triggerMessage, blockAccountIds });
+  const candidates = pickCandidates({
+    messages: spaceMessages,
+    marker,
+    agentId: agent.id,
+    triggerMessage,
+    blockAccountIds,
+    afterSeq: groupCatchup?.afterSeq ?? null,
+  });
   const { kept, truncated } = applyLimits({
     candidates,
     maxMessages: config.viewCompiler.groupDeltaMaxMessages,
     maxChars: config.viewCompiler.groupDeltaMaxChars,
   });
-  const groupDelta = buildGroupDelta({ kept, truncated, config, store, agentId: agent.id });
+  const rawGroupDelta = buildGroupDelta({ kept, truncated, config, store, agentId: agent.id });
+  const groupDelta = [groupCatchup?.block, rawGroupDelta].filter(Boolean).join("\n\n") || null;
 
   // 检索块是当前消息信封的 volatile 尾部。自动检索 fail-open：索引损坏或
   // 预算服务失败不得让聊天 run 失败，本轮只省略该块。

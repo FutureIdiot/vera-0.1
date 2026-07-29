@@ -52,6 +52,7 @@ export function createDaemonRunScheduler({
   memoryDigestScheduler = null,
   contextCompaction = null,
   observation = null,
+  runBackground = null,
 } = {}) {
   if (!store || !hub || !config || !controlService || !daemonRuntime) {
     throw new Error("createDaemonRunScheduler requires store, hub, config, controlService, and daemonRuntime");
@@ -74,6 +75,7 @@ export function createDaemonRunScheduler({
   }
 
   async function prepareAndDispatch({ runId, agent, account, space, agentSession, triggerMessage }) {
+    let catchupContext = null;
     try {
       const frozenRun = store.find("runs", runId);
       if (!frozenRun || frozenRun.modelVersion !== account.modelVersion || frozenRun.effectiveModel !== account.model) {
@@ -135,6 +137,12 @@ export function createDaemonRunScheduler({
         agentSessionId: currentSession.id,
         generation: currentSession.generation,
       });
+      catchupContext = runBackground?.contextForRun?.({
+        spaceId: space.id,
+        spaceSessionId: currentSession.spaceSessionId,
+        accountId: account.id,
+        runId,
+      }) ?? null;
       const prompt = await compilePrompt({
         store,
         space,
@@ -150,6 +158,7 @@ export function createDaemonRunScheduler({
         checkpoint: latestCheckpoint(store, currentSession.id),
         runId,
         config,
+        groupCatchup: catchupContext,
       });
       const effectiveLimitTokens = effectiveContextLimit(config, runtime);
       let input;
@@ -184,6 +193,7 @@ export function createDaemonRunScheduler({
         session,
         workspaceHostId: account.workspace?.hostId,
         runtimeRevision: agent.runtimeRevision,
+        backgroundEligibilityMs: config.runBackground.eligibilityMs,
       });
       agentStates?.setWorking?.(agent.id, space.id, account.id);
       const running = store.find("runs", runId);
@@ -202,8 +212,10 @@ export function createDaemonRunScheduler({
           },
         },
       });
+      if (catchupContext?.id) runBackground?.markDispatched?.(catchupContext.id, runId);
       return claimed.execution;
     } catch (error) {
+      if (catchupContext?.id) runBackground?.releaseReservation?.(catchupContext.id, runId);
       failPending(runId, error);
       throw error;
     }
@@ -244,6 +256,8 @@ export function createDaemonRunScheduler({
       executionLeaseId: null,
       workspaceHostId: account.workspace?.hostId ?? null,
       leaseAcquiredAt: null,
+      backgroundEligibleAt: null,
+      backgroundedAt: null,
       apiResultVersion: null,
       createdAt: new Date().toISOString(),
       endedAt: null,

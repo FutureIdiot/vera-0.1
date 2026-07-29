@@ -291,9 +291,40 @@ test("message time appears only inside the bubble and flat action interfaces sta
     assert.equal(content.children.at(-1), meta);
     assert.equal(meta.hidden, false);
     const actions = bubble.querySelectorAll(".vera-bubble__action");
-    assert.equal(actions.length, 4);
-    assert.deepEqual(actions.map((button) => button.dataset.action), ["retry", "branch", "save", "copy"]);
-    assert.deepEqual(actions.map((button) => button.disabled), [true, true, true, false]);
+    assert.equal(actions.length, 6);
+    assert.deepEqual(
+      actions.map((button) => button.dataset.action),
+      ["background", "stop", "retry", "branch", "save", "copy"],
+    );
+    assert.deepEqual(actions.map((button) => button.disabled), [true, true, true, true, true, false]);
+    assert.deepEqual(actions.slice(0, 2).map((button) => button.hidden), [true, true]);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test("the latest active Run bubble carries work status and its eligible background action", () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    createElement: (tagName) => new FakeElement(tagName),
+    createElementNS: (_namespace, tagName) => new FakeElement(tagName),
+  };
+  try {
+    const bubble = renderMessageBubble({
+      id: "msg_active",
+      itemType: "message",
+      status: "streaming",
+      author: { type: "account", accountId: "acc_one" },
+      content: "working",
+    }, {
+      workStatus: "coding · editing files",
+      onBackground() {},
+    });
+    assert.equal(bubble.querySelector(".vera-bubble__work-status").textContent, "coding · editing files");
+    assert.equal(bubble.querySelector(".vera-bubble__work-status").hidden, false);
+    const background = bubble.querySelector(".vera-bubble__action--background");
+    assert.equal(background.hidden, false);
+    assert.equal(background.disabled, false);
   } finally {
     globalThis.document = previousDocument;
   }

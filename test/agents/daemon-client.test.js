@@ -18,7 +18,8 @@ function stream(frames) {
 
 function fixture({
   envelopes = [], memoryEnvelopes = [], executor, memoryExecutor, eventResponses,
-  bindingRotationResponse = null, runtime = null, loginStatus = 200, maxConnectionFailures = 3,
+  bindingRotationResponse = null, terminalResponse = null,
+  runtime = null, loginStatus = 200, maxConnectionFailures = 3,
 } = {}) {
   const calls = [];
   let loginCount = 0;
@@ -53,6 +54,12 @@ function fixture({
     }
     if (url.includes("/messages")) {
       return new Response(JSON.stringify({ id: `msg_${calls.length}`, content: body.content }), { status: 201 });
+    }
+    if (init.method === "PATCH" && body?.status === "completed" && terminalResponse) {
+      return new Response(JSON.stringify(terminalResponse), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     }
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   };
@@ -190,6 +197,61 @@ test("CLI main rotation updates generation before binding CAS and submits provid
     outputTokens: 4,
     totalTokens: 10004,
   });
+});
+
+test("a background terminal catch-up uses the isolated executor and reports no Chat output", async () => {
+  const input = { kind: "cli", sessionMode: "main", promptText: "main prompt" };
+  let catchupContext;
+  const terminalResponse = {
+    run: { id: "run_a", status: "completed" },
+    catchupTask: {
+      id: "catchup:run_a",
+      sourceMessageIds: ["msg_missed"],
+      input: { kind: "cli", sessionMode: "isolated", promptText: "summarize safely" },
+    },
+  };
+  const executor = {
+    async execute() { return { content: "main reply" }; },
+    async executeCatchup(context) {
+      catchupContext = {
+        taskKind: context.taskKind,
+        input: context.input,
+        workspace: context.workspace,
+        role: context.run.role,
+      };
+      return { content: "A concise catch-up summary." };
+    },
+  };
+  const { client, calls } = fixture({
+    envelopes: [requested(input)],
+    executor,
+    terminalResponse,
+    runtime: {
+      hostId: "host_a",
+      kind: "cli",
+      provider: "codex",
+      model: "model_a",
+      revision: "rev_a",
+      runtimeCapabilities: { models: ["model_a"] },
+    },
+  });
+  await client.start();
+  await client.wait();
+  await settle();
+
+  assert.deepEqual(catchupContext, {
+    taskKind: "catchup",
+    input: terminalResponse.catchupTask.input,
+    workspace: null,
+    role: "catchup",
+  });
+  const result = calls.find((call) => call.url.endsWith("/api/agent/run-catchups/catchup%3Arun_a/result"));
+  assert.deepEqual(result.body, {
+    status: "succeeded",
+    summary: "A concise catch-up summary.",
+  });
+  assert.equal(calls.filter((call) => call.url.endsWith("/messages")).length, 1);
+  assert.equal(calls.some((call) => call.url.endsWith("/activities") && call.body?.summary?.includes("catch-up")), false);
 });
 
 test("requestApproval posts once and resolves only its approval.answered event", async () => {

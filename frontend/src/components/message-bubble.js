@@ -6,6 +6,8 @@
 import { setIconButtonContent } from "./vector-icon.js";
 
 const ACTIONS = [
+  ["background", "garage", "Go to background"],
+  ["stop", "stop", "中止后台工作"],
   ["retry", "retry", "重试"],
   ["branch", "branch", "分支"],
   ["save", "bookmark", "保存"],
@@ -128,7 +130,11 @@ function createActionButton(action, icon, label) {
       }, 1600);
       return;
     }
-    await ctx[`on${action.charAt(0).toUpperCase()}${action.slice(1)}`]?.(item);
+    try {
+      await ctx[`on${action.charAt(0).toUpperCase()}${action.slice(1)}`]?.(item);
+    } catch (error) {
+      ctx.onActionError?.(error, action, item);
+    }
   });
   return button;
 }
@@ -141,6 +147,8 @@ function ensureStructure(el) {
   avatar.className = "vera-bubble__avatar";
   const stack = document.createElement("div");
   stack.className = "vera-bubble__stack";
+  const workStatus = document.createElement("div");
+  workStatus.className = "vera-bubble__work-status";
   const author = document.createElement("div");
   author.className = "vera-bubble__author";
   surface = document.createElement("div");
@@ -164,7 +172,7 @@ function ensureStructure(el) {
   actions.className = "vera-bubble__actions";
   actions.setAttribute("aria-label", "消息操作");
   for (const definition of ACTIONS) actions.appendChild(createActionButton(...definition));
-  stack.append(author, surface, actions);
+  stack.append(workStatus, author, surface, actions);
   el.append(avatar, stack);
   initializeInteractions(el);
 }
@@ -198,6 +206,7 @@ export function applyMessageBubble(el, item, ctx = {}) {
 
   const avatarEl = el.querySelector(".vera-bubble__avatar");
   const authorEl = el.querySelector(".vera-bubble__author");
+  const workStatusEl = el.querySelector(".vera-bubble__work-status");
   const contentEl = el.querySelector(".vera-bubble__content");
   const textEl = el.querySelector(".vera-bubble__text");
   const attachmentsEl = el.querySelector(".vera-bubble__attachments");
@@ -228,6 +237,8 @@ export function applyMessageBubble(el, item, ctx = {}) {
   }
   authorEl.textContent = authorName;
   authorEl.hidden = !authorName;
+  workStatusEl.textContent = ctx.workStatus ?? "";
+  workStatusEl.hidden = !workStatusEl.textContent;
   textEl.textContent = item.content ?? "";
   contentEl.classList.toggle("is-empty", !textEl.textContent);
 
@@ -259,6 +270,7 @@ export function applyMessageBubble(el, item, ctx = {}) {
     const available = action === "copy"
       ? Boolean(ctx.onCopy ?? globalThis.navigator?.clipboard?.writeText)
       : typeof ctx[`on${action.charAt(0).toUpperCase()}${action.slice(1)}`] === "function";
+    button.hidden = ["background", "stop"].includes(action) && !available;
     button.disabled = !available;
     button.title = available ? button.getAttribute("aria-label") : `${button.getAttribute("aria-label")}（下一步接入）`;
   }

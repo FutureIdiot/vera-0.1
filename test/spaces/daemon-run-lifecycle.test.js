@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createEventHub } from "../../src/api/sse.js";
+import { createAgentStateTracker } from "../../src/agents/agent-state.js";
 import { createStore } from "../../src/store/store.js";
 import { getActiveContext } from "../../src/spaces/context-sessions.js";
 import { createDaemonRunLifecycle } from "../../src/spaces/daemon-run-lifecycle.js";
@@ -178,5 +179,45 @@ test("completed main CLI usage updates context pressure and schedules compaction
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(compacted.length, 1);
     assert.equal(compacted[0].agentId, agent.id);
+  });
+});
+
+test("owner cancellation clears the exact Run AgentState before daemon cleanup retries", async () => {
+  await fixture(async ({ store, hub, agent, account, space, run }) => {
+    const agentStates = createAgentStateTracker({ hub });
+    const authority = {
+      agentId: agent.id,
+      ownerAgentId: account.ownerAgentId,
+      accountId: account.id,
+      spaceId: space.id,
+    };
+    agentStates.declare(authority, {
+      agentId: agent.id,
+      accountId: account.id,
+      spaceId: space.id,
+      status: "on_task",
+      detail: "",
+    });
+    const lifecycle = createDaemonRunLifecycle({
+      store,
+      hub,
+      config: CONFIG,
+      agentStates,
+    });
+
+    const cancelled = lifecycle.cancelRun(run.id);
+
+    assert.equal(cancelled.status, "cancelled");
+    assert.deepEqual(
+      agentStates.list({ agentId: agent.id, accountId: account.id, spaceId: space.id })
+        .map(({ lastActiveAt, ...state }) => state),
+      [{
+        agentId: agent.id,
+        accountId: account.id,
+        spaceId: space.id,
+        status: "idle",
+        detail: "",
+      }],
+    );
   });
 });

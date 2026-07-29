@@ -74,7 +74,7 @@ function publishOfflineActivity({ store, hub, space, spaceSession, account, obse
 }
 
 export function postMessage({
-  store, hub, daemonScheduler, memoryDigestScheduler, files, observation, spaceId, body,
+  store, hub, daemonScheduler, memoryDigestScheduler, files, observation, runBackground, spaceId, body,
 }) {
   const space = getSpaceOrThrow(store, spaceId);
   const content = typeof body?.content === "string" ? body.content : "";
@@ -115,6 +115,11 @@ export function postMessage({
   for (const seat of space.seats) {
     if (body.author?.type === "account" && body.author.accountId === seat.accountId) continue; // 不自问自答
     if (!shouldRespond(seat, message)) continue;
+    if (runBackground?.isActive?.(space.id, seat.accountId)) continue;
+    if (runBackground?.shouldHold?.(space.id, seat.accountId)) {
+      runBackground.holdTrigger(space.id, seat.accountId, storedMessage.id);
+      continue;
+    }
     const account = getAccountOrThrow(store, seat.accountId);
     const addressed = isAddressedTo(message, account.id);
     const activeAgent = account.activeAgentId ? store.find("agents", account.activeAgentId) : null;
@@ -140,4 +145,41 @@ export function postMessage({
   }
 
   return { message: stripInternal(storedMessage), runs };
+}
+
+export function scheduleDeferredMessage({
+  store,
+  daemonScheduler,
+  runBackground,
+  record,
+}) {
+  const triggerMessage = store.find("messages", record?.deferredTriggerMessageId);
+  const space = store.find("spaces", record?.spaceId);
+  if (!triggerMessage || !space || space.archivedAt ||
+      triggerMessage.spaceSessionId !== record.spaceSessionId) {
+    return null;
+  }
+  const seat = space.seats.find((candidate) => candidate.accountId === record.accountId);
+  if (!seat || !shouldRespond(seat, triggerMessage)) return null;
+  const account = getAccountOrThrow(store, seat.accountId);
+  const agent = account.activeAgentId ? store.find("agents", account.activeAgentId) : null;
+  if (account.presence !== "online" || !agent ||
+      agent.id !== account.ownerAgentId || agent.id !== record.agentId) {
+    return null;
+  }
+  const spaceSession = ensureActiveSpaceSession(store, space.id);
+  if (spaceSession.id !== record.spaceSessionId) return null;
+  const agentSession = ensureAgentSession(store, {
+    spaceSessionId: spaceSession.id,
+    accountId: account.id,
+    agentId: agent.id,
+  });
+  return daemonScheduler.scheduleMainRun({
+    agent,
+    account,
+    space,
+    spaceSession,
+    agentSession,
+    triggerMessage,
+  });
 }

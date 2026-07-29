@@ -119,6 +119,18 @@ const DEFAULTS = {
     groupDeltaUserLabel: "用户",
     groupDeltaOmittedHint: "（更早的发言数量已达上限，可用 fetch_detail 主动调阅）",
   },
+  runBackground: {
+    eligibilityMs: 10 * 1000,
+    catchupMaxMessages: 50,
+    catchupMaxChars: 8000,
+    summaryMaxChars: 2000,
+    catchupTimeoutMs: 5 * 60 * 1000,
+    catchupTimeoutMs: 5 * 60 * 1000,
+    catchupTimeoutMs: 5 * 60 * 1000,
+    catchupTimeoutMs: 5 * 60 * 1000,
+    summaryHeader: "=== 后台期间群聊摘要 ===",
+    gapMarker: "=== 后台期间群聊摘要 ===\n后台期间的群聊上下文摘要不可用；为避免错误归因，原始消息未回放。",
+  },
   agentDaemon: {
     heartbeatIntervalMs: 15000, // gateway 在 agent SSE 通道上发 agent.heartbeat 的间隔
     tokensPath: "~/.vera/agent-tokens.json", // gateway只保存Agent Token的sha256校验摘要
@@ -374,6 +386,42 @@ export function loadConfig(env = process.env) {
       groupDeltaHeader: env.VERA_VIEW_COMPILER_GROUP_DELTA_HEADER || DEFAULTS.viewCompiler.groupDeltaHeader,
       groupDeltaUserLabel: env.VERA_VIEW_COMPILER_GROUP_DELTA_USER_LABEL || DEFAULTS.viewCompiler.groupDeltaUserLabel,
       groupDeltaOmittedHint: env.VERA_VIEW_COMPILER_GROUP_DELTA_OMITTED_HINT || DEFAULTS.viewCompiler.groupDeltaOmittedHint,
+    },
+    runBackground: {
+      eligibilityMs: positiveInt(
+        env.VERA_RUN_BACKGROUND_ELIGIBILITY_MS,
+        DEFAULTS.runBackground.eligibilityMs,
+      ),
+      catchupMaxMessages: positiveInt(
+        env.VERA_RUN_BACKGROUND_CATCHUP_MAX_MESSAGES,
+        DEFAULTS.runBackground.catchupMaxMessages,
+      ),
+      catchupMaxChars: positiveInt(
+        env.VERA_RUN_BACKGROUND_CATCHUP_MAX_CHARS,
+        DEFAULTS.runBackground.catchupMaxChars,
+      ),
+      summaryMaxChars: positiveInt(
+        env.VERA_RUN_BACKGROUND_SUMMARY_MAX_CHARS,
+        DEFAULTS.runBackground.summaryMaxChars,
+      ),
+      catchupTimeoutMs: positiveInt(
+        env.VERA_RUN_BACKGROUND_CATCHUP_TIMEOUT_MS,
+        DEFAULTS.runBackground.catchupTimeoutMs,
+      ),
+      catchupTimeoutMs: positiveInt(
+        env.VERA_RUN_BACKGROUND_CATCHUP_TIMEOUT_MS,
+        DEFAULTS.runBackground.catchupTimeoutMs,
+      ),
+      catchupTimeoutMs: positiveInt(
+        env.VERA_RUN_BACKGROUND_CATCHUP_TIMEOUT_MS,
+        DEFAULTS.runBackground.catchupTimeoutMs,
+      ),
+      catchupTimeoutMs: positiveInt(
+        env.VERA_RUN_BACKGROUND_CATCHUP_TIMEOUT_MS,
+        DEFAULTS.runBackground.catchupTimeoutMs,
+      ),
+      summaryHeader: env.VERA_RUN_BACKGROUND_SUMMARY_HEADER || DEFAULTS.runBackground.summaryHeader,
+      gapMarker: env.VERA_RUN_BACKGROUND_GAP_MARKER || DEFAULTS.runBackground.gapMarker,
     },
     agentDaemon: {
       heartbeatIntervalMs: num(env.VERA_AGENT_HEARTBEAT_INTERVAL_MS, DEFAULTS.agentDaemon.heartbeatIntervalMs),

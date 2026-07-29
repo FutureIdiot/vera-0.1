@@ -46,6 +46,9 @@ export function createSpacesClient(http) {
     cancelRun(runId) {
       return http.post(`/api/runs/${runId}/cancel`, {});
     },
+    backgroundRun(runId) {
+      return http.post(`/api/runs/${runId}/background`, {});
+    },
     createSpace(body) {
       return http.post("/api/spaces", body);
     },
