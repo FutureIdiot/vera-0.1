@@ -13,8 +13,15 @@ import { createRunProgress } from "../components/run-progress.js";
 import { renderRunMessageCard } from "../components/run-message-card.js";
 import { createFilesClient, FILE_ACCEPT } from "../api/files-client.js";
 import { timelineItemsMatch } from "../state/timeline-cache.js";
+import { createTimelineClearState } from "../state/timeline-clear-state.js";
+import {
+  downloadTimelineMarkdown,
+  formatTimelineMarkdown,
+  timelineExportFilename,
+} from "../components/timeline-export.js";
 
 const TIMELINE_PAGE_SIZE = 50;
+const TIMELINE_EXPORT_PAGE_SIZE = 200;
 const TIMELINE_DOM_LIMIT = 200;
 const IMAGE_ACCEPT = ".png,.jpg,.jpeg,.gif,.webp";
 
@@ -112,6 +119,7 @@ export function mountSpaceView({
   });
   root.append(statusBar, olderButton, timelineEl);
   const store = createTimelineStore({ maxItems: TIMELINE_DOM_LIMIT });
+  const timelineClearState = createTimelineClearState();
   const nodeByKey = new Map();
   const bubbleCtx = { accountName: (id) => accountNameById.get(id) };
   const messageContext = (items, index) => {
@@ -270,6 +278,57 @@ export function mountSpaceView({
     store.ingestEvent(envelope);
   }
 
+  function visibleTimelineItems(items, spaceSessionId = space?.activeSpaceSessionId) {
+    if (!space?.id || !spaceSessionId) return [...items];
+    return timelineClearState.filter(space.id, spaceSessionId, items);
+  }
+
+  function timelineHasOlder(sourceItems, visibleItems) {
+    return sourceItems.length === TIMELINE_PAGE_SIZE && visibleItems.length === sourceItems.length;
+  }
+
+  function setTimelineEmptyStatus(visibleItems, spaceSessionId = space?.activeSpaceSessionId) {
+    const locallyCleared = space?.id && spaceSessionId
+      ? timelineClearState.get(space.id, spaceSessionId)
+      : null;
+    setStatus(visibleItems.length || locallyCleared ? "" : "还没有消息，发一条开始。");
+  }
+
+  async function exportCurrentTimeline() {
+    const exportSpace = space ? structuredClone(space) : null;
+    const spaceSessionId = exportSpace?.activeSpaceSessionId;
+    if (!exportSpace || !spaceSessionId) throw new Error("当前没有可导出的 SpaceSession");
+    const items = [];
+    const seen = new Set();
+    let before;
+    while (true) {
+      const page = await spaces.fetchSessionTimeline(exportSpace.id, spaceSessionId, {
+        before,
+        limit: TIMELINE_EXPORT_PAGE_SIZE,
+      });
+      for (const item of page.items) {
+        const key = `${item.itemType}:${item.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push(item);
+      }
+      if (page.items.length < TIMELINE_EXPORT_PAGE_SIZE) break;
+      const nextBefore = page.items.at(-1)?.id;
+      if (!nextBefore || nextBefore === before) throw new Error("时间线分页没有继续前进");
+      before = nextBefore;
+    }
+    const markdown = formatTimelineMarkdown({
+      space: exportSpace,
+      spaceSessionId,
+      items,
+      accountNames: new Map(accountNameById),
+    });
+    downloadTimelineMarkdown(
+      timelineExportFilename(exportSpace, spaceSessionId),
+      markdown,
+    );
+  }
+
   async function reloadActiveTimeline() {
     if (!space) return;
     const timeline = await spaces.fetchTimeline(space.id, { limit: TIMELINE_PAGE_SIZE });
@@ -284,15 +343,16 @@ export function mountSpaceView({
       spaceSessionId: space.activeSpaceSessionId,
       isGroupChat: space.seats.length > 1,
     });
-    store.hydrate(timeline.items);
+    const visibleItems = visibleTimelineItems(timeline.items, timeline.spaceSession?.id);
+    store.hydrate(visibleItems);
     runProgress.hydrate({
       runs: timeline.runs,
       agentStates: runtime.getBootstrap().agentStates,
       messageRunIds: timeline.items.filter((item) => item.itemType === "message").map((item) => item.runId).filter(Boolean),
     });
-    hasOlder = timeline.items.length === TIMELINE_PAGE_SIZE;
+    hasOlder = timelineHasOlder(timeline.items, visibleItems);
     olderButton.hidden = !hasOlder;
-    setStatus(timeline.items.length ? "" : "还没有消息，发一条开始。");
+    setTimelineEmptyStatus(visibleItems, timeline.spaceSession?.id);
     shell?.setSpace(space);
   }
 
@@ -356,18 +416,19 @@ export function mountSpaceView({
         spaceSessionId: space.activeSpaceSessionId,
         isGroupChat: space.seats.length > 1,
       });
-      if (!timelineItemsMatch(store.getOrderedItems(), timeline.items)) {
-        store.hydrate(timeline.items);
+      const visibleItems = visibleTimelineItems(timeline.items, timeline.spaceSession?.id);
+      if (!timelineItemsMatch(store.getOrderedItems(), visibleItems)) {
+        store.hydrate(visibleItems);
       }
       runProgress.hydrate({
         runs: timeline.runs,
         agentStates: bootstrap.agentStates,
         messageRunIds: timeline.items.filter((item) => item.itemType === "message").map((item) => item.runId).filter(Boolean),
       });
-      hasOlder = timeline.items.length === TIMELINE_PAGE_SIZE;
+      hasOlder = timelineHasOlder(timeline.items, visibleItems);
       olderButton.hidden = !hasOlder;
       if (space.archivedAt) showArchivedStatus();
-      else setStatus(timeline.items.length ? "" : "还没有消息，发一条开始。");
+      else setTimelineEmptyStatus(visibleItems, timeline.spaceSession?.id);
       composer.setDisabled(Boolean(space.archivedAt));
       composer.setTargets(bootstrap.accounts.filter((account) => space.seats.some((seat) => seat.accountId === account.id)));
       shell?.setSpace(space);
@@ -466,8 +527,12 @@ export function mountSpaceView({
     space = initialSpace;
     observation = bootstrap.observation ?? null;
     for (const account of bootstrap.accounts ?? []) accountNameById.set(account.id, account.name);
-    store.hydrate([...cachedTimeline.items].reverse());
-    hasOlder = cachedTimeline.hasOlder;
+    const visibleCachedItems = visibleTimelineItems(
+      cachedTimeline.items,
+      initialSpace.activeSpaceSessionId,
+    );
+    store.hydrate([...visibleCachedItems].reverse());
+    hasOlder = cachedTimeline.hasOlder && visibleCachedItems.length === cachedTimeline.items.length;
     olderButton.hidden = !hasOlder;
     shell?.setSpace(space);
   }
@@ -487,12 +552,29 @@ export function mountSpaceView({
     onResumeSession: async (spaceSessionId) => {
       if (!space) throw new Error("当前没有可恢复 Session 的 Space");
       const result = await spaces.resumeSession(space.id, spaceSessionId, crypto.randomUUID());
+      timelineClearState.restore(space.id, result.resumedSession.id);
       space = { ...space, activeSpaceSessionId: result.resumedSession.id };
       runProgress.reset();
       await reloadActiveTimeline();
     },
     onSend: async (content, target, fileIds) => {
       if (!space) throw new Error("当前没有可发送消息的 Space");
+      if (content === "/export") {
+        await exportCurrentTimeline();
+        return;
+      }
+      if (content === "/clear") {
+        const spaceSessionId = space.activeSpaceSessionId;
+        if (spaceSessionId) {
+          timelineClearState.mark(space.id, spaceSessionId, store.getOrderedItems());
+        }
+        store.clear();
+        timelineCache?.clear(space.id);
+        hasOlder = false;
+        olderButton.hidden = true;
+        setStatus("");
+        return;
+      }
       if (content === "/new") {
         const result = await spaces.startNewSession(space.id, crypto.randomUUID());
         space = { ...space, activeSpaceSessionId: result.newSession.id };
@@ -533,9 +615,10 @@ export function mountSpaceView({
     const beforeTop = timelineEl.scrollTop;
     try {
       const page = await spaces.fetchTimeline(space.id, { before: oldest.id, limit: TIMELINE_PAGE_SIZE });
+      const visibleItems = visibleTimelineItems(page.items);
       preserveFullRenderScroll = true;
-      store.prependOlder(page.items);
-      hasOlder = page.items.length === TIMELINE_PAGE_SIZE;
+      store.prependOlder(visibleItems);
+      hasOlder = timelineHasOlder(page.items, visibleItems);
       olderButton.hidden = !hasOlder;
       timelineEl.scrollTop = beforeTop + timelineEl.scrollHeight - beforeHeight;
     } catch (err) {

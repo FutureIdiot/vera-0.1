@@ -7,9 +7,9 @@ export const DEFAULT_COMMANDS = Object.freeze([
   { command: "/new", description: "开始新的 SpaceSession", available: true },
   { command: "/compact", description: "压缩当前上下文", available: true },
   { command: "/resume", description: "选择并恢复旧 Session", available: true },
+  { command: "/clear", description: "清空本设备当前时间线", available: true },
+  { command: "/export", description: "导出当前 Session 的 Markdown", available: true },
   { command: "/forge", description: "编排 Agent 协作流程", available: false },
-  { command: "/clear", description: "清理当前聊天", available: false },
-  { command: "/export", description: "导出当前对话", available: false },
   { command: "/theme", description: "切换主题", available: false },
   { command: "/help", description: "查看命令帮助", available: false },
 ]);
