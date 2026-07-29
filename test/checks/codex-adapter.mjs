@@ -6,7 +6,13 @@ import { join } from "node:path";
 
 import { createFakeCodex } from "../adapters/codex-cli-fixture.js";
 import { createCodexAdapter } from "../../src/adapters/codex-adapter.js";
-import { createHttpClient, enrollDaemonIdentity, startGateway, startTestDaemon } from "./_helpers.mjs";
+import {
+  createHttpClient,
+  enrollDaemonIdentity,
+  setVeraMemoryEnabled,
+  startGateway,
+  startTestDaemon,
+} from "./_helpers.mjs";
 import { createStore } from "../../src/store/store.js";
 import { createMemoryTaskRuntime } from "../../src/memory/memory-task-runtime.js";
 import { loadConfig } from "../../src/core/config.js";
@@ -103,6 +109,7 @@ export async function run(ctx) {
         },
       });
       const verifiedRequest = createHttpClient(gateway.port);
+      await setVeraMemoryEnabled({ request: verifiedRequest, agentId: agent.id, enabled: true });
       const runtime = {
         hostId: `codex-${agent.id}`,
         kind: "cli",

@@ -2,11 +2,20 @@
 // Agent isolation, stain safety, and unchanged SSE event vocabulary.
 
 export async function run(ctx) {
-  const { check, httpRequest, assertEqual, assert, sse, createOnlineMockAccount } = ctx;
+  const {
+    check,
+    httpRequest,
+    assertEqual,
+    assert,
+    sse,
+    createOnlineMockAccount,
+    setVeraMemoryEnabled,
+  } = ctx;
 
   await check("r.1 M3 retrieval injects safely once per session and keeps SSE unchanged", async () => {
     const created = await createOnlineMockAccount({ name: "M3 alpha" });
     const agentId = created.agent.id;
+    await setVeraMemoryEnabled({ request: httpRequest, agentId, enabled: true });
     ctx.m3AccountId = created.account.id;
     const memories = [
       ["orchid-alpha", "兰花协议甲：检索必须保持确定性"],
@@ -79,6 +88,7 @@ export async function run(ctx) {
   await check("r.3 M3 retrieval never crosses Agent scope", async () => {
     const created = await createOnlineMockAccount({ name: "M3 beta" });
     const agentId = created.agent.id;
+    await setVeraMemoryEnabled({ request: httpRequest, agentId, enabled: true });
     const accountId = created.account.id;
     await httpRequest("POST", `/api/agents/${agentId}/memory`, {
       slug: "beta-orchid", type: "project_rule", description: "兰花协议仅属于beta",

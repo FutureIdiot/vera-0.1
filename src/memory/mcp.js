@@ -132,13 +132,22 @@ function toolError(error) {
   };
 }
 
-export function createMemoryMcpDispatcher({ memory, retrieval, digestService = null }) {
+export function createMemoryMcpDispatcher({
+  memory,
+  retrieval,
+  digestService = null,
+  isEnabled = () => true,
+}) {
   if (!memory) throw new Error("createMemoryMcpDispatcher requires memory");
+  if (typeof isEnabled !== "function") throw new Error("createMemoryMcpDispatcher requires isEnabled");
 
   async function callTool({ context, name, arguments: rawArguments }) {
     try {
       const args = validateArguments(name, rawArguments);
       const trusted = requireContext(context, { sources: name === "memory_create" });
+      if (!isEnabled(trusted.agentId)) {
+        throw new ApiError("forbidden", "Vera Memory MCP is disabled");
+      }
       if (["memory_search", "memory_fetch_more", "memory_fetch_detail"].includes(name)) {
         if (typeof trusted.agentSessionId !== "string" || !trusted.agentSessionId ||
             !Number.isInteger(trusted.generation) || trusted.generation < 1) {

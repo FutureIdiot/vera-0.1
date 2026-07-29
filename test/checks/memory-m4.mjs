@@ -34,19 +34,20 @@ export async function run(ctx) {
     assertEqual(hooks.status, 200);
     assertEqual(hooks.json.bindings.length, 2);
     const recall = hooks.json.bindings.find((item) => item.unitId === "vera.memory.recall");
+    assertEqual(recall.enabled, false);
     const changed = await httpRequest("PATCH", `/api/agents/${agent.id}/unit-bindings/${recall.unitId}`, {
-      enabled: false,
+      enabled: true,
       ifMatch: recall.version,
     });
     assertEqual(changed.status, 200);
-    assertEqual(changed.json.binding.enabled, false);
+    assertEqual(changed.json.binding.enabled, true);
     const stale = await httpRequest("PATCH", `/api/agents/${agent.id}/unit-bindings/${recall.unitId}`, {
-      enabled: true,
+      enabled: false,
       ifMatch: recall.version,
     });
     assertEqual(stale.status, 409);
     const refreshed = await httpRequest("GET", `/api/agents/${agent.id}/unit-bindings?kind=hook`);
-    assertEqual(refreshed.json.bindings.find((item) => item.unitId === "vera.memory.recall").enabled, false);
+    assertEqual(refreshed.json.bindings.find((item) => item.unitId === "vera.memory.recall").enabled, true);
   });
 
   await check("p5-m4.3 Dream is asynchronous, idempotent, and fails without an unverified fallback", async () => {

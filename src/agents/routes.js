@@ -14,7 +14,7 @@ import {
   deleteAccount,
 } from "./accounts.js";
 import { listAccountLoginAudits, recordAccountLoginAudit } from "./login-audit.js";
-import { listUnitBindings, updateUnitBinding } from "./unit-bindings.js";
+import { ensureUnitBindings, listUnitBindings, updateUnitBinding } from "./unit-bindings.js";
 import { accountModelOptions, updateAccountModel } from "./account-models.js";
 
 export function registerAgentRoutes(router, {
@@ -164,6 +164,7 @@ export function registerAgentRoutes(router, {
       const body = await readJsonBody(req);
       const { agent, account } = createAgent(store, body);
       memoryConfigService?.ensureAgentConfig(agent.id);
+      ensureUnitBindings(store, agent.id);
       sendJson(res, 201, { agent, account });
     }),
   );

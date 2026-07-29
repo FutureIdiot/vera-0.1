@@ -6,7 +6,16 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export async function run(ctx) {
-  const { check, httpRequest, sse, assertEqual, assert, dataDir, createOnlineMockAccount } = ctx;
+  const {
+    check,
+    httpRequest,
+    sse,
+    assertEqual,
+    assert,
+    dataDir,
+    createOnlineMockAccount,
+    setVeraMemoryEnabled,
+  } = ctx;
   const createGroup = async (name, accountIds) => {
     const response = await httpRequest("POST", "/api/groups", { name, accountIds });
     assertEqual(response.status, 201);
@@ -119,6 +128,7 @@ updatedAt: 2026-07-08T00:00:00.000Z
     const onlineC = await createOnlineMockAccount({ name: "VerifyMockC" });
     const agentC = onlineC.agent;
     const accountC = onlineC.account;
+    await setVeraMemoryEnabled({ request: httpRequest, agentId: agentC.id, enabled: true });
     const agentVaultPath = join(vaultPath, agentC.id);
     await mkdir(agentVaultPath, { recursive: true });
     await writeFile(join(agentVaultPath, "decision-test.md"), decisionFile, "utf8");

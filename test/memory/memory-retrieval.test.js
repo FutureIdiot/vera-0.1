@@ -68,6 +68,39 @@ test("resident index is Agent-scoped, pin-first, active-only, and hot-budgeted",
   });
 });
 
+test("disabled Recall omits both the resident index and per-turn injection", async () => {
+  await withFixture(async ({ store, memory }) => {
+    const retrieval = createMemoryRetrievalService({
+      store,
+      memory,
+      config: { residentIndexMaxLines: 2, injectionTokenBudget: 128 },
+      isRecallEnabled: () => false,
+    });
+    await save(memory, "agt_alpha1", "alpha-disabled");
+    const recall = await session(retrieval);
+
+    assert.equal(await retrieval.residentIndex("agt_alpha1"), null);
+    assert.equal(await retrieval.residentIndexForSession({
+      agentId: "agt_alpha1",
+      agentSessionId: recall.agentSessionId,
+      generation: recall.generation,
+    }), null);
+    const injected = await retrieval.searchForInjection({
+      context: {
+        agentId: "agt_alpha1",
+        agentSessionId: recall.agentSessionId,
+        generation: recall.generation,
+        runId: "run_disabled",
+        spaceId: "spc_disabled",
+        triggerMessageId: "msg_disabled",
+      },
+      query: "alpha-disabled",
+    });
+    assert.equal(injected.block, null);
+    assert.deepEqual(injected.response.nodes, []);
+  });
+});
+
 test("resident index is frozen for one AgentSession generation", async () => {
   await withFixture(async ({ memory, retrieval }) => {
     await save(memory, "agt_alpha1", "alpha-first");

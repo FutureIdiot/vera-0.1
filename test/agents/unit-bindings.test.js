@@ -14,11 +14,15 @@ import {
 
 const AGENT_ID = "agt_unit_bindings";
 
-async function withStore(run) {
+async function withStore(run, { kind = "api" } = {}) {
   const parent = await mkdtemp(join(tmpdir(), "vera-unit-bindings-"));
   const dataPath = join(parent, "data");
   const store = await createStore({ dataPath, debounceMs: 5 });
-  store.insert("agents", { id: AGENT_ID, name: "Binding Owner" });
+  store.insert("agents", {
+    id: AGENT_ID,
+    name: "Binding Owner",
+    runtimeProfile: { schemaVersion: 1, kind, provider: "test", model: "test-model" },
+  });
   try {
     await run(store, dataPath);
   } finally {
@@ -27,7 +31,7 @@ async function withStore(run) {
   }
 }
 
-test("ensure gives existing Agents the three enabled gateway built-ins once", async () => {
+test("ensure gives API Agents the three enabled gateway built-ins once", async () => {
   await withStore(async (store) => {
     const first = ensureUnitBindings(store, AGENT_ID);
     const second = ensureUnitBindings(store, AGENT_ID);
@@ -43,6 +47,25 @@ test("ensure gives existing Agents the three enabled gateway built-ins once", as
       assert.equal("executorAgentId" in binding, false);
     }
   });
+});
+
+test("ensure gives CLI Agents disabled Memory defaults without resetting explicit changes", async () => {
+  await withStore(async (store) => {
+    const initial = ensureUnitBindings(store, AGENT_ID);
+    assert.deepEqual(initial.map((binding) => binding.enabled), [false, false, false]);
+
+    const current = getUnitBinding(store, AGENT_ID, "vera.memory");
+    const enabled = updateUnitBinding(store, AGENT_ID, current.unitId, {
+      enabled: true,
+      ifMatch: current.version,
+    });
+
+    assert.equal(enabled.enabled, true);
+    assert.deepEqual(ensureUnitBindings(store, AGENT_ID), [
+      enabled,
+      ...initial.slice(1),
+    ]);
+  }, { kind: "cli" });
 });
 
 test("list requires a valid kind, filters manifest order, and ensures defaults", async () => {

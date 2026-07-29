@@ -153,6 +153,30 @@ export function createHttpClient(defaultPort) {
   return httpRequest;
 }
 
+export async function setVeraMemoryEnabled({ request, agentId, enabled }) {
+  for (const [kind, unitIds] of [
+    ["mcp", ["vera.memory"]],
+    ["hook", ["vera.memory.recall", "vera.memory.write"]],
+  ]) {
+    const listed = await request("GET", `/api/agents/${agentId}/unit-bindings?kind=${kind}`);
+    if (listed.status !== 200) {
+      throw new Error(`failed to list ${kind} bindings for ${agentId}: ${listed.status}`);
+    }
+    for (const unitId of unitIds) {
+      const current = listed.json.bindings.find((binding) => binding.unitId === unitId);
+      if (!current) throw new Error(`missing ${unitId} binding for ${agentId}`);
+      if (current.enabled === enabled) continue;
+      const changed = await request("PATCH", `/api/agents/${agentId}/unit-bindings/${unitId}`, {
+        enabled,
+        ifMatch: current.version,
+      });
+      if (changed.status !== 200 || changed.json.binding.enabled !== enabled) {
+        throw new Error(`failed to update ${unitId} binding for ${agentId}: ${changed.status}`);
+      }
+    }
+  }
+}
+
 export function createBinaryHttpClient(defaultPort) {
   return async function binaryRequest(method, path, { headers = {}, body, portOverride } = {}) {
     const response = await fetch(`http://127.0.0.1:${portOverride ?? defaultPort}${path}`, {

@@ -29,6 +29,13 @@ export async function run(ctx) {
     }
     assertEqual(json.account.model, "mock-v1");
     assertEqual(json.account.modelVersion, 1);
+    const mcp = await httpRequest("GET", `/api/agents/${json.agent.id}/unit-bindings?kind=mcp`);
+    const hooks = await httpRequest("GET", `/api/agents/${json.agent.id}/unit-bindings?kind=hook`);
+    assertEqual(mcp.status, 200);
+    assertEqual(hooks.status, 200);
+    assertEqual(mcp.json.bindings.find((binding) => binding.unitId === "vera.memory").enabled, false);
+    assertEqual(hooks.json.bindings.find((binding) => binding.unitId === "vera.memory.recall").enabled, false);
+    assertEqual(hooks.json.bindings.find((binding) => binding.unitId === "vera.memory.write").enabled, false);
     ctx.agent = json.agent;
     ctx.owningAccount = json.account;
   });

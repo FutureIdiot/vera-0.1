@@ -25,6 +25,7 @@ import {
   fileExistsAt,
   createCounter,
   createHttpClient,
+  setVeraMemoryEnabled,
   createBinaryHttpClient,
   createOnlineMockAccount,
   stopMockDaemons,
@@ -109,6 +110,7 @@ async function main() {
     fileExistsAt,
     startGateway,
     createOnlineMockAccount: (options) => createOnlineMockAccount({ port, ...options }),
+    setVeraMemoryEnabled,
     httpRequest,
     binaryRequest: createBinaryHttpClient(port),
     // connectSse helper：统一把打开的 handle 注册进 openSseHandles 以便

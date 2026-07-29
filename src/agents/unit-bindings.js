@@ -46,9 +46,15 @@ function newVersion() {
 }
 
 function assertAgent(store, agentId) {
-  if (!store.find("agents", agentId)) {
+  const agent = store.find("agents", agentId);
+  if (!agent) {
     throw new ApiError("not_found", `agent ${agentId} does not exist`);
   }
+  return agent;
+}
+
+function initialEnabledForAgent(agent) {
+  return agent.runtimeProfile?.kind !== "cli";
 }
 
 function toPublicBinding(record, unit) {
@@ -75,7 +81,7 @@ function findStoredBinding(store, agentId, unitId) {
  * Returns public bindings in manifest order.
  */
 export function ensureUnitBindings(store, agentId) {
-  assertAgent(store, agentId);
+  const agent = assertAgent(store, agentId);
   const now = new Date().toISOString();
 
   return BUILT_IN_UNITS.map((unit) => {
@@ -85,7 +91,7 @@ export function ensureUnitBindings(store, agentId) {
         id: bindingId(agentId, unit.unitId),
         agentId,
         unitId: unit.unitId,
-        enabled: true,
+        enabled: initialEnabledForAgent(agent),
         version: newVersion(),
         createdAt: now,
         updatedAt: now,

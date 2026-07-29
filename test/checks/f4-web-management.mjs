@@ -2,7 +2,15 @@
 // consumers rather than CRUD responses alone.
 
 export async function run(ctx) {
-  const { check, httpRequest, assertEqual, assert, sse, createOnlineMockAccount } = ctx;
+  const {
+    check,
+    httpRequest,
+    assertEqual,
+    assert,
+    sse,
+    createOnlineMockAccount,
+    setVeraMemoryEnabled,
+  } = ctx;
 
   await check("q.1 bootstrap Account shape exposes honest presence capability state", async () => {
     const response = await httpRequest("GET", "/api/bootstrap");
@@ -47,6 +55,7 @@ export async function run(ctx) {
   await check("q.3 resident-index budget hot-updates before a new external session", async () => {
     const created = await createOnlineMockAccount({ name: "F4 memory budget" });
     const agentId = created.agent.id;
+    await setVeraMemoryEnabled({ request: httpRequest, agentId, enabled: true });
     await httpRequest("POST", `/api/agents/${agentId}/memory`, { slug: "first-memory", type: "decision", description: "first hook", content: "first" });
     await httpRequest("POST", `/api/agents/${agentId}/memory`, { slug: "second-memory", type: "decision", description: "second hook", content: "second" });
     const setting = await httpRequest("PATCH", "/api/settings", { settings: { "memory.injectionBudgetResidentLines": 1 } });

@@ -56,6 +56,31 @@ test("Memory MCP schemas never let tool arguments select identity or sources", a
   });
 });
 
+test("disabled Memory MCP rejects every tool before touching its provider", async () => {
+  await withMcp(async ({ memory, retrieval, context }) => {
+    let providerCalls = 0;
+    const disabled = createMemoryMcpDispatcher({
+      memory: {
+        async listWithDiagnostics() {
+          providerCalls += 1;
+          return { memories: [], errors: [], index: null };
+        },
+      },
+      retrieval,
+      isEnabled: (agentId) => agentId !== context.agentId,
+    });
+    const result = await disabled.callTool({
+      context,
+      name: "memory_list",
+      arguments: {},
+    });
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent.error.code, "forbidden");
+    assert.match(result.content[0].text, /disabled/u);
+    assert.equal(providerCalls, 0);
+  });
+});
+
 test("MCP binds Digest to the trusted SpaceSession", async () => {
   await withMcp(async ({ memory, retrieval, context }) => {
     const calls = [];

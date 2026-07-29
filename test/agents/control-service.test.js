@@ -138,7 +138,11 @@ test("Control Service closes the owner credential, Workspace, Session, and Execu
     assert.deepEqual(JSON.parse(await readFile(tokensPath, "utf8"))[enrolled.json.agent.id], agentTokenFingerprint(enrolled.json.agentToken));
     assert.equal((await readFile(tokensPath, "utf8")).includes(enrolled.json.agentToken), false);
     assert.deepEqual(configuredAgents, [enrolled.json.agent.id]);
-    assert.equal(store.list("unitBindings").filter((binding) => binding.agentId === enrolled.json.agent.id).length, 3);
+    const ownerBindings = store.list("unitBindings").filter(
+      (binding) => binding.agentId === enrolled.json.agent.id,
+    );
+    assert.equal(ownerBindings.length, 3);
+    assert.deepEqual(ownerBindings.map((binding) => binding.enabled), [false, false, false]);
     assert.equal("accessKeyHash" in enrolled.json.account, false);
     assert.equal(enrolled.json.account.workspace, null);
     assert.equal(enrolled.json.account.model, "mock-v1");
