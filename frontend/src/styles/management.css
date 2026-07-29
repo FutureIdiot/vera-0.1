@@ -12,8 +12,15 @@
 .vera-space-form fieldset { border: 0; display: grid; gap: var(--vera-space-md); margin: 0; min-width: 0; padding: 0; }
 .vera-space-form legend { font-weight: 600; margin-bottom: var(--vera-space-sm); }
 .vera-space-form input[type="text"], .vera-space-form input:not([type]), .vera-space-form select { background: var(--vera-color-background); border: var(--vera-border-width) solid var(--vera-color-border); border-radius: var(--vera-control-radius); color: var(--vera-color-text); min-height: var(--vera-touch-target); min-width: 0; padding: var(--vera-space-sm); width: 100%; }
-.vera-agent-rule { background: var(--vera-color-surface); border-radius: var(--vera-control-radius); display: grid; gap: var(--vera-space-sm); padding: var(--vera-space-md); }
-.vera-agent-rule__details { display: flex; flex-wrap: wrap; gap: var(--vera-space-sm) var(--vera-space-lg); }
+.vera-space-participant { align-items: center; display: grid; gap: var(--vera-space-sm) var(--vera-space-md); grid-template-columns: minmax(0, 1fr) auto; min-height: var(--vera-touch-target); padding: var(--vera-space-sm) 0; }
+.vera-space-participant + .vera-space-participant { border-top: var(--vera-border-width) solid var(--vera-color-border); }
+.vera-space-participant__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vera-space-form .vera-space-participant select { width: auto; }
+.vera-space-response-sources { display: grid; gap: var(--vera-space-xs); grid-column: 1 / -1; }
+.vera-space-response-sources[hidden] { display: none; }
+.vera-space-response-sources > small { color: var(--vera-color-muted-text); }
+.vera-space-response-sources__options { display: flex; flex-wrap: wrap; gap: var(--vera-space-xs) var(--vera-space-md); }
+.vera-space-response-source { align-items: center; display: inline-flex; gap: var(--vera-space-xs); min-height: var(--vera-touch-target); }
 .vera-check { align-items: center; display: flex; gap: var(--vera-space-sm); min-height: var(--vera-touch-target); }
 .vera-primary-button { background: var(--vera-color-button-bg); border: 0; border-radius: var(--vera-control-radius); color: var(--vera-color-button-text); min-height: var(--vera-touch-target); padding: var(--vera-space-sm) var(--vera-space-lg); }
 .vera-primary-button:hover:not(:disabled) { background: var(--vera-color-button-hover); }
@@ -64,6 +71,11 @@
 .vera-account-list { border-block: var(--vera-border-width) solid var(--vera-color-border); }
 .vera-account-grid,
 .vera-status-grid { display: grid; gap: var(--vera-space-md); }
+.vera-account-login { min-width: 0; }
+.vera-account-login-row { align-items: center; display: flex; gap: var(--vera-space-md); min-height: var(--vera-touch-target); min-width: 0; }
+.vera-account-login-row__summary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vera-account-login-row__agent { color: var(--vera-color-muted-text); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vera-account-login-row__time { color: var(--vera-color-muted-text); flex: 0 0 auto; white-space: nowrap; }
 .vera-memory-layout { display: grid; gap: var(--vera-space-md); grid-template-columns: minmax(0, 1fr); overflow: auto; }
 .vera-memory-list,
 .vera-memory-editor { display: grid; gap: var(--vera-space-sm); min-width: 0; }

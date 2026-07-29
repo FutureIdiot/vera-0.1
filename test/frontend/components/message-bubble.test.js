@@ -128,9 +128,9 @@ test("group Account message uses top-level frozen identity and model fields", ()
 
     const avatar = bubble.querySelector(".vera-bubble__avatar");
     const author = bubble.querySelector(".vera-bubble__author");
-    assert.equal(avatar.href, "#/settings/accounts/acc%20one");
+    assert.equal(avatar.href, "#/agents/agt%20one");
     assert.equal(avatar.textContent, "G");
-    assert.equal(avatar.attributes["aria-label"], "打开 Gemma 设置");
+    assert.equal(avatar.attributes["aria-label"], "打开 Gemma 的 Agent 设置");
     assert.equal(author.textContent, "Gemma · gemma-test");
   } finally {
     globalThis.document = previousDocument;

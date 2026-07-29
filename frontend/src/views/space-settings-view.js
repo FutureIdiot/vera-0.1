@@ -13,6 +13,21 @@ function checkbox(labelText, checked = false) {
   return { label, input };
 }
 
+function projectSeat(
+  seat,
+  responseMode = seat?.responseMode ?? "default",
+  respondTo = seat?.respondTo,
+) {
+  return {
+    accountId: seat.accountId,
+    responseMode,
+    ...(Array.isArray(respondTo) && respondTo.length ? { respondTo: [...respondTo] } : {}),
+    ...(Array.isArray(seat.blockAccountIds) && seat.blockAccountIds.length
+      ? { blockAccountIds: [...seat.blockAccountIds] }
+      : {}),
+  };
+}
+
 export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell } = {}) {
   const client = createSpacesClient(createHttpClient(platform));
   const bootstrap = runtime.getBootstrap();
@@ -47,49 +62,86 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   name.placeholder = "Space 名称";
   basic.append(basicLegend, name);
 
-  const participants = document.createElement("fieldset");
-  const participantLegend = document.createElement("legend");
   const grouped = Boolean(space.groupId);
-  participantLegend.textContent = grouped
-    ? "群聊成员响应规则（成员请在群聊顶部编辑）"
-    : "参与 Account 与响应规则";
-  participants.appendChild(participantLegend);
+  const participants = grouped ? document.createElement("fieldset") : null;
   const seatControls = new Map();
-  for (const account of bootstrap.accounts) {
-    const seat = space.seats.find((candidate) => candidate.accountId === account.id);
-    const row = document.createElement("section");
-    row.className = "vera-agent-rule";
-    const included = checkbox(account.name, Boolean(seat));
-    included.input.disabled = grouped;
-    const mode = document.createElement("select");
-    mode.setAttribute("aria-label", `${account.name} 响应模式`);
-    for (const [value, label] of [["default", "默认：都响应"], ["silent", "静默：仅指定来源 @"], ["focused", "专注：仅 @自己"]]) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      mode.appendChild(option);
-    }
-    mode.value = seat?.responseMode ?? "default";
-    mode.disabled = !included.input.checked;
-    included.input.addEventListener("change", () => { mode.disabled = !included.input.checked; });
-    const sources = document.createElement("div");
-    sources.className = "vera-agent-rule__details";
-    const userSource = checkbox("静默时响应用户", seat?.respondTo?.includes("user"));
-    sources.appendChild(userSource.label);
-    const respondSources = new Map([["user", userSource.input]]);
-    const blocked = new Map();
-    for (const other of bootstrap.accounts.filter((candidate) => candidate.id !== account.id)) {
-      const responseSource = checkbox(`响应 ${other.name}`, seat?.respondTo?.includes(other.id));
-      const control = checkbox(`屏蔽 ${other.name}`, seat?.blockAccountIds?.includes(other.id));
-      respondSources.set(other.id, responseSource.input);
-      blocked.set(other.id, control.input);
-      sources.append(responseSource.label, control.label);
-    }
-    row.append(included.label, mode, sources);
-    participants.appendChild(row);
-    seatControls.set(account.id, { included: included.input, mode, respondSources, blocked });
+
+  if (participants) {
+    const participantLegend = document.createElement("legend");
+    participantLegend.textContent = "参与 Account";
+    participants.appendChild(participantLegend);
   }
 
+  function renderParticipants() {
+    if (!participants) return;
+    const participantLegend = participants.children[0];
+    participants.replaceChildren(participantLegend);
+    seatControls.clear();
+    const accountById = new Map(runtime.getBootstrap().accounts.map((account) => [account.id, account]));
+    for (const seat of space.seats ?? []) {
+      const account = accountById.get(seat.accountId);
+      const row = document.createElement("div");
+      row.className = "vera-space-participant";
+      const name = document.createElement("span");
+      name.className = "vera-space-participant__name";
+      name.textContent = account?.name ?? "未知 Account";
+      const mode = document.createElement("select");
+      mode.setAttribute("aria-label", `${name.textContent} 响应模式`);
+      for (const [value, label] of [["default", "默认"], ["silent", "静默"], ["focused", "专注"]]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        mode.appendChild(option);
+      }
+      mode.value = seat.responseMode ?? "default";
+      const sourceField = document.createElement("div");
+      sourceField.className = "vera-space-response-sources";
+      sourceField.hidden = mode.value !== "silent";
+      const sourceLabel = document.createElement("small");
+      sourceLabel.textContent = "响应来源";
+      const sourceOptions = document.createElement("div");
+      sourceOptions.className = "vera-space-response-sources__options";
+      const respondTo = new Map();
+      const candidates = [
+        { id: "user", name: "User" },
+        ...(space.seats ?? [])
+          .filter((candidate) => candidate.accountId !== seat.accountId)
+          .map((candidate) => ({
+            id: candidate.accountId,
+            name: accountById.get(candidate.accountId)?.name ?? "未知 Account",
+          })),
+      ];
+      for (const candidate of candidates) {
+        const option = document.createElement("label");
+        option.className = "vera-space-response-source";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = candidate.id;
+        input.checked = seat.respondTo?.includes(candidate.id) ?? false;
+        input.setAttribute("aria-label", `${name.textContent} 响应 ${candidate.name}`);
+        const text = document.createElement("span");
+        text.textContent = candidate.name;
+        option.append(input, text);
+        sourceOptions.appendChild(option);
+        respondTo.set(candidate.id, input);
+      }
+      sourceField.append(sourceLabel, sourceOptions);
+      mode.addEventListener("change", () => {
+        sourceField.hidden = mode.value !== "silent";
+      });
+      row.append(name, mode, sourceField);
+      participants.appendChild(row);
+      seatControls.set(seat.accountId, { mode, respondTo });
+    }
+  }
+
+  renderParticipants();
+
+  /*
+   * Direct Space的唯一Seat由目录归属固定；Group成员由Group管理。
+   * 本页只编辑Group现有Seat的responseMode/respondTo，
+   * 隐藏的blockAccountIds在projectSeat中原样保留。
+   */
   const notifications = document.createElement("fieldset");
   const notificationLegend = document.createElement("legend");
   notificationLegend.textContent = "消息提醒";
@@ -111,7 +163,10 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   save.type = "submit";
   save.className = "vera-primary-button";
   save.textContent = "保存设置";
-  form.append(basic, participants, notifications, error, save);
+  save.disabled = !space.seats?.length;
+  form.append(basic);
+  if (participants) form.appendChild(participants);
+  form.append(notifications, error, save);
   const historyLink = document.createElement("a");
   historyLink.className = "vera-text-button";
   historyLink.href = `#/spaces/${encodeURIComponent(space.id)}/history`;
@@ -127,14 +182,8 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
     name.value = space.name;
     notificationMode.value = space.notifications?.mode ?? "accountMessages";
     includeErrors.input.checked = space.notifications?.includeActivityErrors !== false;
-    for (const [accountId, control] of seatControls) {
-      const seat = space.seats.find((candidate) => candidate.accountId === accountId);
-      control.included.checked = Boolean(seat);
-      control.mode.disabled = !seat;
-      control.mode.value = seat?.responseMode ?? "default";
-      for (const [sourceId, input] of control.respondSources) input.checked = seat?.respondTo?.includes(sourceId) ?? false;
-      for (const [blockedId, input] of control.blocked) input.checked = seat?.blockAccountIds?.includes(blockedId) ?? false;
-    }
+    renderParticipants();
+    save.disabled = !space.seats?.length;
     shell?.setSpace(space);
   }
 
@@ -142,15 +191,15 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     error.hidden = true;
-    const seats = [];
-    for (const [accountId, control] of seatControls) {
-      if (!control.included.checked) continue;
-      const respondTo = [...control.respondSources].filter(([, input]) => input.checked).map(([id]) => id);
-      const blockAccountIds = [...control.blocked].filter(([, input]) => input.checked).map(([id]) => id);
-      seats.push({ accountId, responseMode: control.mode.value, ...(respondTo.length ? { respondTo } : {}), ...(blockAccountIds.length ? { blockAccountIds } : {}) });
-    }
+    const seats = (space.seats ?? []).map((seat) => {
+      const controls = seatControls.get(seat.accountId);
+      const respondTo = controls
+        ? [...controls.respondTo].filter(([, input]) => input.checked).map(([sourceId]) => sourceId)
+        : seat.respondTo;
+      return projectSeat(seat, controls?.mode.value ?? seat.responseMode, respondTo);
+    });
     if (!seats.length) {
-      error.textContent = "Space 至少需要一个参与 Account。";
+      error.textContent = "这个 Space 的参与 Account 数据异常，无法保存。";
       error.hidden = false;
       return;
     }

@@ -89,23 +89,15 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
   workspaceFacts.className = "vera-agent-info-panel";
   workspace.append(workspaceTitle, workspaceFacts);
 
-  const spaces = document.createElement("section");
-  spaces.className = "vera-management-section";
-  const spacesTitle = document.createElement("h2");
-  spacesTitle.textContent = "参与的 Space";
-  const spacesList = document.createElement("div");
-  spacesList.className = "vera-account-grid";
-  spaces.append(spacesTitle, spacesList);
-
   const audit = document.createElement("section");
   audit.className = "vera-management-section";
   const auditTitle = document.createElement("h2");
   auditTitle.textContent = "最近登录";
   const auditList = document.createElement("div");
-  auditList.className = "vera-account-grid";
+  auditList.className = "vera-account-login";
   audit.append(auditTitle, auditList);
 
-  content.append(feedback, identity, access, workspace, spaces, audit);
+  content.append(feedback, identity, access, workspace, audit);
   root.appendChild(content);
 
   function findAgent(id) {
@@ -151,48 +143,27 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
       infoRow("宿主", workspaceValue?.hostId ?? "—"),
       infoRow("最近校验", formatTime(workspaceValue?.lastValidatedAt)),
     );
-    const activeSpaces = (runtime.getBootstrap().spaces ?? []).filter((space) =>
-      space.archivedAt == null
-      && Array.isArray(space.seats)
-      && space.seats.some((seat) => seat.accountId === account.id));
-    spacesList.replaceChildren();
-    if (!activeSpaces.length) spacesList.appendChild(createNotice("当前没有参与 active Space。"));
-    for (const space of activeSpaces) {
-      const seat = space.seats.find((candidate) => candidate.accountId === account.id);
-      const card = document.createElement("article");
-      card.className = "vera-management-card";
-      const actions = document.createElement("div");
-      actions.className = "vera-form-actions";
-      const open = document.createElement("a");
-      open.className = "vera-text-button";
-      open.href = `#/spaces/${encodeURIComponent(space.id)}`;
-      open.textContent = "进入 Space";
-      const settings = document.createElement("a");
-      settings.className = "vera-text-button";
-      settings.href = `#/spaces/${encodeURIComponent(space.id)}/settings`;
-      settings.textContent = "Space 设置";
-      actions.append(open, settings);
-      card.append(
-        infoRow("名称", space.name ?? "未命名 Space"),
-        infoRow("响应模式", seat?.responseMode ?? "default"),
-        actions,
-      );
-      spacesList.appendChild(card);
-    }
     const entries = Array.isArray(detail?.recentLogins) ? detail.recentLogins : [];
     auditList.replaceChildren();
     if (!entries.length) auditList.appendChild(createNotice("还没有登录记录。"));
-    for (const entry of entries) {
-      const card = document.createElement("article");
-      card.className = "vera-management-card";
-      card.append(
-        infoRow("事件", entry.event ?? "—"),
-        infoRow("结果", entry.result ?? "—"),
-        infoRow("原因", entry.reasonCode ?? "—"),
-        infoRow("Agent", agentLink(findAgent(entry.agentId), entry.agentId ?? "—")),
-        infoRow("时间", formatTime(entry.createdAt)),
-      );
-      auditList.appendChild(card);
+    const entry = entries[0];
+    if (entry) {
+      const row = document.createElement("div");
+      row.className = "vera-account-login-row";
+      const summary = document.createElement("span");
+      summary.className = "vera-account-login-row__summary";
+      summary.textContent = [entry.event, entry.result, entry.reasonCode].filter(Boolean).join(" · ") || "—";
+      const actor = document.createElement("span");
+      actor.className = "vera-account-login-row__agent";
+      const linkedAgent = agentLink(findAgent(entry.agentId), entry.agentId ?? "—");
+      if (linkedAgent instanceof Node) actor.appendChild(linkedAgent);
+      else actor.textContent = linkedAgent;
+      const time = document.createElement("time");
+      time.className = "vera-account-login-row__time";
+      time.dateTime = entry.createdAt ?? "";
+      time.textContent = formatTime(entry.createdAt);
+      row.append(summary, actor, time);
+      auditList.appendChild(row);
     }
   }
 

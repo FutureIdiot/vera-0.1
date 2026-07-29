@@ -1,5 +1,5 @@
 const ENTRIES = [
-  ["Account", "Agent 系统身份、连接与授权", "#/settings/accounts"],
+  ["Account", "对外身份、模型、Workspace 与接入授权", "#/settings/accounts"],
   ["System", "隔离、记忆整理、消息呈现与 Gateway 更新", "#/settings/system"],
   ["Appearance", "主题、字体与响应式布局", "#/settings/appearance"],
   ["Paths", "受控校验与迁移", "#/settings/paths"],

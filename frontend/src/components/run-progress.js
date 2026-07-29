@@ -50,11 +50,11 @@ function createElement(entry, { accountName, isGroupChat, onBackground, onError 
   avatar.textContent = name.charAt(0).toUpperCase();
   avatar.hidden = !isGroupChat;
   avatar.setAttribute("aria-hidden", String(!isGroupChat));
-  avatar.tabIndex = isGroupChat ? 0 : -1;
-  if (isGroupChat) {
-    avatar.href = `#/settings/accounts/${encodeURIComponent(run.accountId)}`;
-    avatar.setAttribute("aria-label", `打开 ${name} 设置`);
-    avatar.title = name;
+  avatar.tabIndex = isGroupChat && run.agentId ? 0 : -1;
+  if (isGroupChat && run.agentId) {
+    avatar.href = `#/agents/${encodeURIComponent(run.agentId)}`;
+    avatar.setAttribute("aria-label", `打开 ${name} 的 Agent 设置`);
+    avatar.title = "Agent 设置";
   }
 
   const stack = document.createElement("div");

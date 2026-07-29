@@ -55,6 +55,11 @@ export function resolveSpaceIdentity(currentSpace, accounts = [], agentStates = 
   };
 }
 
+export function resolveAgentSettingsHref(account) {
+  const agentId = account?.activeAgentId ?? account?.ownerAgentId ?? null;
+  return agentId ? `#/agents/${encodeURIComponent(agentId)}` : null;
+}
+
 function defaultManagementHeader(routeName, currentSpace) {
   const currentChat = currentSpace ? `#/spaces/${encodeURIComponent(currentSpace.id)}` : "#/";
   const defaults = {
@@ -149,7 +154,7 @@ export function createAppShell({ root, platform, runtime } = {}) {
 
   const participants = document.createElement("div");
   participants.className = "vera-shell__participants";
-  participants.setAttribute("aria-hidden", "true");
+  participants.setAttribute("aria-label", "当前 Space 的 Agent");
 
   const identity = document.createElement("div");
   identity.className = "vera-shell__identity";
@@ -360,14 +365,24 @@ export function createAppShell({ root, platform, runtime } = {}) {
     participants.replaceChildren();
     const bootstrap = runtime.getBootstrap();
     const accounts = bootstrap.accounts ?? [];
+    const agents = bootstrap.agents ?? [];
     const seats = currentSpace?.seats ?? [];
     const visible = seats.slice(0, 3);
     for (const seat of visible) {
       const account = accounts.find((candidate) => candidate.id === seat.accountId);
-      const avatar = document.createElement("span");
+      const href = resolveAgentSettingsHref(account);
+      const agentId = account?.activeAgentId ?? account?.ownerAgentId ?? null;
+      const agent = agents.find((candidate) => candidate.id === agentId);
+      const avatar = document.createElement(href ? "a" : "span");
       avatar.className = "vera-shell__participant";
       avatar.textContent = (account?.name ?? seat.accountId ?? "?").charAt(0).toUpperCase();
-      avatar.title = account?.name ?? seat.accountId ?? "Account";
+      if (href) {
+        avatar.href = href;
+        avatar.setAttribute("aria-label", `打开 ${agent?.name ?? "Agent"} 设置`);
+        avatar.title = agent?.name ?? "Agent";
+      } else {
+        avatar.title = account?.name ?? seat.accountId ?? "Account";
+      }
       participants.appendChild(avatar);
     }
     if (seats.length > visible.length) {

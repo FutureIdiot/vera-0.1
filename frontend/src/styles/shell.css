@@ -90,8 +90,13 @@
   height: var(--vera-header-avatar-size);
   justify-content: center;
   margin-left: calc(var(--vera-space-sm) * -1);
+  text-decoration: none;
   user-select: none;
   width: var(--vera-header-avatar-size);
+}
+
+.vera-shell__participant[href] {
+  cursor: pointer;
 }
 
 .vera-shell__participant:first-child {

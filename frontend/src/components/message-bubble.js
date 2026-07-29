@@ -1,7 +1,7 @@
 // Message 气泡：随 message.delta 流式增长、message.completed 以全文覆盖
 // （docs/api-contract.md 四、客户端义务）。样式一律走 CSS 变量（styles/tokens.css）。
-// Account 消息显示持久对外身份；头像进入 Account 详情，不把实际执行 Agent
-// 冒充联系人。名称优先使用消息冻结快照，再查当前 Account 投影。
+// Account 消息显示持久对外身份；头像仅作为冻结 executingAgentId 的设置入口，
+// 不改变消息仍由 Account 署名的事实。名称优先使用冻结快照，再查当前 Account 投影。
 
 import { setIconButtonContent } from "./vector-icon.js";
 
@@ -221,15 +221,16 @@ export function applyMessageBubble(el, item, ctx = {}) {
     : "";
   const avatarEligible = !isUser && Boolean(accountId);
   const avatarVisible = avatarEligible && grouping.showAvatar && !isPrivateAgent;
+  const avatarLinked = avatarVisible && Boolean(item.executingAgentId);
   avatarEl.textContent = avatarEligible ? (accountName || "?").charAt(0).toUpperCase() : "";
   avatarEl.hidden = !avatarEligible || isPrivateAgent;
   avatarEl.classList.toggle("is-placeholder", avatarEligible && !avatarVisible && !isPrivateAgent);
   avatarEl.setAttribute("aria-hidden", String(!avatarVisible));
-  avatarEl.tabIndex = avatarVisible ? 0 : -1;
-  if (avatarVisible) {
-    avatarEl.href = `#/settings/accounts/${encodeURIComponent(accountId)}`;
-    avatarEl.setAttribute("aria-label", `打开 ${accountName || "Account"} 设置`);
-    avatarEl.title = accountName || "Account";
+  avatarEl.tabIndex = avatarLinked ? 0 : -1;
+  if (avatarLinked) {
+    avatarEl.href = `#/agents/${encodeURIComponent(item.executingAgentId)}`;
+    avatarEl.setAttribute("aria-label", `打开 ${accountName || "Account"} 的 Agent 设置`);
+    avatarEl.title = "Agent 设置";
   } else {
     avatarEl.removeAttribute("href");
     avatarEl.removeAttribute("aria-label");

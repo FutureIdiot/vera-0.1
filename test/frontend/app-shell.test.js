@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   clampNavigatorWidth,
+  resolveAgentSettingsHref,
   resolveSpaceIdentity,
   resolveNavigatorState,
   resolveShellHeader,
@@ -15,6 +16,18 @@ test("navigator width stays inside its tokenized resize bounds", () => {
   assert.equal(clampNavigatorWidth(520, 320, 720), 520);
   assert.equal(clampNavigatorWidth(900, 320, 720), 720);
   assert.equal(clampNavigatorWidth(300, 320, 280), 320);
+});
+
+test("top-bar Account avatars resolve the active or owner Agent settings route", () => {
+  assert.equal(resolveAgentSettingsHref({
+    activeAgentId: "agt active",
+    ownerAgentId: "agt owner",
+  }), "#/agents/agt%20active");
+  assert.equal(resolveAgentSettingsHref({
+    activeAgentId: null,
+    ownerAgentId: "agt owner",
+  }), "#/agents/agt%20owner");
+  assert.equal(resolveAgentSettingsHref({ activeAgentId: null, ownerAgentId: null }), null);
 });
 
 test("chat top bar uses the left control for the directory and the Space title for settings", () => {
@@ -83,6 +96,9 @@ test("all management routes expose one top-bar back action and one heading", () 
   });
   assert.equal(agent.title, "Gemma");
   assert.equal(agent.leadingHref, "#/spaces/spc_one");
+
+  const agentDefault = resolveShellHeader({ routeName: "agent-detail", currentSpace: space });
+  assert.equal(agentDefault.leadingHref, "#/spaces/spc_one");
 
   const files = resolveShellHeader({ routeName: "space-files", currentSpace: space });
   assert.equal(files.title, "Files");

@@ -134,6 +134,7 @@ test("group Chat gives each running Account a status placeholder and reveals bac
     assert.equal(container.children.length, 2);
     assert.equal(container.children[0].querySelector(".vera-run-progress__identity").textContent, "Gemini · gemini-flash");
     assert.equal(container.children[0].querySelector(".vera-run-progress__status").textContent, "working");
+    assert.equal(container.children[0].querySelector(".vera-bubble__avatar").href, "#/agents/agt_acc_gemini");
     assert.equal(container.children[1].querySelector(".vera-run-progress__identity").textContent, "Codex · gpt-test");
 
     progress.handleEvent(state("acc_gemini", "coding", "editing files"));

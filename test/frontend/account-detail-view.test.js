@@ -10,7 +10,7 @@ import {
   infoRows,
 } from "./account-detail-test-support.js";
 
-test("Account detail derives active Space membership from bootstrap without another request", async () => {
+test("Account detail does not render Space membership from bootstrap", async () => {
   const previousDocument = globalThis.document;
   const previousNode = globalThis.Node;
   globalThis.document = { createElement: (tagName) => new FakeElement(tagName) };
@@ -64,56 +64,11 @@ test("Account detail derives active Space membership from bootstrap without anot
     const dispose = await mountAccountDetailView({ root, runtime, platform, accountId: "acc_a" });
 
     assert.deepEqual(requested, [["http://vera.test/api/accounts/acc_a", "GET"]]);
-    const membership = findSection(root, "参与的 Space");
-    assert.equal(membership.textContent.includes("Active Space"), true);
-    assert.equal(membership.textContent.includes("focused"), true);
-    assert.equal(membership.textContent.includes("Archived Space"), false);
-    assert.equal(membership.textContent.includes("Other Account Space"), false);
-    assert.equal(membership.textContent.includes("Missing Seats"), false);
-    const links = descendants(membership).filter((node) => node.tagName === "A");
-    assert.deepEqual(links.map((link) => [link.textContent, link.href]), [
-      ["进入 Space", "#/spaces/spc_active"],
-      ["Space 设置", "#/spaces/spc_active/settings"],
-    ]);
-    dispose();
-  } finally {
-    globalThis.document = previousDocument;
-    globalThis.Node = previousNode;
-  }
-});
-
-test("Account detail shows an honest empty state when bootstrap has no active membership", async () => {
-  const previousDocument = globalThis.document;
-  const previousNode = globalThis.Node;
-  globalThis.document = { createElement: (tagName) => new FakeElement(tagName) };
-  globalThis.Node = FakeElement;
-  try {
-    const detail = {
-      account: {
-        id: "acc_a",
-        name: "Account A",
-        ownerAgentId: "agt_a",
-        activeAgentId: null,
-        presence: "offline",
-        accessKeyState: "active",
-        accessKeyVersion: 1,
-        workspace: null,
-      },
-      recentLogins: [],
-    };
-    const { root, runtime, platform } = fixture(detail, {
-      spaces: [{
-        id: "spc_archived",
-        name: "Archived Space",
-        archivedAt: "2026-07-18T01:02:03.000Z",
-        seats: [{ accountId: "acc_a", responseMode: "default" }],
-      }],
-    });
-    const dispose = await mountAccountDetailView({ root, runtime, platform, accountId: "acc_a" });
-
-    const membership = findSection(root, "参与的 Space");
-    assert.equal(membership.textContent.includes("当前没有参与 active Space。"), true);
-    assert.equal(descendants(membership).some((node) => node.className === "vera-management-card"), false);
+    assert.equal(findSection(root, "参与的 Space"), undefined);
+    assert.equal(root.textContent.includes("Active Space"), false);
+    assert.equal(root.textContent.includes("Archived Space"), false);
+    const spaceLinks = descendants(root).filter((node) => node.tagName === "A" && node.href?.startsWith("#/spaces/"));
+    assert.deepEqual(spaceLinks, []);
     dispose();
   } finally {
     globalThis.document = previousDocument;
@@ -141,18 +96,29 @@ test("Account detail renders only the frozen recentLogins fields and nested Work
       },
       ownerAgent: { id: "agt_a", name: "Agent A" },
       activeAgent: { id: "agt_a", name: "Agent A" },
-      recentLogins: [{
-        id: "aud_a",
-        accountId: "acc_a",
-        agentId: "agt_a",
-        event: "login",
-        result: "rejected",
-        reasonCode: "account_busy",
-        createdAt,
-        status: "must-not-render",
-        message: "free text must not render",
-        at: "legacy-time-must-not-render",
-      }],
+      recentLogins: [
+        {
+          id: "aud_a",
+          accountId: "acc_a",
+          agentId: "agt_a",
+          event: "login",
+          result: "rejected",
+          reasonCode: "account_busy",
+          createdAt,
+          status: "must-not-render",
+          message: "free text must not render",
+          at: "legacy-time-must-not-render",
+        },
+        {
+          id: "aud_older",
+          accountId: "acc_a",
+          agentId: "agt_legacy",
+          event: "logout",
+          result: "succeeded",
+          reasonCode: null,
+          createdAt: "2026-07-17T01:02:03.000Z",
+        },
+      ],
       workspace: { hostId: "legacy-host-must-not-render", status: "legacy" },
       loginAudit: [{ event: "logout", result: "succeeded", agentId: "agt_legacy", createdAt }],
     };
@@ -164,14 +130,12 @@ test("Account detail renders only the frozen recentLogins fields and nested Work
     assert.equal(root.textContent.includes("legacy-host-must-not-render"), false);
 
     const audit = findSection(root, "最近登录");
-    const cards = descendants(audit).filter((node) => node.className === "vera-management-card");
-    assert.equal(cards.length, 1);
-    assert.deepEqual(infoRows(cards[0]), [
-      ["事件", "login"],
-      ["结果", "rejected"],
-      ["原因", "account_busy"],
-      ["Agent", "Agent A"],
-      ["时间", new Date(createdAt).toLocaleString()],
+    const rows = descendants(audit).filter((node) => node.className === "vera-account-login-row");
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].children.map((node) => node.textContent), [
+      "login · rejected · account_busy",
+      "Agent A",
+      new Date(createdAt).toLocaleString(),
     ]);
     for (const unsafe of ["must-not-render", "free text must not render", "legacy-time-must-not-render", "logout", "agt_legacy"]) {
       assert.equal(audit.textContent.includes(unsafe), false, `${unsafe} should not render`);
@@ -210,7 +174,7 @@ test("Account detail shows a safe empty state when recentLogins is absent", asyn
     const audit = findSection(root, "最近登录");
     assert.equal(audit.textContent.includes("还没有登录记录。"), true);
     assert.equal(audit.textContent.includes("succeeded"), false);
-    assert.equal(descendants(audit).some((node) => node.className === "vera-management-card"), false);
+    assert.equal(descendants(audit).some((node) => node.className === "vera-account-login-row"), false);
     dispose();
   } finally {
     globalThis.document = previousDocument;
