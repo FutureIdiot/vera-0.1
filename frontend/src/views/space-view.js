@@ -19,6 +19,10 @@ import {
   formatTimelineMarkdown,
   timelineExportFilename,
 } from "../components/timeline-export.js";
+import {
+  openForgeDialog,
+  renderForgeContextCard,
+} from "../components/forge-dialog.js";
 
 const TIMELINE_PAGE_SIZE = 50;
 const TIMELINE_EXPORT_PAGE_SIZE = 200;
@@ -59,6 +63,9 @@ export function mountSpaceView({
   let loadingOlder = false;
   let preserveFullRenderScroll = false;
   let activeCompactionJobId = null;
+  let activeForgeDialog = null;
+  let forgePollTimer = null;
+  let currentForgeContext = null;
   let observation = null;
   let latestSeq = 0;
 
@@ -93,6 +100,9 @@ export function mountSpaceView({
   olderButton.className = "vera-load-older";
   olderButton.textContent = "加载更早消息";
   olderButton.hidden = true;
+  const forgeContextHost = document.createElement("div");
+  forgeContextHost.className = "vera-forge-context-host";
+  forgeContextHost.hidden = true;
   const spaces = createSpacesClient(createHttpClient(platform));
   const files = createFilesClient(createHttpClient(platform));
   const accountNameById = new Map();
@@ -117,7 +127,7 @@ export function mountSpaceView({
       refreshAllMessageBubbles();
     },
   });
-  root.append(statusBar, olderButton, timelineEl);
+  root.append(statusBar, olderButton, forgeContextHost, timelineEl);
   const store = createTimelineStore({ maxItems: TIMELINE_DOM_LIMIT });
   const timelineClearState = createTimelineClearState();
   const nodeByKey = new Map();
@@ -291,7 +301,90 @@ export function mountSpaceView({
     const locallyCleared = space?.id && spaceSessionId
       ? timelineClearState.get(space.id, spaceSessionId)
       : null;
-    setStatus(visibleItems.length || locallyCleared ? "" : "还没有消息，发一条开始。");
+    setStatus(visibleItems.length || locallyCleared || currentForgeContext
+      ? ""
+      : "还没有消息，发一条开始。");
+  }
+
+  function renderForgeContext(draft) {
+    currentForgeContext = draft ?? null;
+    forgeContextHost.replaceChildren();
+    if (!draft) {
+      forgeContextHost.hidden = true;
+      return;
+    }
+    forgeContextHost.appendChild(renderForgeContextCard(draft, runtime.getBootstrap().accounts));
+    forgeContextHost.hidden = false;
+  }
+
+  function stopForgePolling() {
+    if (forgePollTimer !== null) clearTimeout(forgePollTimer);
+    forgePollTimer = null;
+  }
+
+  function scheduleForgePolling() {
+    stopForgePolling();
+    if (!activeForgeDialog || activeForgeDialog.draft.status !== "generating") return;
+    forgePollTimer = setTimeout(async () => {
+      forgePollTimer = null;
+      if (!mounted || !activeForgeDialog) return;
+      try {
+        await activeForgeDialog.refresh();
+      } catch {}
+      scheduleForgePolling();
+    }, 1000);
+  }
+
+  async function startForge() {
+    if (!space) throw new Error("当前没有可 Forge 的 Space");
+    activeForgeDialog?.close();
+    const created = await spaces.createForgeDraft(space.id, crypto.randomUUID());
+    const callbacks = {
+      accounts: runtime.getBootstrap().accounts,
+      onRefresh: async (draft) => {
+        const response = await spaces.fetchForgeDraft(space.id, draft.id);
+        return response.draft;
+      },
+      onSave: async (draft, targets) => {
+        const response = await spaces.updateForgeDraft(
+          space.id,
+          draft.id,
+          draft.version,
+          targets,
+        );
+        return response.draft;
+      },
+      onConfirm: async (draft) => {
+        const result = await spaces.confirmForgeDraft(
+          space.id,
+          draft.id,
+          crypto.randomUUID(),
+          draft.version,
+        );
+        space = { ...space, activeSpaceSessionId: result.newSession.id };
+        runProgress.reset();
+        await reloadActiveTimeline();
+        return result;
+      },
+      onRegenerate: async () => {
+        const response = await spaces.createForgeDraft(space.id, crypto.randomUUID());
+        queueMicrotask(scheduleForgePolling);
+        return response.draft;
+      },
+      onCancel: async (draft) => {
+        const response = await spaces.cancelForgeDraft(space.id, draft.id);
+        return response.draft;
+      },
+      onClose: () => {
+        stopForgePolling();
+        activeForgeDialog = null;
+      },
+    };
+    activeForgeDialog = openForgeDialog(root, {
+      draft: created.draft,
+      ...callbacks,
+    });
+    scheduleForgePolling();
   }
 
   async function exportCurrentTimeline() {
@@ -338,6 +431,7 @@ export function mountSpaceView({
       spaceSession: timeline.spaceSession,
       agentSessions: timeline.agentSessions,
     });
+    renderForgeContext(timeline.forgeContext);
     runProgress.setContext({
       spaceId: space.id,
       spaceSessionId: space.activeSpaceSessionId,
@@ -411,6 +505,7 @@ export function mountSpaceView({
         spaceSession: timeline.spaceSession,
         agentSessions: timeline.agentSessions,
       });
+      renderForgeContext(timeline.forgeContext);
       runProgress.setContext({
         spaceId: space.id,
         spaceSessionId: space.activeSpaceSessionId,
@@ -501,6 +596,13 @@ export function mountSpaceView({
       void refreshCompactionStatus();
       return;
     }
+    if (envelope.type === "context-forge.updated" &&
+        envelope.data?.spaceId === space?.id &&
+        activeForgeDialog?.draft.id === envelope.data?.draft?.id) {
+      activeForgeDialog.update(envelope.data.draft);
+      scheduleForgePolling();
+      return;
+    }
     if (["file.updated", "file.deleted"].includes(envelope.type)) {
       void reloadActiveTimeline().catch((err) => handleHydrationError("附件状态刷新失败", err));
       return;
@@ -588,6 +690,10 @@ export function mountSpaceView({
         void refreshCompactionStatus();
         return;
       }
+      if (content === "/forge") {
+        await startForge();
+        return;
+      }
       const result = await spaces.postMessage(space.id, {
         author: { type: "user" },
         target,
@@ -638,6 +744,8 @@ export function mountSpaceView({
     mounted = false;
     hydrationGeneration += 1;
     pendingEvents = [];
+    stopForgePolling();
+    activeForgeDialog?.close();
     if (space?.id && space.activeSpaceSessionId) {
       timelineCache?.set(space.id, {
         spaceSessionId: space.activeSpaceSessionId,

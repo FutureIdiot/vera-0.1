@@ -9,6 +9,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createDaemonClient } from "../../src/agents/daemon-client.js";
 import { createMockAdapter } from "../../src/adapters/mock-adapter.js";
+import { emptyForgeCapsule } from "../../src/spaces/forge-capsule.js";
 
 const mockDaemons = new Set();
 
@@ -265,6 +266,10 @@ export async function createOnlineMockAccount({ port, name }) {
           requestApproval: context.requestApproval,
           persistProviderBinding: context.persistProviderBinding,
         });
+      },
+      async executeForge({ source }) {
+        const first = source.messages[0]?.content ?? "暂无";
+        return { content: emptyForgeCapsule().replace("暂无", `黑盒提炼：${first}`) };
       },
       shutdown: () => adapter.shutdown?.(),
     },

@@ -9,7 +9,7 @@ export const DEFAULT_COMMANDS = Object.freeze([
   { command: "/resume", description: "选择并恢复旧 Session", available: true },
   { command: "/clear", description: "清空本设备当前时间线", available: true },
   { command: "/export", description: "导出当前 Session 的 Markdown", available: true },
-  { command: "/forge", description: "编排 Agent 协作流程", available: false },
+  { command: "/forge", description: "提炼当前 Session 并创建新窗口", available: true },
   { command: "/theme", description: "切换主题", available: false },
   { command: "/help", description: "查看命令帮助", available: false },
 ]);

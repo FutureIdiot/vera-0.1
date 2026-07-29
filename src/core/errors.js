@@ -15,6 +15,7 @@ export const STATUS_BY_CODE = {
   session_busy: 409,
   context_capacity: 409,
   history_conflict: 409,
+  forge_failed: 409,
   memory_cursor_invalid: 400,
   memory_cursor_expired: 410,
   memory_retrieval_unavailable: 503,

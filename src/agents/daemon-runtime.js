@@ -9,6 +9,8 @@ const DIRECTED_DAEMON_EVENTS = new Set([
   "run.activity-visibility.updated",
   "approval.answered",
   "agent-session.compact.requested",
+  "context-forge.requested",
+  "context-forge.cancelled",
   "account.upserted",
   "space.updated",
   "agent.updated",
@@ -355,5 +357,6 @@ export function createDaemonRuntime({
     rotateProviderBinding: runResults.rotateProviderBinding,
     saveApiResult: runResults.saveApiResult,
     submitCompaction: runResults.submitCompaction,
+    submitForge: runResults.submitForge,
   };
 }

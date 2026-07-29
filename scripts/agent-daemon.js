@@ -11,6 +11,7 @@ import { createAntigravityAdapter } from "../src/adapters/antigravity-adapter.js
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { compileForgeCapsule } from "../src/spaces/forge-capsule.js";
 
 function required(env, name) {
   const value = env[name]?.trim();
@@ -178,6 +179,56 @@ export async function main({ env = process.env, fetchImpl = globalThis.fetch, ex
         runtime,
         workspacePath: workspace.path,
       });
+    },
+    async executeForge({ target, source, limits, signal }) {
+      const directory = await mkdtemp(join(tmpdir(), "vera-forge-"));
+      try {
+        const executionRuntime = { ...runtime, model: target.model };
+        const generate = async (promptText) => {
+          const fragments = [];
+          const collect = (value) => {
+            const content = typeof value === "string" ? value : value?.content;
+            if (typeof content === "string" && content) fragments.push(content);
+            return Promise.resolve(null);
+          };
+          const rejectTools = (activity = {}) => {
+            if (["reasoning", "status", "usage"].includes(activity.kind)) return Promise.resolve(null);
+            throw Object.assign(new Error("Forge tools are disabled"), { code: "provider_error" });
+          };
+          const result = await adapter.run({
+            runtime: executionRuntime,
+            workspacePath: directory,
+            sessionMode: "isolated",
+            prompt: executionRuntime.kind === "api"
+              ? { apiMessages: [{ role: "user", content: promptText }] }
+              : { text: promptText },
+            providerBinding: null,
+            historyVersion: null,
+            spaceSessionId: source.spaceSessionId,
+            agentSessionId: null,
+            contextGeneration: null,
+            accountId: target.accountId,
+            signal,
+            onDelta: collect,
+            onMessage: collect,
+            onActivity: rejectTools,
+            requestApproval: () => Promise.resolve("deny"),
+          });
+          return typeof result?.content === "string" && result.content
+            ? result.content
+            : fragments.join("");
+        };
+        return {
+          content: await compileForgeCapsule({
+            messages: source.messages,
+            maxChunkChars: limits.chunkChars,
+            maxCapsuleChars: limits.capsuleChars,
+            generate,
+          }),
+        };
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
     },
     shutdown: () => adapter.shutdown?.(),
   };

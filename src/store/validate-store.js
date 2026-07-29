@@ -13,6 +13,7 @@ const ARRAY_FILES = new Set([
   "memoryDreamJobs.json",
   "spaceSessions.json", "agentSessions.json", "providerBindings.json",
   "apiHistories.json", "contextCompactionJobs.json", "contextControlRequests.json",
+  "contextForgeDrafts.json",
   "runCatchups.json", "runMessages.json",
   "files.json",
 ]);

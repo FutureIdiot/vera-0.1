@@ -71,6 +71,10 @@ const DEFAULTS = {
     autoRatio: 0.80,
     hardRatio: 0.95,
     checkpointRecentTurns: 8,
+    forgeSourceMaxChars: 1000000,
+    forgeChunkChars: 6000,
+    forgeCapsuleMaxChars: 6000,
+    forgeTaskTimeoutMs: 10 * 60 * 1000,
   },
   memory: {
     vaultPath: "~/.vera/memory", // Obsidian 兼容 vault，仓库外（api-contract.md Memory 一节）
@@ -347,6 +351,22 @@ export function loadConfig(env = process.env) {
         checkpointRecentTurns: positiveInt(
           env.VERA_CONTEXT_CHECKPOINT_RECENT_TURNS,
           DEFAULTS.context.checkpointRecentTurns,
+        ),
+        forgeSourceMaxChars: positiveInt(
+          env.VERA_CONTEXT_FORGE_SOURCE_MAX_CHARS,
+          DEFAULTS.context.forgeSourceMaxChars,
+        ),
+        forgeChunkChars: positiveInt(
+          env.VERA_CONTEXT_FORGE_CHUNK_CHARS,
+          DEFAULTS.context.forgeChunkChars,
+        ),
+        forgeCapsuleMaxChars: positiveInt(
+          env.VERA_CONTEXT_FORGE_CAPSULE_MAX_CHARS,
+          DEFAULTS.context.forgeCapsuleMaxChars,
+        ),
+        forgeTaskTimeoutMs: positiveInt(
+          env.VERA_CONTEXT_FORGE_TASK_TIMEOUT_MS,
+          DEFAULTS.context.forgeTaskTimeoutMs,
         ),
         ...thresholds,
       };

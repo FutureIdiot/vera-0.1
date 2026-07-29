@@ -61,6 +61,7 @@ function activeAgentSessionsForSpace(store, space, spaceSessionId) {
 export function registerSpaceRoutes(router, {
   store, hub, config, daemonScheduler, memoryDigestScheduler,
   daemonRuntime, daemonRunLifecycle, contextCompaction, memory, files, observation,
+  contextForge,
   runBackground, controlService,
   runMessages,
 }) {
@@ -253,6 +254,7 @@ export function registerSpaceRoutes(router, {
         return item;
       });
       timeline.agentSessions = activeAgentSessionsForSpace(store, space, spaceSession.id);
+      timeline.forgeContext = contextForge?.forgeContextForSession(spaceSession.id) ?? null;
       sendJson(res, 200, timeline);
     }),
   );
@@ -295,6 +297,7 @@ export function registerSpaceRoutes(router, {
         }
         return item;
       });
+      timeline.forgeContext = contextForge?.forgeContextForSession(session.id) ?? null;
       sendJson(res, 200, timeline);
     }),
   );
@@ -386,6 +389,111 @@ export function registerSpaceRoutes(router, {
         throw new ApiError("not_found", `context compaction job ${params.jobId} does not exist`);
       }
       sendJson(res, 200, { job });
+    }),
+  );
+
+  router.post(
+    "/api/spaces/:id/session/_forge/drafts",
+    asHandler(async ({ req, res, params }) => {
+      getSpaceOrThrow(store, params.id);
+      if (isArchived(store, params.id)) {
+        throw new ApiError("conflict", `space ${params.id} is archived, restore it first`);
+      }
+      if (!contextForge) throw new ApiError("forge_failed", "Forge is unavailable");
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+          Object.keys(body).length !== 1 || typeof body.requestId !== "string" || !body.requestId) {
+        throw new ApiError("invalid_request", "body must be exactly { requestId }");
+      }
+      const draft = contextForge.createDraft({ spaceId: params.id, requestId: body.requestId });
+      sendJson(res, 202, { draft });
+    }),
+  );
+
+  router.get(
+    "/api/spaces/:id/session/_forge/drafts/:draftId",
+    asHandler(async ({ res, params }) => {
+      getSpaceOrThrow(store, params.id);
+      if (!contextForge) throw new ApiError("forge_failed", "Forge is unavailable");
+      const draft = contextForge.getDraft(params.draftId);
+      if (draft.spaceId !== params.id) {
+        throw new ApiError("not_found", `Forge draft ${params.draftId} does not exist`);
+      }
+      sendJson(res, 200, { draft });
+    }),
+  );
+
+  router.patch(
+    "/api/spaces/:id/session/_forge/drafts/:draftId",
+    asHandler(async ({ req, res, params }) => {
+      getSpaceOrThrow(store, params.id);
+      if (!contextForge) throw new ApiError("forge_failed", "Forge is unavailable");
+      const current = contextForge.getDraft(params.draftId);
+      if (current.spaceId !== params.id) {
+        throw new ApiError("not_found", `Forge draft ${params.draftId} does not exist`);
+      }
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+          Object.keys(body).sort().join(",") !== "ifVersion,targets") {
+        throw new ApiError("invalid_request", "body must be exactly { ifVersion, targets }");
+      }
+      const draft = contextForge.updateDraft({
+        draftId: params.draftId,
+        ifVersion: body.ifVersion,
+        targets: body.targets,
+      });
+      sendJson(res, 200, { draft });
+    }),
+  );
+
+  router.delete(
+    "/api/spaces/:id/session/_forge/drafts/:draftId",
+    asHandler(async ({ res, params }) => {
+      getSpaceOrThrow(store, params.id);
+      if (!contextForge) throw new ApiError("forge_failed", "Forge is unavailable");
+      const current = contextForge.getDraft(params.draftId);
+      if (current.spaceId !== params.id) {
+        throw new ApiError("not_found", `Forge draft ${params.draftId} does not exist`);
+      }
+      sendJson(res, 200, { draft: contextForge.cancelDraft(params.draftId) });
+    }),
+  );
+
+  router.post(
+    "/api/spaces/:id/session/_forge/drafts/:draftId/_confirm",
+    asHandler(async ({ req, res, params }) => {
+      getSpaceOrThrow(store, params.id);
+      if (!contextForge) throw new ApiError("forge_failed", "Forge is unavailable");
+      const current = contextForge.getDraft(params.draftId);
+      if (current.spaceId !== params.id) {
+        throw new ApiError("not_found", `Forge draft ${params.draftId} does not exist`);
+      }
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+          Object.keys(body).sort().join(",") !== "ifVersion,requestId" ||
+          typeof body.requestId !== "string" || !body.requestId) {
+        throw new ApiError("invalid_request", "body must be exactly { requestId, ifVersion }");
+      }
+      const repeated = store.list("contextControlRequests").some((item) =>
+        item.type === "forge" && item.spaceId === params.id && item.requestId === body.requestId);
+      const result = contextForge.confirmDraft({
+        draftId: params.draftId,
+        requestId: body.requestId,
+        ifVersion: body.ifVersion,
+      });
+      if (!repeated) {
+        hub.publish("space-session.archived", {
+          spaceId: params.id,
+          spaceSession: result.archivedSession,
+        });
+        hub.publish("space-session.created", {
+          spaceId: params.id,
+          spaceSession: result.newSession,
+          agentSessions: result.agentSessions,
+          forgeContext: result.draft,
+        });
+      }
+      sendJson(res, 200, result);
     }),
   );
 

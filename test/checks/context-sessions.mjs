@@ -19,6 +19,7 @@ export async function run(ctx) {
   let space;
   let firstSessionId;
   let secondSessionId;
+  let forgedSessionId;
   let firstMessageId;
   let firstReplyIds;
 
@@ -72,7 +73,7 @@ export async function run(ctx) {
     }
   });
 
-  await check("p5-c1.3 exact /new, /compact and /resume are rejected by the Message endpoint", async () => {
+  await check("p5-c1.3 exact context commands are rejected by the Message endpoint", async () => {
     const before = await httpRequest("GET", `/api/spaces/${space.id}/timeline?limit=500`);
     assertEqual(before.status, 200);
     const attempts = [];
@@ -80,6 +81,7 @@ export async function run(ctx) {
       "/new", "  /new \n",
       "/compact", "\t/compact\n",
       "/resume", " \t/resume\n",
+      "/forge", " \t/forge\n",
     ]) {
       const rejected = await httpRequest("POST", `/api/spaces/${space.id}/messages`, {
         author: { type: "user" },
@@ -285,5 +287,84 @@ export async function run(ctx) {
     assertEqual(after.status, 200);
     assertEqual(after.json.items.length, before.json.items.length,
       "compaction must not create Message/Activity timeline records");
+  });
+
+  await check("p5-c2.1 /forge creates an editable draft and confirms one fresh inherited Session", async () => {
+    const created = await httpRequest("POST", `/api/spaces/${space.id}/session/_forge/drafts`, {
+      requestId: "p5-c2-forge-draft-1",
+    });
+    assertEqual(created.status, 202);
+    assertEqual(created.json.draft.spaceSessionId, undefined);
+    const draftId = created.json.draft.id;
+    const readyEvent = await sse.waitFor(
+      (event) => event.type === "context-forge.updated"
+        && event.data.draft.id === draftId
+        && event.data.draft.status === "ready",
+      5000,
+    );
+    assertEqual(readyEvent.data.spaceSessionId, secondSessionId);
+
+    const detail = await httpRequest(
+      "GET",
+      `/api/spaces/${space.id}/session/_forge/drafts/${draftId}`,
+    );
+    assertEqual(detail.status, 200);
+    assertEqual(detail.json.draft.status, "ready");
+    assert(detail.json.draft.targets[0].sourceMessageIds.length > 0,
+      "Forge should expose its frozen Message source range");
+    assertEqual("runtimeRevision" in detail.json.draft.targets[0], false);
+    assertEqual("model" in detail.json.draft.targets[0], false);
+
+    const manualContext = "人工确认：只继承当前目标、已确认决定和下一步。";
+    const edited = await httpRequest(
+      "PATCH",
+      `/api/spaces/${space.id}/session/_forge/drafts/${draftId}`,
+      {
+        ifVersion: detail.json.draft.version,
+        targets: [{
+          accountId: ctx.owningAccount.id,
+          content: manualContext,
+        }],
+      },
+    );
+    assertEqual(edited.status, 200);
+    assertEqual(edited.json.draft.targets[0].content, manualContext);
+    assertEqual(edited.json.draft.targets[0].editedByUser, true);
+
+    const confirmed = await httpRequest(
+      "POST",
+      `/api/spaces/${space.id}/session/_forge/drafts/${draftId}/_confirm`,
+      {
+        requestId: "p5-c2-forge-confirm-1",
+        ifVersion: edited.json.draft.version,
+      },
+    );
+    assertEqual(confirmed.status, 200);
+    assertEqual(confirmed.json.archivedSession.id, secondSessionId);
+    assertEqual(confirmed.json.archivedSession.archiveReason, "forge_command");
+    assertEqual(confirmed.json.draft.status, "confirmed");
+    forgedSessionId = confirmed.json.newSession.id;
+    assert(forgedSessionId !== secondSessionId, "Forge must create a distinct SpaceSession");
+
+    const archivedEvent = await sse.waitFor(
+      (event) => event.type === "space-session.archived"
+        && event.data.spaceSession.id === secondSessionId,
+      5000,
+    );
+    const createdEvent = await sse.waitFor(
+      (event) => event.type === "space-session.created"
+        && event.data.spaceSession.id === forgedSessionId,
+      5000,
+    );
+    assert(archivedEvent.seq < createdEvent.seq, "Forge archive event must precede create event");
+
+    const timeline = await httpRequest("GET", `/api/spaces/${space.id}/timeline?limit=500`);
+    assertEqual(timeline.status, 200);
+    assertTimelineSession(assert, timeline, forgedSessionId, "forged timeline");
+    assertEqual(timeline.json.items.length, 0);
+    assertEqual(timeline.json.agentSessions.length, 1);
+    assertEqual(timeline.json.agentSessions[0].generation, 1);
+    assertEqual(timeline.json.forgeContext.status, "confirmed");
+    assertEqual(timeline.json.forgeContext.targets[0].content, manualContext);
   });
 }

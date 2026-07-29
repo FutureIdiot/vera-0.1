@@ -173,6 +173,15 @@ export function registerAgentRoutes(router, {
           ));
         }),
       );
+
+      router.put(
+        "/api/agent/forges/:draftId/targets/:agentId",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 200, await daemonRuntime.submitForge(
+            params.draftId, params.agentId, await readJsonBody(req), req.headers,
+          ));
+        }),
+      );
     }
   }
 

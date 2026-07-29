@@ -28,5 +28,6 @@ export const newProviderBindingId = () => makeId("pbd");
 export const newApiHistoryId = () => makeId("aph");
 export const newContextCompactionJobId = () => makeId("ccj");
 export const newContextControlRequestId = () => makeId("ccr");
+export const newContextForgeDraftId = () => makeId("fgd");
 export const newAccountSessionId = () => makeId("acs");
 export const newExecutionLeaseId = () => makeId("exl");

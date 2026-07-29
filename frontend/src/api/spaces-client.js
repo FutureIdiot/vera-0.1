@@ -29,6 +29,27 @@ export function createSpacesClient(http) {
     fetchCompactionJob(spaceId, jobId) {
       return http.get(`/api/spaces/${spaceId}/session/_compact/jobs/${jobId}`);
     },
+    createForgeDraft(spaceId, requestId) {
+      return http.post(`/api/spaces/${spaceId}/session/_forge/drafts`, { requestId });
+    },
+    fetchForgeDraft(spaceId, draftId) {
+      return http.get(`/api/spaces/${spaceId}/session/_forge/drafts/${draftId}`);
+    },
+    updateForgeDraft(spaceId, draftId, ifVersion, targets) {
+      return http.patch(`/api/spaces/${spaceId}/session/_forge/drafts/${draftId}`, {
+        ifVersion,
+        targets,
+      });
+    },
+    cancelForgeDraft(spaceId, draftId) {
+      return http.delete(`/api/spaces/${spaceId}/session/_forge/drafts/${draftId}`);
+    },
+    confirmForgeDraft(spaceId, draftId, requestId, ifVersion) {
+      return http.post(`/api/spaces/${spaceId}/session/_forge/drafts/${draftId}/_confirm`, {
+        requestId,
+        ifVersion,
+      });
+    },
     listSessions(spaceId, { status } = {}) {
       const query = status ? `?status=${encodeURIComponent(status)}` : "";
       return http.get(`/api/spaces/${spaceId}/sessions${query}`);

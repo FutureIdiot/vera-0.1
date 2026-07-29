@@ -43,6 +43,7 @@ import { createOpencodeAdapter } from "./adapters/opencode-adapter.js";
 import { createCodexAdapter } from "./adapters/codex-adapter.js";
 import { createAntigravityAdapter } from "./adapters/antigravity-adapter.js";
 import { createContextCompactionService } from "./spaces/context-compactions.js";
+import { createContextForgeService } from "./spaces/context-forges.js";
 import { recoverInterruptedRuns } from "./spaces/run-controller.js";
 import { createFilesService } from "./memory/files-service.js";
 import { registerFilesRoutes } from "./memory/files-routes.js";
@@ -158,6 +159,12 @@ const contextCompaction = createContextCompactionService({
   hub,
   config,
   dispatchDaemonCompaction: (request) => daemonRuntime.dispatchEvent(request),
+});
+const contextForge = createContextForgeService({
+  store,
+  hub,
+  config,
+  dispatchDaemonForge: (request) => daemonRuntime.dispatchEvent(request),
 });
 
 function freezeMemoryTask({ ownerAgentId, kind }) {
@@ -279,6 +286,7 @@ const daemonRunLifecycle = createDaemonRunLifecycle({
   memoryDigestScheduler,
   memoryRetrieval,
   contextCompaction,
+  contextForge,
   observation,
   runBackground,
   runMessages,
@@ -354,6 +362,7 @@ registerMemoryTaskRoutes(router, {
 registerSpaceRoutes(router, {
   store, hub, config, daemonScheduler, daemonRuntime, daemonRunLifecycle,
   memoryDigestScheduler, contextCompaction, memory, files, observation,
+  contextForge,
   runBackground, controlService,
   runMessages,
 });

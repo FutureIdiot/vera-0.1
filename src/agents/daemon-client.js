@@ -3,6 +3,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createDaemonCompactionHandler } from "./daemon-compaction-handler.js";
+import { createDaemonForgeHandler } from "./daemon-forge-handler.js";
 import { createMemoryTaskWorker } from "./memory-task-worker.js";
 import { createDaemonRunHandler } from "./daemon-run-handler.js";
 
@@ -205,6 +206,11 @@ export function createDaemonClient({
     request,
     getKnownGeneration: runHandler.getKnownGeneration,
   });
+  const forgeHandler = createDaemonForgeHandler({
+    identity,
+    executor,
+    request,
+  });
 
   function loginBody() {
     const { hostId, kind, provider, model, revision, runtimeCapabilities = null } = identity.runtime;
@@ -241,6 +247,7 @@ export function createDaemonClient({
     }
     if (runHandler.handleEnvelope(envelope)) return;
     if (compactionHandler.handleEnvelope(envelope)) return;
+    if (forgeHandler.handleEnvelope(envelope)) return;
     if (CONFIG_EVENTS.has(envelope?.type)) await executor?.onConfig?.(envelope);
   }
 
@@ -252,6 +259,7 @@ export function createDaemonClient({
     streamAbort?.abort();
     await runHandler.terminate();
     await compactionHandler.terminate();
+    await forgeHandler.terminate();
     await memoryWorker.stop();
     await executor?.shutdown?.();
   }
@@ -290,6 +298,7 @@ export function createDaemonClient({
         if (!running) break;
         runHandler.onStreamDisconnect();
         compactionHandler.onStreamDisconnect();
+        forgeHandler.onStreamDisconnect();
         failures += 1;
         if (error?.code === "account_reauthentication_required") {
           await terminate("account_reauthentication_required");

@@ -233,5 +233,56 @@ export function createDaemonRunResults({
     return updated;
   }
 
-  return { saveProviderBinding, rotateProviderBinding, saveApiResult, submitCompaction };
+  async function submitForge(draftId, agentId, body, headers) {
+    strictObject(body, {
+      allowed: ["status", "content", "execution", "error"],
+      required: ["status"],
+    });
+    if (!["succeeded", "failed", "cancelled"].includes(body.status)) {
+      invalid("Forge result status is invalid");
+    }
+    if (body.status === "succeeded") {
+      requiredText(body.content, "content");
+      strictObject(body.execution, {
+        allowed: ["runtimeRevision", "model", "fallbackUsed"],
+        required: ["runtimeRevision", "model", "fallbackUsed"],
+        name: "execution",
+      });
+      requiredText(body.execution.runtimeRevision, "execution.runtimeRevision");
+      requiredText(body.execution.model, "execution.model");
+      if (body.execution.fallbackUsed !== false || body.error !== undefined) {
+        invalid("Forge succeeded result is invalid");
+      }
+    } else {
+      if (body.content !== undefined || body.execution !== undefined) {
+        invalid("Forge failed result must not include content or execution");
+      }
+      if (body.error !== undefined) {
+        strictObject(body.error, {
+          allowed: ["code", "message"],
+          required: ["code", "message"],
+          name: "error",
+        });
+        requiredText(body.error.code, "error.code");
+        requiredText(body.error.message, "error.message");
+      }
+    }
+    const authority = await authenticate(headers);
+    if (agentId !== authority.agent.id) throw new ApiError("forbidden", "Forge target Agent does not match");
+    const draft = store.find("contextForgeDrafts", draftId);
+    const target = draft?.targets?.find((candidate) =>
+      candidate.agentId === agentId && candidate.accountId === authority.account.id);
+    if (!target) throw new ApiError("not_found", `Forge target ${agentId} does not exist`);
+    if (runLifecycle.submitForgeResult) {
+      return invoke("submitForgeResult", {
+        ...authority,
+        draft,
+        target,
+        input: structuredClone(body),
+      });
+    }
+    conflict("Forge result lifecycle is unavailable");
+  }
+
+  return { saveProviderBinding, rotateProviderBinding, saveApiResult, submitCompaction, submitForge };
 }

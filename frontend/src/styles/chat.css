@@ -866,6 +866,88 @@
   stroke-linecap: round;
 }
 
+.vera-forge-dialog {
+  max-height: calc(100% - var(--vera-space-lg) * 2);
+  overflow: hidden;
+  width: min(
+    calc(var(--vera-navigator-dialog-width) * 2),
+    calc(100% - var(--vera-space-lg) * 2)
+  );
+}
+
+.vera-forge-dialog__body {
+  display: grid;
+  gap: var(--vera-space-md);
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.vera-forge-dialog__body::-webkit-scrollbar {
+  display: none;
+}
+
+.vera-forge-dialog__target {
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  border-radius: var(--vera-control-radius);
+  display: grid;
+  gap: var(--vera-space-xs);
+  padding: var(--vera-space-md);
+}
+
+.vera-forge-dialog__target > small,
+.vera-forge-dialog__sources {
+  color: var(--vera-color-muted-text);
+  font-size: var(--vera-font-size-small);
+}
+
+.vera-forge-dialog__target textarea {
+  min-height: calc(var(--vera-touch-target) * 6);
+}
+
+.vera-forge-dialog__sources code {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: var(--vera-space-xs) 0;
+  white-space: pre-wrap;
+}
+
+.vera-forge-dialog__actions {
+  flex-wrap: wrap;
+}
+
+.vera-forge-card {
+  background: var(--vera-color-surface);
+  border: var(--vera-border-width) solid var(--vera-color-border);
+  border-radius: var(--vera-control-radius);
+  margin: var(--vera-space-sm) var(--vera-window-margin);
+  padding: var(--vera-space-md);
+}
+
+.vera-forge-card > summary {
+  cursor: pointer;
+  font-weight: var(--vera-font-weight-semibold);
+}
+
+.vera-forge-card > small {
+  color: var(--vera-color-muted-text);
+  display: block;
+  margin-top: var(--vera-space-xs);
+}
+
+.vera-forge-card > section {
+  display: grid;
+  gap: var(--vera-space-xs);
+  margin-top: var(--vera-space-md);
+}
+
+.vera-forge-card pre {
+  font: inherit;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 480px) {
   .vera-composer {
     padding-inline: var(--vera-space-sm);

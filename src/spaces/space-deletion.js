@@ -114,6 +114,7 @@ function purgeSpaceGraph(store, spaceId, deletedMemories) {
     "runs",
     "spaceSessions",
     "contextCompactionJobs",
+    "contextForgeDrafts",
     "contextControlRequests",
     "runCatchups",
     "runMessages",

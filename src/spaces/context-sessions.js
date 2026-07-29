@@ -221,7 +221,7 @@ function resumeRequestResult(store, request) {
   };
 }
 
-function hasActiveContextWork(store, spaceSessionIds) {
+export function hasActiveContextWork(store, spaceSessionIds) {
   const ids = new Set(spaceSessionIds);
   return store.list("runs").some((run) =>
     ids.has(run.spaceSessionId) && ACTIVE_RUN_STATUSES.has(run.status)) ||
@@ -293,6 +293,136 @@ export function startNewSpaceSession(store, { spaceId, requestId } = {}, { now }
     createdAt: timestamp, finishedAt: timestamp,
   });
   return { archivedSession: stripInternal(store.find("spaceSessions", current.id)), newSession: stripInternal(next) };
+}
+
+function forgeRequestResult(store, request) {
+  const result = requestResult(store, request);
+  const agentSessions = store.list("agentSessions")
+    .filter((item) => item.spaceSessionId === result.newSession.id && item.status === "active")
+    .map(publicAgentSession);
+  return { ...result, agentSessions };
+}
+
+export function startForgedSpaceSession(store, {
+  spaceId,
+  requestId,
+  draftId,
+  sourceSpaceSessionId,
+  targets,
+} = {}, { now } = {}) {
+  requireString(spaceId, "spaceId");
+  requireString(requestId, "requestId");
+  requireString(draftId, "draftId");
+  requireString(sourceSpaceSessionId, "sourceSpaceSessionId");
+  const priorRequest = store.list("contextControlRequests").find((item) =>
+    item.type === "forge" && item.spaceId === spaceId && item.requestId === requestId);
+  if (priorRequest) return forgeRequestResult(store, priorRequest);
+  if (!Array.isArray(targets) || targets.length === 0) throw invalid("targets must be a non-empty array");
+  const space = store.find("spaces", spaceId);
+  if (!space) throw new ApiError("not_found", `space ${spaceId} does not exist`);
+  const current = ensureActiveSpaceSession(store, spaceId);
+  if (current.id !== sourceSpaceSessionId) {
+    throw new ApiError("history_conflict", "Forge source SpaceSession is no longer active");
+  }
+  if (hasActiveContextWork(store, [current.id])) {
+    throw new ApiError("session_busy", `space ${spaceId} has active context work`);
+  }
+  const byAccount = new Map(targets.map((target) => [target.accountId, target]));
+  if (byAccount.size !== targets.length || byAccount.size !== (space.seats ?? []).length) {
+    throw invalid("Forge targets must exactly cover current Space seats");
+  }
+  const prepared = [];
+  for (const seat of space.seats ?? []) {
+    const account = store.find("accounts", seat.accountId);
+    const target = byAccount.get(seat.accountId);
+    if (!account?.ownerAgentId || !store.find("agents", account.ownerAgentId) ||
+        target?.agentId !== account.ownerAgentId ||
+        typeof target.content !== "string" || !target.content.trim() ||
+        !Array.isArray(target.sourceMessageIds) ||
+        target.sourceMessageIds.some((id) => typeof id !== "string")) {
+      throw conflict(`Forge target for account ${seat.accountId} is unavailable`);
+    }
+    prepared.push({
+      account,
+      agentId: account.ownerAgentId,
+      content: target.content.trim(),
+      sourceMessageIds: [...new Set(target.sourceMessageIds)],
+    });
+  }
+
+  const timestamp = nowIso(now);
+  store.update("spaceSessions", current.id, {
+    status: "archived", archivedAt: timestamp, archiveReason: "forge_command",
+  });
+  for (const agentSession of store.list("agentSessions").filter((item) =>
+    item.spaceSessionId === current.id)) {
+    store.update("agentSessions", agentSession.id, { status: "archived", updatedAt: timestamp });
+    freezeRecallSessions(store, agentSession.id, timestamp);
+  }
+  const next = createSpaceSessionRecord(store, spaceId, timestamp);
+  const forgedSession = store.update("spaceSessions", next.id, {
+    forgedFromSpaceSessionId: current.id,
+    forgeDraftId: draftId,
+  });
+  store.update("spaces", spaceId, { activeSpaceSessionId: forgedSession.id });
+  const agentSessions = [];
+  for (const target of prepared) {
+    const created = ensureAgentSession(store, {
+      spaceSessionId: forgedSession.id,
+      accountId: target.account.id,
+      agentId: target.agentId,
+    }, { now: timestamp });
+    const checkpoint = {
+      schemaVersion: 1,
+      summary: target.content,
+      sourceMessageIds: target.sourceMessageIds,
+      omittedMessageCount: 0,
+      omittedDigest: null,
+      recentTurns: [],
+    };
+    const estimatedInputTokens = Math.ceil(Buffer.byteLength(target.content, "utf8") / 4);
+    const raw = store.find("agentSessions", created.id);
+    const updated = store.update("agentSessions", raw.id, {
+      context: {
+        ...raw.context,
+        checkpointVersion: 1,
+        estimatedInputTokens,
+        pressureRatio: raw.context?.effectiveLimitTokens > 0
+          ? estimatedInputTokens / raw.context.effectiveLimitTokens
+          : 0,
+        measurement: "estimate",
+      },
+      checkpoints: [{
+        fromGeneration: null,
+        toGeneration: 1,
+        version: 1,
+        kind: "forge",
+        checkpoint,
+        createdAt: timestamp,
+      }],
+      updatedAt: timestamp,
+    });
+    agentSessions.push(publicAgentSession(updated));
+  }
+  store.insert("contextControlRequests", {
+    id: newContextControlRequestId(),
+    type: "forge",
+    spaceId,
+    requestId,
+    status: "succeeded",
+    result: {
+      draftId,
+      archivedSpaceSessionId: current.id,
+      newSpaceSessionId: forgedSession.id,
+    },
+    createdAt: timestamp,
+    finishedAt: timestamp,
+  });
+  return {
+    archivedSession: stripInternal(store.find("spaceSessions", current.id)),
+    newSession: stripInternal(forgedSession),
+    agentSessions,
+  };
 }
 
 export function resumeSpaceSession(store, {

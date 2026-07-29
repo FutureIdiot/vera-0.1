@@ -31,6 +31,7 @@ export function createDaemonRunLifecycle({
   memoryDigestScheduler = null,
   memoryRetrieval = null,
   contextCompaction = null,
+  contextForge = null,
   observation = null,
   runBackground = null,
   runMessages = null,
@@ -455,6 +456,14 @@ export function createDaemonRunLifecycle({
     cancelRun,
     submitCompactionResult: contextCompaction
       ? ({ job, target, input }) => contextCompaction.submitDaemonResult({ job, target, input })
+      : undefined,
+    submitForgeResult: contextForge
+      ? ({ draft, target, input }) => contextForge.submitDaemonResult({
+          draftId: draft.id,
+          agentId: target.agentId,
+          accountId: target.accountId,
+          input,
+        })
       : undefined,
   };
 }
