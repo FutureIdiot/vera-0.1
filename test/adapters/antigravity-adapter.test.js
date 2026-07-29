@@ -159,6 +159,51 @@ test("fragmented JSONL and result fallback work while provider errors remain red
   await assert.rejects(() => instance.run(wrongCwd.ctx), (error) => error.code === "provider_error");
 });
 
+test("headless permission soft-deny resumes once without creating an Approval or rotating", async (t) => {
+  const fake = await createFakeAntigravity(t);
+  const instance = adapter(fake.binary);
+  t.after(() => instance.shutdown());
+  const denied = context(fake.binary, {
+    prompt: { text: "TRIGGER_PERMISSION_DENIAL" },
+    requestApproval: () => {
+      throw new Error("Antigravity headless soft-deny must not create a Vera Approval");
+    },
+  });
+  const result = await instance.run(denied.ctx);
+  assert.equal(result.content, "AGY_PERMISSION_CONTINUED");
+  assert.deepEqual(denied.deltas, ["AGY_PERMISSION_CONTINUED"]);
+  assert.deepEqual(denied.rotations, []);
+  assert.equal(result.providerBinding.providerState.conversationId, "agy-conversation-1");
+  assert.equal(result.usage.inputTokens, 12000);
+  const deniedActivity = denied.activities.filter((item) => item.label === "run_command").at(-1);
+  assert.equal(deniedActivity.toolStatus, "failed");
+  assert.equal(deniedActivity.summary, "工具权限申请已自动拒绝");
+  const calls = await fake.calls();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].args.includes("--conversation"), true);
+  assert.equal(calls[1].prompt.startsWith("Vera control notice:"), true);
+  assert.equal(calls[1].prompt.includes("Do not retry that tool"), true);
+
+  const filesystem = context(fake.binary, {
+    prompt: { text: "TRIGGER_FILESYSTEM_PERMISSION_ERROR" },
+  });
+  const filesystemResult = await instance.run(filesystem.ctx);
+  assert.equal(filesystemResult.content, "");
+  assert.equal(filesystem.activities.at(-1).summary, "命令执行失败");
+  assert.equal((await fake.calls()).length, 3);
+
+  const repeated = context(fake.binary, {
+    runtime: runtime(fake.binary, "fake-permission-loop"),
+    prompt: { text: "TRIGGER_PERMISSION_DENIAL" },
+  });
+  await assert.rejects(
+    () => instance.run(repeated.ctx),
+    (error) => error.code === "provider_error" && !error.message.includes("printf"),
+  );
+  assert.deepEqual(repeated.rotations, []);
+  assert.equal((await fake.calls()).length, 5);
+});
+
 test("runtime guards, isolated mode, capacity, cancellation, timeout and shutdown are strict", async (t) => {
   const fake = await createFakeAntigravity(t);
   const instance = adapter(fake.binary);

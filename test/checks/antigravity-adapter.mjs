@@ -138,11 +138,26 @@ export async function run(ctx) {
       assertEqual(replies[0].content, "AGY_CHAT_OK");
       assertEqual(replies[1].content, "AGY_CHAT_OK");
 
+      const denied = await request("POST", `/api/spaces/${spaceId}/messages`, {
+        author: { type: "user" },
+        target: { type: "broadcast" },
+        content: "TRIGGER_PERMISSION_DENIAL",
+      });
+      const deniedRun = denied.json.runs.find((item) => item.agentId === identity.agent.id);
+      assert(deniedRun, "permission prompt must create an Antigravity Run");
+      const continuedReplies = await waitForReplies(request, spaceId, 3, sleep, 5000);
+      assert(continuedReplies.some((item) => item.content === "AGY_PERMISSION_CONTINUED"),
+        "permission continuation must create the final Account Message");
+
       await sleep(200);
       const calls = await fake.calls();
-      assertEqual(calls.length, 3);
+      assertEqual(calls.length, 5);
       assert(calls[1].args.includes("--conversation"), "second attempt must resume the frozen binding");
       assert(!calls[2].args.includes("--conversation"), "rotation retry must create a fresh conversation");
+      assert(calls[3].args.includes("--conversation"), "permission attempt must use the frozen binding");
+      assert(calls[4].args.includes("--conversation"), "permission continuation must resume the same binding");
+      assert(calls[4].prompt.startsWith("Vera control notice:"),
+        "permission continuation must use the fixed provider control prompt");
       assert(!JSON.stringify(calls).includes("dangerously-skip-permissions"), "dangerous bypass must never be sent");
       assert(!JSON.stringify(calls).includes("--sandbox"), "scratch sandbox must never replace the Account Workspace");
 
@@ -153,13 +168,28 @@ export async function run(ctx) {
       const currentSession = sessions.find((item) => item.id === secondRun.agentSessionId);
       assertEqual(currentSession.generation, 2);
       assertEqual(currentSession.context.measurement, "provider_reported");
-      assertEqual(currentSession.context.estimatedInputTokens, 10000);
+      assertEqual(currentSession.context.estimatedInputTokens, 12000);
       const bindings = JSON.parse(await readFile(join(dataPath, "providerBindings.json"), "utf8"));
       const binding = bindings.find((item) =>
         item.agentSessionId === secondRun.agentSessionId &&
         item.generation === 2 &&
         item.accountId === identity.account.id);
       assertEqual(binding.providerState.conversationId, "agy-conversation-1");
+      const runs = JSON.parse(await readFile(join(dataPath, "runs.json"), "utf8"));
+      const completedDeniedRun = runs.find((item) => item.id === deniedRun.id);
+      assertEqual(completedDeniedRun.status, "completed");
+      assertEqual(completedDeniedRun.replyMessageIds.length, 1);
+      const activities = JSON.parse(await readFile(join(dataPath, "activities.json"), "utf8"));
+      const deniedActivity = activities.find((item) => item.runId === deniedRun.id);
+      assertEqual(deniedActivity.toolStatus, "failed");
+      assertEqual(deniedActivity.summary, "工具权限申请已自动拒绝");
+      const approvals = await readFile(join(dataPath, "approvals.json"), "utf8")
+        .then(JSON.parse)
+        .catch((error) => {
+          if (error?.code === "ENOENT") return [];
+          throw error;
+        });
+      assertEqual(approvals.some((item) => item.runId === deniedRun.id), false);
     } finally {
       if (gateway) await gateway.stop();
       await daemon?.stop();

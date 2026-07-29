@@ -14,9 +14,15 @@ const prompt = value("--print") || "";
 const model = value("--model") || "";
 const prior = value("--conversation");
 const calls = path.join(__dirname, "calls.jsonl");
+let previousCalls = [];
+try {
+  previousCalls = fs.readFileSync(calls, "utf8").trim().split("\\n").filter(Boolean).map(JSON.parse);
+} catch {}
 fs.appendFileSync(calls, JSON.stringify({ args, prompt, cwd: process.cwd() }) + "\\n");
 const write = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
-const conversation = prior === "stale-conversation" || (model === "fake-rotate" && prior)
+const conversation = prior === "stale-conversation" ||
+  (model === "fake-rotate" && prior && !previousCalls.some((call) =>
+    call.args?.includes("--conversation") && call.args?.includes("fake-rotate")))
   ? "fresh-after-stale"
   : prior || "agy-conversation-1";
 if (model === "fake-hang") {
@@ -59,6 +65,46 @@ if (model === "fake-provider-error") {
     error: "verify at https://accounts.google.com/secret-link",
     usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
   } });
+  return;
+}
+const writePermissionDenied = (error = {
+  name: "PermissionUserDeniedError",
+  message: "User denied permission to run command: printf VERA_PERMISSION_PROBE",
+}) => {
+  write({ event: "step_update", step_update: {
+    conversation_id: conversation, step_index: 1, state: "ACTIVE", step_type: "tool",
+    tool_name: "run_command",
+    tool_info: { name: "run_command", parameters: { command: "printf VERA_PERMISSION_PROBE" } },
+  } });
+  write({ event: "step_update", step_update: {
+    conversation_id: conversation, step_index: 1, state: "ERROR", step_type: "tool",
+    tool_name: "run_command",
+    tool_info: { name: "run_command", error },
+  } });
+  process.stderr.write("Tool request was soft-denied; add an allow rule to permit it.\\n");
+  write({ event: "result", result: {
+    conversation_id: conversation, status: "SUCCESS", response: "",
+    usage: { input_tokens: prior ? 12000 : 11000, output_tokens: 0, total_tokens: prior ? 12000 : 11000 },
+  } });
+};
+if (model === "fake-permission-loop" ||
+    (prompt.includes("TRIGGER_PERMISSION_DENIAL") && !prompt.startsWith("Vera control notice:"))) {
+  writePermissionDenied();
+  return;
+}
+if (prompt.startsWith("Vera control notice:")) {
+  write({ event: "step_update", step_update: {
+    conversation_id: conversation, step_index: 2, state: "DONE",
+    step_type: "agent_response", text_delta: "AGY_PERMISSION_CONTINUED",
+  } });
+  write({ event: "result", result: {
+    conversation_id: conversation, status: "SUCCESS", response: "AGY_PERMISSION_CONTINUED",
+    usage: { input_tokens: 12000, output_tokens: 3, total_tokens: 12003 },
+  } });
+  return;
+}
+if (prompt.includes("TRIGGER_FILESYSTEM_PERMISSION_ERROR")) {
+  writePermissionDenied("bash: /root/private: Permission denied");
   return;
 }
 if (model === "fake-no-result") return;

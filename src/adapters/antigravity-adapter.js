@@ -7,7 +7,8 @@
 // - maps public agent_response/tool events to delta/Activity and normalizes
 //   result usage; hidden reasoning is never projected;
 // - relies on Antigravity's persisted fine-grained permission rules, never its
-//   dangerous bypass or scratch sandbox;
+//   dangerous bypass or scratch sandbox, and resumes once after a structured
+//   headless permission soft-deny so the agent can finish without retrying it;
 // - abort/timeout/shutdown terminate the detached process group.
 
 import { constants } from "node:fs";
@@ -28,6 +29,12 @@ const USAGE_FIELDS = {
   cache_read_tokens: "cacheReadTokens",
   total_tokens: "totalTokens",
 };
+
+const PERMISSION_DENIED_CONTINUATION = [
+  "Vera control notice: the previous tool request was denied by the headless permission policy.",
+  "Do not retry that tool or request elevated permissions.",
+  "Continue within the permissions already available and give the user a concise final response explaining any limitation.",
+].join(" ");
 
 function byteLength(value) {
   return Buffer.byteLength(String(value ?? ""), "utf8");
@@ -52,6 +59,20 @@ function normalizeUsage(value) {
   return Object.keys(usage).length ? usage : undefined;
 }
 
+function permissionDeniedTool(step) {
+  if (String(step?.state ?? "").toUpperCase() !== "ERROR") return false;
+  const error = step?.tool_info?.error;
+  if (error == null) return false;
+  const fields = error && typeof error === "object" && !Array.isArray(error)
+    ? [error.name, error.code, error.type, error.message, JSON.stringify(error)]
+    : [error];
+  return fields.some((value) => {
+    const text = String(value ?? "").trim();
+    return /(?:^|[./\s])PermissionUserDeniedError(?:$|[\s:])/u.test(text) ||
+      /^User denied permission to (?:\S|\s)+/u.test(text);
+  });
+}
+
 function toolActivity(step) {
   const info = step?.tool_info && typeof step.tool_info === "object" ? step.tool_info : {};
   const name = String(step?.tool_name || info.name || "tool");
@@ -69,7 +90,9 @@ function toolActivity(step) {
     phase: "tool",
     kind,
     label: name,
-    summary: summarizeToolActivity({ kind, name, status: toolStatus }),
+    summary: permissionDeniedTool(step)
+      ? "工具权限申请已自动拒绝"
+      : summarizeToolActivity({ kind, name, status: toolStatus }),
     detail,
     toolStatus,
     callId: `antigravity-${step?.conversation_id ?? "new"}-${step?.step_index ?? "tool"}`,
@@ -176,6 +199,7 @@ export function createAntigravityAdapter({ config = {} } = {}) {
     let conversationId = priorConversationId;
     let content = "";
     let sawDelta = false;
+    let sawPermissionDenied = false;
     let savedBinding = providerBinding;
     let persistPromise = null;
 
@@ -232,6 +256,7 @@ export function createAntigravityAdapter({ config = {} } = {}) {
           content += step.text_delta;
           await ctx.onDelta?.(step.text_delta);
         } else if (step.step_type === "tool") {
+          if (permissionDeniedTool(step)) sawPermissionDenied = true;
           await ctx.onActivity?.(toolActivity(step));
         }
         return;
@@ -318,6 +343,8 @@ export function createAntigravityAdapter({ config = {} } = {}) {
         content,
         ...(savedBinding ? { providerBinding: savedBinding } : {}),
         ...(usage ? { usage } : {}),
+        permissionDenied: sawPermissionDenied,
+        conversationId,
       };
     } catch (error) {
       if (error instanceof AdapterError) throw error;
@@ -350,8 +377,9 @@ export function createAntigravityAdapter({ config = {} } = {}) {
       prompt = rotated.prompt ?? prompt;
       providerBinding = rotated.providerBinding ?? null;
     }
+    let attempt;
     try {
-      return await runAttempt({ ...ctx, prompt }, providerBinding);
+      attempt = await runAttempt({ ...ctx, prompt }, providerBinding);
     } catch (error) {
       if (!providerBinding || !error?.missingConversation) throw error;
       ctx.onActivity?.({
@@ -363,11 +391,30 @@ export function createAntigravityAdapter({ config = {} } = {}) {
       });
       const rotated = await ctx.rotateProviderBinding?.({ reason: "missing" });
       if (!rotated) throw new AdapterError("provider_error", "Antigravity session rotation is unavailable");
-      return runAttempt(
+      attempt = await runAttempt(
         { ...ctx, prompt: rotated.prompt ?? ctx.prompt },
         rotated.providerBinding ?? null,
       );
     }
+    if (attempt.permissionDenied && !attempt.content) {
+      const continuationBinding = attempt.providerBinding ?? {
+        version: 1,
+        providerState: { conversationId: attempt.conversationId },
+      };
+      attempt = await runAttempt({
+        ...ctx,
+        prompt: { text: PERMISSION_DENIED_CONTINUATION },
+      }, continuationBinding);
+      if (attempt.permissionDenied || !attempt.content) {
+        throw new AdapterError(
+          "provider_error",
+          "Antigravity did not complete after a denied tool request",
+        );
+      }
+    }
+    const { permissionDenied: _permissionDenied, conversationId: _conversationId, ...result } = attempt;
+    if (ctx.sessionMode === "isolated") delete result.providerBinding;
+    return result;
   }
 
   function run(ctx) {
