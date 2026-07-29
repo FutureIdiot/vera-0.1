@@ -57,10 +57,47 @@ function normalizedRuntime(value) {
   if (models.includes("default") || new Set(models).size !== models.length || !models.includes(model)) {
     throw new DaemonClientError("invalid_config", "runtime models must be unique and include the default model");
   }
+  const modelContexts = capabilities.modelContexts === undefined
+    ? []
+    : Array.isArray(capabilities.modelContexts)
+      ? capabilities.modelContexts.map((item) => {
+          const context = object(item, "runtime model context");
+          const contextModel = requiredText(context.model, "runtime model context model");
+          if (Object.keys(context).some((key) =>
+            !["model", "contextWindowTokens", "measurement"].includes(key)) ||
+              !models.includes(contextModel) ||
+              !Number.isInteger(context.contextWindowTokens) ||
+              context.contextWindowTokens <= 0 ||
+              !["provider_reported", "verified_config"].includes(context.measurement)) {
+            throw new DaemonClientError("invalid_config", "runtime model context is invalid");
+          }
+          return {
+            model: contextModel,
+            contextWindowTokens: context.contextWindowTokens,
+            measurement: context.measurement,
+          };
+        })
+      : (() => { throw new DaemonClientError("invalid_config", "runtime model contexts are invalid"); })();
+  if (new Set(modelContexts.map((item) => item.model)).size !== modelContexts.length) {
+    throw new DaemonClientError("invalid_config", "runtime model contexts must be unique");
+  }
+  modelContexts.sort((left, right) => left.model.localeCompare(right.model));
+  if (capabilities.contextCompaction !== undefined &&
+      capabilities.contextCompaction !== "native") {
+    throw new DaemonClientError("invalid_config", "runtime context compaction capability is invalid");
+  }
+  if (capabilities.contextCompaction === "native" && runtime.kind !== "cli") {
+    throw new DaemonClientError("invalid_config", "native context compaction requires a CLI runtime");
+  }
   return {
     ...runtime,
     model,
-    runtimeCapabilities: { ...capabilities, models },
+    runtimeCapabilities: {
+      ...capabilities,
+      models,
+      ...(modelContexts.length ? { modelContexts } : {}),
+      ...(capabilities.contextCompaction === "native" ? { contextCompaction: "native" } : {}),
+    },
   };
 }
 

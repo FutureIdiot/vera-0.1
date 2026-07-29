@@ -291,13 +291,16 @@ test("message time appears only inside the bubble and flat action interfaces sta
     assert.equal(content.children.at(-1), meta);
     assert.equal(meta.hidden, false);
     const actions = bubble.querySelectorAll(".vera-bubble__action");
-    assert.equal(actions.length, 6);
+    assert.equal(actions.length, 7);
     assert.deepEqual(
       actions.map((button) => button.dataset.action),
-      ["background", "stop", "retry", "branch", "save", "copy"],
+      ["background", "stop", "retry", "branch", "save", "copy", "edit"],
     );
-    assert.deepEqual(actions.map((button) => button.disabled), [true, true, true, true, true, false]);
-    assert.deepEqual(actions.slice(0, 2).map((button) => button.hidden), [true, true]);
+    assert.deepEqual(actions.map((button) => button.disabled), [true, true, true, true, true, false, true]);
+    assert.deepEqual(
+      actions.filter((button) => !button.hidden).map((button) => button.dataset.action),
+      ["copy", "edit"],
+    );
   } finally {
     globalThis.document = previousDocument;
   }

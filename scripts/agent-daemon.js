@@ -39,11 +39,53 @@ export function adapterFor(runtime, config) {
   throw Object.assign(new Error("runtime executor is unavailable"), { code: "unavailable" });
 }
 
+export async function discoverRuntimeCapabilities(runtime, adapter, config) {
+  const models = runtime.runtimeCapabilities?.models ?? [runtime.model];
+  const existing = Array.isArray(runtime.runtimeCapabilities?.modelContexts)
+    ? runtime.runtimeCapabilities.modelContexts
+    : [];
+  let discoveredCapabilities = {};
+  if (typeof adapter?.discoverRuntimeCapabilities === "function") {
+    try {
+      discoveredCapabilities = await adapter.discoverRuntimeCapabilities(runtime) ?? {};
+    } catch {
+      discoveredCapabilities = {};
+    }
+  } else if (runtime.kind === "api" && runtime.provider === "ollama") {
+    discoveredCapabilities = {
+      modelContexts: models.map((model) => ({
+        model,
+        contextWindowTokens: config.ollama.numCtx,
+        measurement: "verified_config",
+      })),
+    };
+  }
+  const discovered = discoveredCapabilities.modelContexts ?? [];
+  const byModel = new Map(existing.map((item) => [item.model, item]));
+  for (const item of discovered) byModel.set(item.model, item);
+  const { contextCompaction: _configuredCompaction, ...configuredCapabilities } =
+    runtime.runtimeCapabilities ?? {};
+  return {
+    ...runtime,
+    runtimeCapabilities: {
+      ...configuredCapabilities,
+      models,
+      ...(byModel.size ? {
+        modelContexts: [...byModel.values()].sort((left, right) => left.model.localeCompare(right.model)),
+      } : {}),
+      ...(discoveredCapabilities.contextCompaction === "native"
+        ? { contextCompaction: "native" }
+        : {}),
+    },
+  };
+}
+
 export async function main({ env = process.env, fetchImpl = globalThis.fetch, executor = null } = {}) {
   const config = loadConfig(env);
-  const runtime = json(env, "VERA_AGENT_RUNTIME_JSON");
+  const configuredRuntime = json(env, "VERA_AGENT_RUNTIME_JSON");
   const workspace = json(env, "VERA_AGENT_WORKSPACE_JSON");
-  const adapter = executor ? null : adapterFor(runtime, config);
+  const adapter = executor ? null : adapterFor(configuredRuntime, config);
+  const runtime = await discoverRuntimeCapabilities(configuredRuntime, adapter, config);
   const daemonExecutor = executor ?? {
     execute(context) {
       const { input, run } = context;
@@ -129,6 +171,13 @@ export async function main({ env = process.env, fetchImpl = globalThis.fetch, ex
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
+    },
+    compactSession(context) {
+      return adapter.compactSession?.({
+        ...context,
+        runtime,
+        workspacePath: workspace.path,
+      });
     },
     shutdown: () => adapter.shutdown?.(),
   };

@@ -17,6 +17,7 @@ import {
   rotateContextGeneration,
   updateContextPressure,
 } from "./context-state.js";
+import { modelContextFromCapabilities } from "../agents/runtime-contexts.js";
 import { withAccountExecutionLock } from "./execution-lock.js";
 import {
   boundApiMessages,
@@ -92,6 +93,7 @@ export function executeRun({
     ...(agent.runtimeProfile ?? {}),
     model: account.model ?? agent.runtimeProfile?.model,
     connection: agent.runtimeBinding?.connection ?? {},
+    runtimeCapabilities: agent.runtimeBinding?.runtimeSnapshot?.runtimeCapabilities ?? {},
   };
   let activeSpaceSession = spaceSession;
   let activeAgentSession = agentSession;
@@ -385,12 +387,27 @@ export function executeRun({
         : runtime.kind === "api"
           ? estimateTokens(apiHistory)
           : priorEstimate + estimateTokens(prompt.text) + estimateTokens(result?.content ?? "");
+      const modelContext = modelContextFromCapabilities(
+        runtime.runtimeCapabilities,
+        runtime.model,
+      );
+      const reportedWindow = Number.isInteger(result?.usage?.contextWindowTokens) &&
+        result.usage.contextWindowTokens > 0
+        ? {
+            contextWindowTokens: result.usage.contextWindowTokens,
+            windowMeasurement: "provider_reported",
+          }
+        : modelContext ? {
+            contextWindowTokens: modelContext.contextWindowTokens,
+            windowMeasurement: modelContext.measurement,
+          } : {};
       activeAgentSession = updateContextPressure(store, {
         agentSessionId: activeAgentSession.id,
         generation: activeAgentSession.generation,
         estimatedInputTokens: measured,
         effectiveLimitTokens,
         measurement: hasProviderMeasurement ? "provider_reported" : "estimate",
+        ...reportedWindow,
       });
       const nextPressure = assessContextPressure(activeAgentSession, config.context);
       if (nextPressure.shouldCompact && contextCompaction) {

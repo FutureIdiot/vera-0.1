@@ -110,12 +110,29 @@ test("chat uses non-interactive exec, CAS-persists provider binding, resumes, an
   assert.deepEqual(firstResult, {
     content: "CODEX_CHAT_OK",
     providerBinding: { version: 1, providerState: { threadId: "thr_fake_1" } },
+    usage: {
+      inputTokens: 101,
+      outputTokens: 9,
+      cacheReadTokens: 80,
+      totalTokens: 110,
+      contextWindowTokens: 950,
+    },
   });
   assert.equal("sessionState" in firstResult, false);
 
   const second = makeCtx(fake.binary, { providerBinding: firstResult.providerBinding });
   const secondResult = await adapter.run(second.ctx);
-  assert.deepEqual(secondResult, { content: "CODEX_RESUME_OK", providerBinding: firstResult.providerBinding });
+  assert.deepEqual(secondResult, {
+    content: "CODEX_RESUME_OK",
+    providerBinding: firstResult.providerBinding,
+    usage: {
+      inputTokens: 101,
+      outputTokens: 9,
+      cacheReadTokens: 80,
+      totalTokens: 110,
+      contextWindowTokens: 950,
+    },
+  });
   assert.deepEqual(second.persisted, []);
   const calls = await fake.readInvocations();
   assert.equal(calls[0].input, "INDEX\n\nquestion");
@@ -179,6 +196,63 @@ test("invalid binding and explicit missing thread rotate, while ordinary provide
   await assert.rejects(() => adapter.run(failed.ctx), (error) => error.code === "provider_error" && !error.message.includes("secret"));
   assert.equal(failed.activities.every((item) => item.phase === "thinking"), true);
   assert.deepEqual(ordinaryRotateReasons, []);
+});
+
+test("Codex discovers model-specific usable context windows from the installed CLI catalog", async (t) => {
+  const fake = await createFakeCodex(t);
+  const adapter = createCodexAdapter({ config: { binary: fake.binary } });
+  const capabilities = await adapter.discoverRuntimeCapabilities({
+    ...account(fake.binary),
+    runtimeCapabilities: { models: ["fake-chat", "fake-tool", "not-in-catalog"] },
+  });
+  assert.deepEqual(capabilities.modelContexts, [
+    {
+      model: "fake-chat",
+      contextWindowTokens: 950,
+      measurement: "provider_reported",
+    },
+    {
+      model: "fake-tool",
+      contextWindowTokens: 1800,
+      measurement: "provider_reported",
+    },
+  ]);
+  assert.equal(capabilities.contextCompaction, "native");
+});
+
+test("Codex native compact resumes the same app-server thread and fails closed", async (t) => {
+  const fake = await createFakeCodex(t);
+  const adapter = createCodexAdapter({ config: { binary: fake.binary, watchdogMs: 1000 } });
+  const providerBinding = {
+    version: 2,
+    accountId: "acc_codex",
+    providerFingerprint: "sha256:codex",
+    providerState: { threadId: "thread-native" },
+  };
+  assert.deepEqual(await adapter.compactSession({
+    runtime: account(fake.binary),
+    workspacePath: process.cwd(),
+    input: { providerBinding },
+    signal: new AbortController().signal,
+  }), { providerBinding });
+  const requests = (await fake.readInvocations())
+    .filter((item) => item.args[0] === "app-server" && item.args[1] === "--stdio")
+    .map((item) => JSON.parse(item.input));
+  assert.deepEqual(requests.map((item) => item.method), [
+    "initialize", "thread/resume", "thread/compact/start",
+  ]);
+  assert.equal(requests[1].params.threadId, "thread-native");
+  assert.equal(requests[2].params.threadId, "thread-native");
+
+  await assert.rejects(() => adapter.compactSession({
+    runtime: account(fake.binary),
+    workspacePath: process.cwd(),
+    input: { providerBinding: {
+      ...providerBinding,
+      providerState: { threadId: "thread-fail" },
+    } },
+    signal: new AbortController().signal,
+  }), (error) => error.code === "provider_error");
 });
 
 test("isolated CLI run is one-shot and neither persists nor returns a binding", async (t) => {

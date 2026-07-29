@@ -8,7 +8,7 @@ import {
   estimateTokens,
 } from "../../src/spaces/run-context.js";
 
-test("provider context profile overrides the global default without exceeding its byte gate", () => {
+test("provider context profile is independent from the current prompt byte gate", () => {
   const config = {
     context: { defaultLimitTokens: 16384 },
     antigravity: { contextWindowTokens: 32768, maxInputBytes: 131072 },
@@ -20,7 +20,25 @@ test("provider context profile overrides the global default without exceeding it
   config.antigravity.maxInputBytes = 64000;
   assert.equal(
     effectiveContextLimit(config, { provider: "antigravity" }),
-    16000,
+    32768,
+  );
+  assert.equal(
+    effectiveContextLimit({
+      context: { defaultLimitTokens: 16384 },
+      codex: { maxInputBytes: 400000 },
+    }, {
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      runtimeCapabilities: {
+        modelContexts: [{
+          model: "gpt-5.6-sol",
+          contextWindowTokens: 258400,
+          measurement: "provider_reported",
+        }],
+      },
+    }),
+    258400,
+    "the actual model window must not be replaced by Vera's independent input byte gate",
   );
 });
 

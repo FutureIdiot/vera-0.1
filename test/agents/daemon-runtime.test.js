@@ -139,7 +139,12 @@ test("daemon Run endpoints authenticate the current Session lease and delegate s
       ["POST", "/api/agent/runs/run_runtime/approvals", { prompt: "allow?", options: ["allow", "deny"] }, 201],
       ["PATCH", "/api/agent/runs/run_runtime", {
         status: "completed",
-        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+        usage: {
+          inputTokens: 10,
+          outputTokens: 2,
+          totalTokens: 12,
+          contextWindowTokens: 258400,
+        },
       }, 200],
       ["PUT", `/api/agent/compactions/ccj_runtime/targets/${agentId}`, {
         agentSessionId: "ags_runtime", fromGeneration: 1, status: "failed",

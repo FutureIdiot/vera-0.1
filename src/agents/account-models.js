@@ -5,6 +5,7 @@
 import { ApiError } from "../core/errors.js";
 import { rotateContextGeneration } from "../spaces/context-state.js";
 import { projectAccount } from "./accounts.js";
+import { agentModelContext } from "./runtime-contexts.js";
 
 const ACTIVE_RUN_STATUSES = new Set(["pending", "running"]);
 const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
@@ -118,6 +119,23 @@ export function updateAccountModel(store, accountId, body, { hub = null, now = (
     modelVersion: currentVersion + 1,
     updatedAt: timestamp,
   });
+  const modelContext = agentModelContext(owner, updated.model);
+  for (const session of sessions) {
+    const current = store.find("agentSessions", session.id);
+    const effectiveLimitTokens = modelContext?.contextWindowTokens ?? 0;
+    store.update("agentSessions", current.id, {
+      context: {
+        ...current.context,
+        contextWindowTokens: modelContext?.contextWindowTokens ?? 0,
+        windowMeasurement: modelContext?.measurement ?? null,
+        effectiveLimitTokens,
+        pressureRatio: effectiveLimitTokens > 0
+          ? (current.context?.estimatedInputTokens ?? 0) / effectiveLimitTokens
+          : 0,
+      },
+      updatedAt: timestamp,
+    });
+  }
   const projected = projectAccount(updated);
   hub?.publish("account.upserted", { account: projected });
   return projected;

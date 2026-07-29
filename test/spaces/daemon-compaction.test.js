@@ -8,8 +8,9 @@ import { createEventHub } from "../../src/api/sse.js";
 import { createStore } from "../../src/store/store.js";
 import { getActiveContext } from "../../src/spaces/context-sessions.js";
 import { createContextCompactionService } from "../../src/spaces/context-compactions.js";
+import { compareAndSetProviderBinding, getProviderBinding } from "../../src/spaces/context-state.js";
 
-test("daemon compaction dispatches a frozen target and advances generation only after result", async () => {
+test("Codex native compaction keeps the same provider thread and advances generation only after result", async () => {
   const root = await mkdtemp(join(tmpdir(), "vera-daemon-compact-"));
   const store = await createStore({ dataPath: root, debounceMs: 1 });
   const hub = createEventHub({ bufferSize: 100 });
@@ -18,7 +19,10 @@ test("daemon compaction dispatches a frozen target and advances generation only 
       id: "agt_compact",
       name: "Compact",
       runtimeProfile: { schemaVersion: 1, kind: "cli", provider: "codex", model: "gpt-test" },
-      runtimeBinding: { connection: {} },
+      runtimeBinding: {
+        connection: {},
+        runtimeSnapshot: { runtimeCapabilities: { contextCompaction: "native" } },
+      },
       runtimeRevision: "sha256:compact",
       createdAt: "2026-07-19T00:00:00.000Z",
     });
@@ -40,6 +44,14 @@ test("daemon compaction dispatches a frozen target and advances generation only 
       spaceId: space.id,
       accountId: account.id,
       agentId: agent.id,
+    });
+    compareAndSetProviderBinding(store, {
+      agentSessionId: agentSession.id,
+      generation: 1,
+      accountId: account.id,
+      providerFingerprint: "sha256:codex",
+      providerState: { threadId: "thread-native" },
+      ifVersion: null,
     });
     store.insert("messages", {
       id: "msg_compact",
@@ -76,7 +88,7 @@ test("daemon compaction dispatches a frozen target and advances generation only 
               agentSessionId: target.agentSessionId,
               fromGeneration: target.fromGeneration,
               status: "succeeded",
-              checkpoint: data.input.checkpoint,
+              providerBinding: data.input.providerBinding,
             },
           });
         });
@@ -94,11 +106,17 @@ test("daemon compaction dispatches a frozen target and advances generation only 
       agentId: agent.id,
       agentSessionId: agentSession.id,
       fromGeneration: 1,
-      mode: "checkpoint_new_binding",
+      mode: "native",
     });
-    assert.equal("providerBinding" in dispatched.event.data.input, false);
+    assert.equal(dispatched.event.data.input.providerBinding.providerState.threadId, "thread-native");
+    assert.equal("checkpoint" in dispatched.event.data.input, false);
     assert.equal(completed.status, "succeeded");
     assert.equal(store.find("agentSessions", agentSession.id).generation, 2);
+    assert.equal(getProviderBinding(store, {
+      agentSessionId: agentSession.id,
+      generation: 2,
+      accountId: account.id,
+    }).providerState.threadId, "thread-native");
     assert.equal(store.list("messages").length, 1, "compaction must not create chat output");
   } finally {
     await store.close();

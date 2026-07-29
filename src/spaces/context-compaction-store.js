@@ -78,7 +78,11 @@ function resolveTarget(store, spaceSession, target) {
   const account = accountId ? store.find("accounts", accountId) : null;
   if (!account || account.ownerAgentId !== target.agentId) throw conflict(`agent ${target.agentId} is not the owner of account ${accountId}`);
   const agent = store.find("agents", target.agentId);
-  const mode = target.mode ?? (agent?.runtimeProfile?.kind === "api" ? "gateway_history" : "checkpoint_new_binding");
+  const nativeCompaction =
+    agent?.runtimeBinding?.runtimeSnapshot?.runtimeCapabilities?.contextCompaction === "native";
+  const mode = target.mode ?? (agent?.runtimeProfile?.kind === "api"
+    ? "gateway_history"
+    : nativeCompaction ? "native" : "checkpoint_new_binding");
   if (!MODES.has(mode)) throw invalid("target.mode is invalid");
   const recentTurnLimit = target.recentTurnLimit ?? 8;
   if (!Number.isInteger(recentTurnLimit) || recentTurnLimit < 1) {

@@ -28,6 +28,11 @@ function strictKeys(value, allowed, field) {
 function runtimeSnapshot(runtime) {
   strictKeys(runtime, new Set(["hostId", "kind", "provider", "model", "revision", "runtimeCapabilities"]), "runtime");
   const capabilities = object(runtime.runtimeCapabilities, "runtime.runtimeCapabilities");
+  strictKeys(
+    capabilities,
+    new Set(["models", "modelContexts", "contextCompaction", "tools", "extensions"]),
+    "runtime.runtimeCapabilities",
+  );
   const models = Array.isArray(capabilities.models)
     ? capabilities.models.map((model) => requiredText(model, "runtime model"))
     : invalid("runtime.runtimeCapabilities.models must be a non-empty array");
@@ -35,8 +40,42 @@ function runtimeSnapshot(runtime) {
   if (new Set(models).size !== models.length) invalid("runtime.runtimeCapabilities.models must not contain duplicates");
   if (models.includes("default")) invalid("runtime.runtimeCapabilities.models must contain effective model names");
   models.sort();
+  const modelContexts = capabilities.modelContexts === undefined
+    ? []
+    : Array.isArray(capabilities.modelContexts)
+      ? capabilities.modelContexts.map((value) => {
+          const item = object(value, "runtime.runtimeCapabilities.modelContexts[]");
+          strictKeys(
+            item,
+            new Set(["model", "contextWindowTokens", "measurement"]),
+            "runtime.runtimeCapabilities.modelContexts[]",
+          );
+          const model = requiredText(item.model, "runtime model context model");
+          if (!models.includes(model) ||
+              !Number.isInteger(item.contextWindowTokens) ||
+              item.contextWindowTokens <= 0 ||
+              !["provider_reported", "verified_config"].includes(item.measurement)) {
+            invalid("runtime model context is invalid");
+          }
+          return {
+            model,
+            contextWindowTokens: item.contextWindowTokens,
+            measurement: item.measurement,
+          };
+        })
+      : invalid("runtime.runtimeCapabilities.modelContexts must be an array");
+  if (new Set(modelContexts.map((item) => item.model)).size !== modelContexts.length) {
+    invalid("runtime.runtimeCapabilities.modelContexts must not contain duplicate models");
+  }
+  modelContexts.sort((left, right) => left.model.localeCompare(right.model));
   const safeCapabilities = {
     models,
+    ...(modelContexts.length ? { modelContexts } : {}),
+    ...(capabilities.contextCompaction === undefined ? {} : {
+      contextCompaction: capabilities.contextCompaction === "native"
+        ? "native"
+        : invalid("runtime context compaction capability is invalid"),
+    }),
     ...(Array.isArray(capabilities.tools) ? {
       tools: capabilities.tools.map((tool) => {
         const item = object(tool, "runtime.runtimeCapabilities.tools[]");
@@ -62,6 +101,9 @@ function runtimeSnapshot(runtime) {
   if (snapshot.model === "default") invalid("runtime.model must be the effective model");
   if (!snapshot.runtimeCapabilities.models.includes(snapshot.model)) {
     invalid("runtime.model must be included in runtime.runtimeCapabilities.models");
+  }
+  if (snapshot.runtimeCapabilities.contextCompaction === "native" && snapshot.kind !== "cli") {
+    invalid("runtime native context compaction requires a CLI runtime");
   }
   return snapshot;
 }

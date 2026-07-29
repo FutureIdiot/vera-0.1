@@ -254,6 +254,12 @@ test("space-session.created advances the canonical active session pointer", asyn
     data: { spaceId: "spc_1", spaceSession: { id: "sps_new" } },
   }) });
   assert.equal(runtime.getBootstrap().spaces[0].activeSpaceSessionId, "sps_new");
+  sources[0].onmessage({ data: JSON.stringify({
+    seq: 3,
+    type: "space-session.resumed",
+    data: { spaceId: "spc_1", spaceSession: { id: "sps_old" } },
+  }) });
+  assert.equal(runtime.getBootstrap().spaces[0].activeSpaceSessionId, "sps_old");
   runtime.close();
 });
 

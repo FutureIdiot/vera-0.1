@@ -61,7 +61,8 @@ export function createAppRuntime({
       bootstrap.groups = upsert(bootstrap.groups ?? [], envelope.data.group);
     } else if (envelope.type === "group.deleted" && envelope.data?.groupId) {
       bootstrap.groups = (bootstrap.groups ?? []).filter((group) => group.id !== envelope.data.groupId);
-    } else if (envelope.type === "space-session.created" && envelope.data?.spaceId && envelope.data?.spaceSession?.id) {
+    } else if (["space-session.created", "space-session.resumed"].includes(envelope.type) &&
+        envelope.data?.spaceId && envelope.data?.spaceSession?.id) {
       bootstrap.spaces = bootstrap.spaces.map((space) => space.id === envelope.data.spaceId
         ? { ...space, activeSpaceSessionId: envelope.data.spaceSession.id }
         : space);

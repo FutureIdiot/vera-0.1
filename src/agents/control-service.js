@@ -37,6 +37,7 @@ import {
 } from "../store/migrations/federation-account.mjs";
 import { recordAccountLoginAudit } from "./login-audit.js";
 import { updateAccountModel as changeAccountModel } from "./account-models.js";
+import { refreshAgentSessionContextWindows } from "../spaces/context-sessions.js";
 
 function reauth() {
   throw new ApiError("account_reauthentication_required", "Account Session requires reauthentication");
@@ -186,7 +187,7 @@ export function createControlService({
   }
 
   function applyAccountRuntime(account, agent, runtime, binding) {
-    return store.update("accounts", account.id, {
+    const updated = store.update("accounts", account.id, {
       workspace: binding,
       runtimeCapabilities: runtime.runtimeCapabilities,
       presence: "online",
@@ -194,6 +195,8 @@ export function createControlService({
       lastSeenAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    refreshAgentSessionContextWindows(store, updated.id);
+    return updated;
   }
 
 

@@ -68,6 +68,7 @@ class FakeElement {
   }
 
   append(...children) { this.children.push(...children); }
+  prepend(...children) { this.children.unshift(...children); }
   appendChild(child) { this.children.push(child); }
   replaceChildren(...children) { this.children = [...children]; }
   addEventListener(type, listener) { this.listeners.set(type, listener); }
@@ -75,6 +76,71 @@ class FakeElement {
   querySelectorAll() { return []; }
   focus() {}
 }
+
+test("composer uses icon-only Session and plus controls, and resumes from History", async () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    createElement: (tagName) => new FakeElement(tagName),
+    createElementNS: (_namespace, tagName) => new FakeElement(tagName),
+  };
+  const resumed = [];
+  try {
+    const composer = createComposer({
+      targets: [{ id: "acc_alpha", name: "Alpha" }],
+      onPickAttachment: async () => null,
+      onListSessions: async () => ({
+        sessions: [{
+          id: "sps_old",
+          status: "archived",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }],
+      }),
+      onResumeSession: async (id) => { resumed.push(id); },
+    });
+    composer.setSessionContext({
+      spaceSession: { id: "sps_current", createdAt: "2026-01-02T00:00:00.000Z" },
+      agentSessions: [{
+        id: "ags_alpha",
+        accountId: "acc_alpha",
+        context: {
+          estimatedInputTokens: 180000,
+          effectiveLimitTokens: 12000,
+          contextWindowTokens: 258000,
+          pressureRatio: 15,
+        },
+      }],
+    });
+
+    const bar = composer.element.children[3];
+    const tools = bar.children[0];
+    const sessionButton = tools.children[0];
+    const plusButton = tools.children[1];
+    assert.equal(sessionButton.attributes["aria-label"], "查看 Session");
+    assert.equal(sessionButton.children[0].dataset.icon, "session");
+    assert.equal(plusButton.attributes["aria-label"], "添加附件");
+    assert.equal(plusButton.children[0].dataset.icon, "plus");
+
+    sessionButton.listeners.get("click")();
+    const sessionMenu = composer.element.children[4];
+    assert.equal(sessionMenu.hidden, false);
+    assert.equal(sessionMenu.children[1].children[0].children[1].textContent,
+      "70% · 180,000 / 258,000 tokens");
+    await sessionMenu.children[2].listeners.get("click")();
+    await new Promise((resolve) => setImmediate(resolve));
+    const oldSession = sessionMenu.children.at(-1);
+    await oldSession.listeners.get("click")();
+    assert.deepEqual(resumed, ["sps_old"]);
+
+    plusButton.listeners.get("click")();
+    const attachmentMenu = composer.element.children[5];
+    assert.equal(attachmentMenu.hidden, false);
+    assert.equal(attachmentMenu.children.length, 2);
+    assert.equal(attachmentMenu.children[0].children[1].textContent, "图片");
+    assert.equal(attachmentMenu.children[1].children[1].textContent, "文件");
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
 
 test("composer keeps one in-flight submit even when submit events re-enter synchronously", async () => {
   const previousDocument = globalThis.document;

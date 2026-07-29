@@ -125,6 +125,9 @@ export function createDaemonRunScheduler({
         ...(agent.runtimeProfile ?? {}),
         model: frozenRun.effectiveModel,
         connection: structuredClone(agent.runtimeBinding?.connection ?? {}),
+        runtimeCapabilities: structuredClone(
+          agent.runtimeBinding?.runtimeSnapshot?.runtimeCapabilities ?? {},
+        ),
       };
       const session = controlService.getSession(account.id);
       if (!session || session.agentId !== agent.id || session.runtimeRevision !== agent.runtimeRevision) {
@@ -308,6 +311,9 @@ export function createDaemonRunScheduler({
         ...(agent.runtimeProfile ?? {}),
         model: frozenRun.effectiveModel,
         connection: structuredClone(agent.runtimeBinding?.connection ?? {}),
+        runtimeCapabilities: structuredClone(
+          agent.runtimeBinding?.runtimeSnapshot?.runtimeCapabilities ?? {},
+        ),
       };
       const input = isolatedDelegateInput(runtime, delegatePacket);
       authorizeDaemonExecution({

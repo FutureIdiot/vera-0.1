@@ -9,12 +9,14 @@ export function estimateTokens(value) {
 }
 
 export function effectiveContextLimit(config, runtime) {
-  const configured = config?.[runtime.provider]?.contextWindowTokens ??
+  const actualContext = runtime?.runtimeCapabilities?.modelContexts?.find((item) =>
+    item?.model === runtime.model &&
+    Number.isInteger(item.contextWindowTokens) &&
+    item.contextWindowTokens > 0);
+  const configured = actualContext?.contextWindowTokens ??
+    config?.[runtime.provider]?.contextWindowTokens ??
     config.context.defaultLimitTokens;
-  const byteLimit = config?.[runtime.provider]?.maxInputBytes;
-  return Number.isFinite(byteLimit) && byteLimit > 0
-    ? Math.min(configured, Math.floor(byteLimit / 4))
-    : configured;
+  return configured;
 }
 
 export function latestCheckpoint(store, agentSessionId) {

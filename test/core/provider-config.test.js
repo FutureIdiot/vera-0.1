@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { loadConfig } from "../../src/core/config.js";
-import { adapterFor } from "../../scripts/agent-daemon.js";
+import { adapterFor, discoverRuntimeCapabilities } from "../../scripts/agent-daemon.js";
 
 test("Antigravity provider config has safe defaults and strict env normalization", async () => {
   const defaults = loadConfig({});
@@ -56,4 +56,42 @@ test("production daemon selects Antigravity only for the exact runtime provider"
     () => adapterFor({ kind: "cli", provider: "agy", model: "gemini-3.6-flash-low" }, config),
     (error) => error.code === "unavailable",
   );
+});
+
+test("daemon reports only context windows discovered by its actual runtime", async () => {
+  const config = loadConfig({ VERA_OLLAMA_NUM_CTX: "24576" });
+  const ollama = await discoverRuntimeCapabilities({
+    kind: "api",
+    provider: "ollama",
+    model: "model-a",
+    runtimeCapabilities: { models: ["model-a", "model-b"] },
+  }, null, config);
+  assert.deepEqual(ollama.runtimeCapabilities.modelContexts, [
+    { model: "model-a", contextWindowTokens: 24576, measurement: "verified_config" },
+    { model: "model-b", contextWindowTokens: 24576, measurement: "verified_config" },
+  ]);
+
+  const unavailable = await discoverRuntimeCapabilities({
+    kind: "cli",
+    provider: "unknown",
+    model: "model-a",
+    runtimeCapabilities: { models: ["model-a"] },
+  }, {
+    async discoverRuntimeCapabilities() {
+      throw new Error("provider catalog unavailable");
+    },
+  }, config);
+  assert.equal("modelContexts" in unavailable.runtimeCapabilities, false);
+
+  const native = await discoverRuntimeCapabilities({
+    kind: "cli",
+    provider: "codex",
+    model: "model-a",
+    runtimeCapabilities: { models: ["model-a"] },
+  }, {
+    async discoverRuntimeCapabilities() {
+      return { contextCompaction: "native" };
+    },
+  }, config);
+  assert.equal(native.runtimeCapabilities.contextCompaction, "native");
 });

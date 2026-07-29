@@ -1,7 +1,7 @@
 // 底部输入框：发消息（POST /api/spaces/:id/messages，广播）。
 // 只负责收集输入、调用 onSend，不知道 gateway 的 URL 形状。
 
-import { setIconButtonContent } from "./vector-icon.js";
+import { createVectorIcon, setIconButtonContent } from "./vector-icon.js";
 
 export const DEFAULT_COMMANDS = Object.freeze([
   { command: "/new", description: "开始新的 SpaceSession", available: true },
@@ -43,10 +43,27 @@ function createIconButton(icon, label, className) {
   return button;
 }
 
+function formatTokens(value) {
+  return Math.max(0, Math.round(Number(value) || 0)).toLocaleString("en-US");
+}
+
+function formatSessionTime(value) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "时间未知";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(timestamp);
+}
+
 export function createComposer({
   onSend,
   onStop,
   onPickAttachment,
+  onListSessions,
+  onResumeSession,
   onVoice,
   targets = [],
   commands = DEFAULT_COMMANDS,
@@ -60,6 +77,12 @@ export function createComposer({
   let isGroupChat = false;
   let activeMenu = null;
   let activeIndex = 0;
+  let sessionContext = { spaceSession: null, agentSessions: [] };
+  let historySessions = [];
+  let historyExpanded = false;
+  let historyLoading = false;
+  let historyLoaded = false;
+  let resumingSessionId = null;
 
   const form = document.createElement("form");
   form.className = "vera-composer";
@@ -80,13 +103,25 @@ export function createComposer({
   stopMenu.setAttribute("role", "listbox");
   stopMenu.setAttribute("aria-label", "选择要中止的 Account");
 
+  const sessionMenu = document.createElement("div");
+  sessionMenu.className = "vera-composer__menu vera-composer__session-menu";
+  sessionMenu.hidden = true;
+  sessionMenu.setAttribute("role", "dialog");
+  sessionMenu.setAttribute("aria-label", "Session 与上下文");
+
+  const attachmentMenu = document.createElement("div");
+  attachmentMenu.className = "vera-composer__menu vera-composer__attachment-menu";
+  attachmentMenu.hidden = true;
+  attachmentMenu.setAttribute("role", "menu");
+  attachmentMenu.setAttribute("aria-label", "添加附件");
+
   const bar = document.createElement("div");
   bar.className = "vera-composer__bar";
   const attachmentControls = document.createElement("div");
   attachmentControls.className = "vera-composer__tools";
-  const image = createIconButton("image", "添加图片", "vera-composer__tool");
-  const attach = createIconButton("file", "添加文件", "vera-composer__tool");
-  attachmentControls.append(image, attach);
+  const session = createIconButton("session", "查看 Session", "vera-composer__tool vera-composer__session-button");
+  const attach = createIconButton("plus", "添加附件", "vera-composer__tool");
+  attachmentControls.append(session, attach);
 
   const input = document.createElement("textarea");
   input.className = "vera-composer__input";
@@ -112,7 +147,7 @@ export function createComposer({
   error.className = "vera-composer__error";
   error.setAttribute("role", "alert");
   error.hidden = true;
-  form.append(commandMenu, mentionMenu, stopMenu, bar, attachmentList, error);
+  form.append(commandMenu, mentionMenu, stopMenu, bar, sessionMenu, attachmentMenu, attachmentList, error);
 
   function renderAttachments() {
     attachmentList.replaceChildren();
@@ -156,6 +191,8 @@ export function createComposer({
     commandMenu.hidden = true;
     mentionMenu.hidden = true;
     stopMenu.hidden = true;
+    sessionMenu.hidden = true;
+    attachmentMenu.hidden = true;
     activeMenu = null;
     activeIndex = 0;
   }
@@ -185,6 +222,149 @@ export function createComposer({
     button.addEventListener("pointerdown", (event) => event.preventDefault());
     button.addEventListener("click", onSelect);
     return button;
+  }
+
+  function contextAccountName(agentSession) {
+    return currentTargets.find((target) => target.id === agentSession.accountId)?.name ?? "Account";
+  }
+
+  function contextSummary(agentSession) {
+    const used = agentSession.context?.estimatedInputTokens ?? 0;
+    const limit = agentSession.context?.contextWindowTokens ?? 0;
+    if (!(limit > 0)) return `${formatTokens(used)} tokens · 容量未知`;
+    const ratio = Math.max(0, used / limit);
+    return `${Math.round(ratio * 100)}% · ${formatTokens(used)} / ${formatTokens(limit)} tokens`;
+  }
+
+  function sessionHistoryButton(item) {
+    const button = menuButton(
+      formatSessionTime(item.createdAt),
+      item.id === resumingSessionId ? "正在恢复…" : "点击恢复这个 Session",
+      {
+        disabled: Boolean(resumingSessionId),
+        onSelect: async () => {
+          if (!onResumeSession || resumingSessionId) return;
+          resumingSessionId = item.id;
+          renderSessionMenu();
+          error.hidden = true;
+          try {
+            await onResumeSession(item.id);
+            historyExpanded = false;
+            historyLoaded = false;
+            historySessions = [];
+            sessionMenu.hidden = true;
+          } catch (err) {
+            error.textContent = err.message || "Session 恢复失败，请重试";
+            error.hidden = false;
+          } finally {
+            resumingSessionId = null;
+            if (!sessionMenu.hidden) renderSessionMenu();
+          }
+        },
+      },
+    );
+    button.classList.add("vera-composer__session-history-item");
+    return button;
+  }
+
+  async function loadSessionHistory() {
+    if (historyLoading || historyLoaded || !onListSessions) return;
+    historyLoading = true;
+    renderSessionMenu();
+    try {
+      const result = await onListSessions();
+      historySessions = (result?.sessions ?? []).filter((item) =>
+        item.id !== sessionContext.spaceSession?.id && item.status === "archived");
+      historyLoaded = true;
+    } catch (err) {
+      error.textContent = err.message || "Session 历史加载失败";
+      error.hidden = false;
+    } finally {
+      historyLoading = false;
+      if (!sessionMenu.hidden) renderSessionMenu();
+    }
+  }
+
+  function renderSessionMenu() {
+    sessionMenu.replaceChildren();
+    const heading = document.createElement("div");
+    heading.className = "vera-composer__session-heading";
+    const label = document.createElement("span");
+    label.textContent = "Context window";
+    const sessionTime = document.createElement("small");
+    sessionTime.textContent = sessionContext.spaceSession
+      ? `当前 Session · ${formatSessionTime(sessionContext.spaceSession.createdAt)}`
+      : "当前 Session";
+    heading.append(label, sessionTime);
+    sessionMenu.appendChild(heading);
+
+    const contexts = document.createElement("div");
+    contexts.className = "vera-composer__session-contexts";
+    if (sessionContext.agentSessions.length === 0) {
+      const unavailable = document.createElement("p");
+      unavailable.className = "vera-composer__session-empty";
+      unavailable.textContent = "上下文容量暂不可用";
+      contexts.appendChild(unavailable);
+    } else {
+      for (const agentSession of sessionContext.agentSessions) {
+        const row = document.createElement("div");
+        row.className = "vera-composer__session-context";
+        const account = document.createElement("span");
+        account.textContent = contextAccountName(agentSession);
+        const capacity = document.createElement("strong");
+        capacity.textContent = contextSummary(agentSession);
+        row.append(account, capacity);
+        contexts.appendChild(row);
+      }
+    }
+    sessionMenu.appendChild(contexts);
+
+    const history = menuButton(
+      "History",
+      historyExpanded ? "收起旧 Session" : "展开旧 Session",
+      {
+        onSelect: () => {
+          historyExpanded = !historyExpanded;
+          renderSessionMenu();
+          if (historyExpanded) void loadSessionHistory();
+        },
+      },
+    );
+    history.classList.add("vera-composer__session-history-toggle");
+    sessionMenu.appendChild(history);
+    if (!historyExpanded) return;
+    if (historyLoading) {
+      const loading = document.createElement("p");
+      loading.className = "vera-composer__session-empty";
+      loading.textContent = "正在加载…";
+      sessionMenu.appendChild(loading);
+      return;
+    }
+    if (historyLoaded && historySessions.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "vera-composer__session-empty";
+      empty.textContent = "还没有旧 Session";
+      sessionMenu.appendChild(empty);
+      return;
+    }
+    for (const item of historySessions) sessionMenu.appendChild(sessionHistoryButton(item));
+  }
+
+  function renderAttachmentMenu() {
+    attachmentMenu.replaceChildren();
+    const image = menuButton("图片", "从设备中选择图片", {
+      onSelect: () => void pick("image"),
+    });
+    const imageIcon = createVectorIcon("image");
+    imageIcon.classList.add("vera-composer__menu-icon");
+    image.prepend(imageIcon);
+    const file = menuButton("文件", "从设备中选择文件", {
+      onSelect: () => void pick("file"),
+    });
+    const fileIcon = createVectorIcon("file");
+    fileIcon.classList.add("vera-composer__menu-icon");
+    file.prepend(fileIcon);
+    attachmentMenu.append(image, file);
   }
 
   function setActiveItem(menu, index) {
@@ -283,8 +463,8 @@ export function createComposer({
 
   async function pick(kind) {
     if (!onPickAttachment) return;
-    image.disabled = true;
     attach.disabled = true;
+    closeMenus();
     error.hidden = true;
     try {
       const file = await onPickAttachment(kind);
@@ -297,13 +477,24 @@ export function createComposer({
       error.textContent = err.message || "附件上传失败，请重试";
       error.hidden = false;
     } finally {
-      image.disabled = disabled;
       attach.disabled = disabled;
     }
   }
 
-  image.addEventListener("click", () => void pick("image"));
-  attach.addEventListener("click", () => void pick("file"));
+  session.addEventListener("click", () => {
+    const shouldOpen = sessionMenu.hidden;
+    closeMenus();
+    if (!shouldOpen) return;
+    renderSessionMenu();
+    sessionMenu.hidden = false;
+  });
+  attach.addEventListener("click", () => {
+    const shouldOpen = attachmentMenu.hidden;
+    closeMenus();
+    if (!shouldOpen) return;
+    renderAttachmentMenu();
+    attachmentMenu.hidden = false;
+  });
   voice.addEventListener("click", () => void onVoice?.());
   send.addEventListener("click", () => {
     if (foregroundRuns.length === 0) return;
@@ -372,15 +563,47 @@ export function createComposer({
   function setTargets(nextTargets) {
     currentTargets = [...nextTargets];
     updateSuggestions();
+    if (!sessionMenu.hidden) renderSessionMenu();
   }
 
   function setDisabled(nextDisabled) {
     disabled = nextDisabled;
     input.disabled = disabled;
-    image.disabled = disabled;
+    session.disabled = disabled;
     attach.disabled = disabled;
     voice.disabled = disabled || typeof onVoice !== "function";
     updateSendState();
+  }
+
+  function setSessionContext({
+    spaceSession = null,
+    agentSessions = [],
+  } = {}) {
+    const previousSessionId = sessionContext.spaceSession?.id ?? null;
+    const nextSessionId = spaceSession?.id ?? null;
+    sessionContext = {
+      spaceSession: spaceSession ? structuredClone(spaceSession) : null,
+      agentSessions: agentSessions.map((item) => structuredClone(item)),
+    };
+    if (previousSessionId !== nextSessionId) {
+      historySessions = [];
+      historyExpanded = false;
+      historyLoaded = false;
+    }
+    const ratios = sessionContext.agentSessions
+      .map((item) => {
+        const used = item.context?.estimatedInputTokens;
+        const limit = item.context?.contextWindowTokens;
+        return Number.isFinite(used) && Number.isFinite(limit) && limit > 0
+          ? used / limit
+          : null;
+      })
+      .filter(Number.isFinite);
+    const peak = ratios.length > 0 ? Math.max(...ratios) : null;
+    session.title = peak === null
+      ? "查看 Session"
+      : `查看 Session · ${Math.round(Math.max(0, peak) * 100)}%`;
+    if (!sessionMenu.hidden) renderSessionMenu();
   }
 
   function setForegroundRuns(runs = [], options = {}) {
@@ -393,5 +616,12 @@ export function createComposer({
     updateSendState();
   }
 
-  return { element: form, input, setTargets, setDisabled, setForegroundRuns };
+  return {
+    element: form,
+    input,
+    setTargets,
+    setDisabled,
+    setForegroundRuns,
+    setSessionContext,
+  };
 }

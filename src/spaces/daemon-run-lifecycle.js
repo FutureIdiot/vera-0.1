@@ -11,6 +11,7 @@ import {
   rotateContextGeneration,
   updateContextPressure,
 } from "./context-state.js";
+import { modelContextFromCapabilities } from "../agents/runtime-contexts.js";
 import {
   checkpointForAgent,
   effectiveContextLimit,
@@ -209,13 +210,31 @@ export function createDaemonRunLifecycle({
         ...(agent.runtimeProfile ?? {}),
         model: current.effectiveModel,
         connection: structuredClone(agent.runtimeBinding?.connection ?? {}),
+        runtimeCapabilities: structuredClone(
+          agent.runtimeBinding?.runtimeSnapshot?.runtimeCapabilities ?? {},
+        ),
       };
+      const modelContext = modelContextFromCapabilities(
+        runtime.runtimeCapabilities,
+        current.effectiveModel,
+      );
+      const reportedWindow = Number.isInteger(input.usage.contextWindowTokens) &&
+        input.usage.contextWindowTokens > 0
+        ? {
+            contextWindowTokens: input.usage.contextWindowTokens,
+            windowMeasurement: "provider_reported",
+          }
+        : modelContext ? {
+            contextWindowTokens: modelContext.contextWindowTokens,
+            windowMeasurement: modelContext.measurement,
+          } : {};
       const agentSession = updateContextPressure(store, {
         agentSessionId: current.agentSessionId,
         generation: current.contextGeneration,
         estimatedInputTokens: input.usage.inputTokens,
         effectiveLimitTokens: effectiveContextLimit(config, runtime),
         measurement: "provider_reported",
+        ...reportedWindow,
       });
       shouldCompact = assessContextPressure(agentSession, config.context).shouldCompact;
     }
@@ -319,6 +338,9 @@ export function createDaemonRunLifecycle({
       ...(agent.runtimeProfile ?? {}),
       model: current.effectiveModel,
       connection: structuredClone(agent.runtimeBinding?.connection ?? {}),
+      runtimeCapabilities: structuredClone(
+        agent.runtimeBinding?.runtimeSnapshot?.runtimeCapabilities ?? {},
+      ),
     };
     const prompt = await compilePrompt({
       store,

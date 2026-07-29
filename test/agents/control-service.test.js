@@ -747,6 +747,59 @@ test("runtime model capabilities normalize safely and cannot drift within one re
       store.find("agents", enrolled.json.agent.id).runtimeBinding.runtimeSnapshot.runtimeCapabilities.models,
       ["mock-v1", "mock-v2"],
     );
+    const withContexts = loginBody(created.account.id);
+    withContexts.runtime.runtimeCapabilities.modelContexts = [
+      {
+        model: "mock-v2",
+        contextWindowTokens: 100000,
+        measurement: "verified_config",
+      },
+      {
+        model: "mock-v1",
+        contextWindowTokens: 258400,
+        measurement: "provider_reported",
+      },
+    ];
+    withContexts.runtime.runtimeCapabilities.contextCompaction = "native";
+    const contextsAccepted = await request(router, "POST", "/api/agent/login", withContexts, {
+      authorization: `Bearer ${enrolled.json.agentToken}`,
+      "x-vera-account-session": login.json.accountSession.token,
+    });
+    assert.equal(contextsAccepted.status, 200);
+    assert.deepEqual(
+      store.find("agents", enrolled.json.agent.id)
+        .runtimeBinding.runtimeSnapshot.runtimeCapabilities.modelContexts
+        .map((item) => item.model),
+      ["mock-v1", "mock-v2"],
+    );
+    assert.equal(
+      store.find("agents", enrolled.json.agent.id)
+        .runtimeBinding.runtimeSnapshot.runtimeCapabilities.contextCompaction,
+      "native",
+    );
+
+    const badCompaction = loginBody(created.account.id);
+    badCompaction.runtime.runtimeCapabilities.contextCompaction = "checkpoint_new_binding";
+    const compactionRejected = await request(router, "POST", "/api/agent/login", badCompaction, {
+      authorization: `Bearer ${enrolled.json.agentToken}`,
+      "x-vera-account-session": login.json.accountSession.token,
+    });
+    assert.equal(compactionRejected.status, 400);
+    assert.equal(compactionRejected.json.error.code, "invalid_request");
+
+    const badContext = loginBody(created.account.id);
+    badContext.runtime.runtimeCapabilities.modelContexts = [{
+      model: "unknown-model",
+      contextWindowTokens: 100,
+      measurement: "provider_reported",
+    }];
+    const contextRejected = await request(router, "POST", "/api/agent/login", badContext, {
+      authorization: `Bearer ${enrolled.json.agentToken}`,
+      "x-vera-account-session": login.json.accountSession.token,
+    });
+    assert.equal(contextRejected.status, 400);
+    assert.equal(contextRejected.json.error.code, "invalid_request");
+
     const reordered = loginBody(created.account.id);
     reordered.runtime.runtimeCapabilities.models = ["mock-v2", "mock-v1"];
     const normalized = await request(router, "POST", "/api/agent/login", reordered, {

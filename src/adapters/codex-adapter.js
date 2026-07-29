@@ -1,8 +1,10 @@
-// Native Codex CLI adapter (verified with codex-cli 0.144.2).
+// Native Codex CLI adapter (verified with codex-cli 0.146.0-alpha.3.1).
 //
 // - accepts only Account kind=cli, provider=codex;
 // - chat uses non-interactive `codex exec --json`, with a versioned CLI
 //   provider binding whose providerState is {threadId};
+// - compact resumes that exact thread through app-server and waits for the
+//   contextCompaction item plus its completed turn;
 // - Codex has no token-delta JSONL event, so completed agent_message items map once
 //   to onDelta and command/tool items map to Activity;
 // - digestMemory always uses a fresh ephemeral temp cwd, read-only/never policy,
@@ -30,6 +32,7 @@ import {
 } from "../core/activity-events.js";
 import { projectCodexDigestSchema } from "./codex-digest-schema.js";
 import { normalizeCodexDreamProposals, projectCodexDreamSchema } from "./codex-dream-schema.js";
+import { compactCodexThread } from "./codex-app-server.js";
 
 export { projectCodexDigestSchema } from "./codex-digest-schema.js";
 
@@ -40,6 +43,44 @@ const DIGEST_DISABLED_FEATURES = [
 
 function byteLength(value) {
   return Buffer.byteLength(String(value ?? ""), "utf8");
+}
+
+function normalizeUsage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const fields = {
+    input_tokens: "inputTokens",
+    output_tokens: "outputTokens",
+    reasoning_output_tokens: "thinkingTokens",
+    cached_input_tokens: "cacheReadTokens",
+    total_tokens: "totalTokens",
+    model_context_window: "contextWindowTokens",
+  };
+  const usage = {};
+  for (const [source, target] of Object.entries(fields)) {
+    const count = value[source];
+    if (Number.isFinite(count) && count >= 0) usage[target] = count;
+  }
+  return Number.isFinite(usage.inputTokens) ? usage : null;
+}
+
+function contextWindowsFromCatalog(catalog, models) {
+  if (!Array.isArray(catalog?.models)) return [];
+  const allowed = new Set(models);
+  return catalog.models.flatMap((item) => {
+    const model = typeof item?.slug === "string" ? item.slug.trim() : "";
+    const rawWindow = item?.context_window;
+    const effectivePercent = item?.effective_context_window_percent;
+    if (!allowed.has(model) || !Number.isInteger(rawWindow) || rawWindow <= 0 ||
+        !Number.isFinite(effectivePercent) || effectivePercent <= 0 || effectivePercent > 100) {
+      return [];
+    }
+    const contextWindowTokens = Math.floor(rawWindow * effectivePercent / 100);
+    return contextWindowTokens > 0 ? [{
+      model,
+      contextWindowTokens,
+      measurement: "provider_reported",
+    }] : [];
+  }).sort((left, right) => left.model.localeCompare(right.model));
 }
 
 function missingThread(stderr) {
@@ -237,6 +278,7 @@ export function createCodexAdapter({ config = {} }) {
     let persistError = null;
     let content = "";
     let reasoningCount = 0;
+    let usage = null;
     const initialReasoningCallId = `thinking-${threadId ?? "new"}`;
     const workspacePath = ctx.workspacePath || process.cwd();
     const args = ["-C", workspacePath, "-a", "never", "-s", chatSandbox, "exec"];
@@ -273,6 +315,10 @@ export function createCodexAdapter({ config = {} }) {
               }
             }
           }
+          if (event?.type === "turn.completed") {
+            usage = normalizeUsage(event.usage);
+            return;
+          }
           if (!["item.started", "item.completed"].includes(event?.type)) return;
           const item = event.item ?? {};
           if (event.type === "item.completed" &&
@@ -304,7 +350,11 @@ export function createCodexAdapter({ config = {} }) {
       if (!nextThreadId) throw new AdapterError("provider_error", "Codex CLI did not return a thread id");
       await persistPromise;
       if (persistError) throw persistError;
-      return nextProviderBinding ? { content, providerBinding: nextProviderBinding } : { content };
+      return {
+        content,
+        ...(nextProviderBinding ? { providerBinding: nextProviderBinding } : {}),
+        ...(ctx.sessionMode === "main" && usage ? { usage } : {}),
+      };
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -354,6 +404,77 @@ export function createCodexAdapter({ config = {} }) {
 
   function run(ctx) {
     return trackOperation(runInner(ctx));
+  }
+
+  async function discoverRuntimeCapabilities(runtime) {
+    assertRuntime(runtime, "executor_unavailable");
+    const binary = resolveBinary(runtime);
+    await assertBinary(binary, "executor_unavailable");
+    let catalog = null;
+    await execJson({
+      binary,
+      args: ["debug", "models", "--bundled"],
+      cwd: process.cwd(),
+      input: "",
+      signal: null,
+      timeoutMs: digestTimeoutMs,
+      digest: true,
+      onEvent(event) {
+        if (event?.models) catalog = event;
+      },
+    });
+    const models = runtime.runtimeCapabilities?.models ?? [runtime.model];
+    const schemaDirectory = await mkdtemp(join(tmpdir(), "vera-codex-schema-"));
+    let nativeCompaction = false;
+    try {
+      await execJson({
+        binary,
+        args: ["app-server", "generate-json-schema", "--out", schemaDirectory],
+        cwd: process.cwd(),
+        input: "",
+        signal: null,
+        timeoutMs: digestTimeoutMs,
+        digest: true,
+        onEvent() {},
+      });
+      const clientRequests = await readFile(join(schemaDirectory, "ClientRequest.json"), "utf8");
+      nativeCompaction = clientRequests.includes('"thread/compact/start"');
+    } catch {
+      nativeCompaction = false;
+    } finally {
+      await rm(schemaDirectory, { recursive: true, force: true });
+    }
+    return {
+      ...runtime.runtimeCapabilities,
+      models: [...models],
+      modelContexts: contextWindowsFromCatalog(catalog, models),
+      ...(nativeCompaction ? { contextCompaction: "native" } : {}),
+    };
+  }
+
+  async function compactSessionInner({ input, runtime, workspacePath, signal }) {
+    assertRuntime(runtime);
+    const providerBinding = input?.providerBinding;
+    const threadId = providerBinding?.providerState?.threadId;
+    if (!Number.isInteger(providerBinding?.version) || providerBinding.version < 1 ||
+        typeof threadId !== "string" || !threadId) {
+      throw new AdapterError("provider_error", "Codex native context compaction requires a current thread");
+    }
+    const binary = resolveBinary(runtime);
+    await assertBinary(binary, "unavailable");
+    await compactCodexThread({
+      binary,
+      threadId,
+      cwd: workspacePath ?? process.cwd(),
+      sandbox: chatSandbox,
+      signal,
+      timeoutMs: watchdogMs,
+    });
+    return { providerBinding };
+  }
+
+  function compactSession(input) {
+    return trackOperation(compactSessionInner(input));
   }
 
   async function digestMemoryInner({ runtime, taskModel, payload, signal }) {
@@ -467,5 +588,5 @@ export function createCodexAdapter({ config = {} }) {
     await Promise.allSettled([...operations]);
   }
 
-  return { run, digestMemory, dreamMemory, shutdown };
+  return { run, compactSession, discoverRuntimeCapabilities, digestMemory, dreamMemory, shutdown };
 }

@@ -33,6 +33,9 @@ export function createSpacesClient(http) {
       const query = status ? `?status=${encodeURIComponent(status)}` : "";
       return http.get(`/api/spaces/${spaceId}/sessions${query}`);
     },
+    resumeSession(spaceId, spaceSessionId, requestId) {
+      return http.post(`/api/spaces/${spaceId}/sessions/${spaceSessionId}/_resume`, { requestId });
+    },
     fetchSessionTimeline(spaceId, spaceSessionId, { before, limit } = {}) {
       const params = new URLSearchParams();
       if (before) params.set("before", before);

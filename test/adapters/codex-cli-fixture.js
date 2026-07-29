@@ -6,13 +6,56 @@ export async function createFakeCodex(t) {
   const directory = await mkdtemp(join(tmpdir(), "vera-fake-codex-"));
   const binary = join(directory, "codex");
   const logPath = join(directory, "invocations.jsonl");
-  const script = `#!/usr/bin/env node
+const script = `#!/usr/bin/env node
 import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
 
 const args = process.argv.slice(2);
+const logPath = ${JSON.stringify(logPath)};
+if (args[0] === "app-server" && args[1] === "generate-json-schema") {
+  const out = args[args.indexOf("--out") + 1];
+  await appendFile(logPath, JSON.stringify({ args, cwd: process.cwd(), input: "" }) + "\\n");
+  await writeFile(out + "/ClientRequest.json", JSON.stringify({ method: "thread/compact/start" }));
+  process.exit(0);
+}
+if (args[0] === "app-server" && args[1] === "--stdio") {
+  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  let compactThreadId = null;
+  for await (const line of lines) {
+    if (!line.trim()) continue;
+    await appendFile(logPath, JSON.stringify({ args, cwd: process.cwd(), input: line }) + "\\n");
+    const request = JSON.parse(line);
+    if (request.method === "initialize") {
+      process.stdout.write(JSON.stringify({ id: request.id, result: { userAgent: "fake-codex" } }) + "\\n");
+    } else if (request.method === "thread/resume") {
+      compactThreadId = request.params.threadId;
+      process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: compactThreadId } } }) + "\\n");
+    } else if (request.method === "thread/compact/start") {
+      const turnId = "turn_compact_1";
+      process.stdout.write(JSON.stringify({ id: request.id, result: {} }) + "\\n");
+      process.stdout.write(JSON.stringify({
+        method: "turn/started",
+        params: { threadId: compactThreadId, turn: { id: turnId, status: "inProgress" } }
+      }) + "\\n");
+      if (compactThreadId !== "thread-fail") {
+        process.stdout.write(JSON.stringify({
+          method: "item/completed",
+          params: { threadId: compactThreadId, turnId, item: { id: "compact_1", type: "contextCompaction" } }
+        }) + "\\n");
+      }
+      process.stdout.write(JSON.stringify({
+        method: "turn/completed",
+        params: { threadId: compactThreadId, turn: {
+          id: turnId, status: compactThreadId === "thread-fail" ? "failed" : "completed"
+        } }
+      }) + "\\n");
+    }
+  }
+  process.exit(0);
+}
+
 let input = "";
 for await (const chunk of process.stdin) input += chunk;
-const logPath = ${JSON.stringify(logPath)};
 await appendFile(logPath, JSON.stringify({ args, cwd: process.cwd(), input }) + "\\n");
 const valueAfter = (flag) => {
   const index = args.indexOf(flag);
@@ -24,6 +67,14 @@ const schemaPath = valueAfter("--output-schema");
 const resumeIndex = args.indexOf("resume");
 const resumed = resumeIndex >= 0;
 const threadId = resumed ? args[resumeIndex + 1] : "thr_fake_1";
+
+if (args[0] === "debug" && args[1] === "models") {
+  process.stdout.write(JSON.stringify({ models: [
+    { slug: "fake-chat", context_window: 1000, effective_context_window_percent: 95 },
+    { slug: "fake-tool", context_window: 2000, effective_context_window_percent: 90 }
+  ] }) + "\\n");
+  process.exit(0);
+}
 
 if (model === "fake-hang") await new Promise(() => setInterval(() => {}, 1000));
 if (model === "fake-provider-error") {
@@ -80,7 +131,13 @@ if (schemaPath) {
     process.stdout.write(line);
   }
 }
-process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "turn.completed", usage: {
+  input_tokens: 101,
+  cached_input_tokens: 80,
+  output_tokens: 9,
+  total_tokens: 110,
+  model_context_window: 950
+} }) + "\\n");
 `;
   await writeFile(binary, script, { mode: 0o700 });
   await chmod(binary, 0o700);

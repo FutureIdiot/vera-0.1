@@ -7,6 +7,7 @@ import { createStore } from "../../src/store/store.js";
 import {
   ensureActiveSpaceSession,
   ensureAgentSession,
+  resumeSpaceSession,
   startNewSpaceSession,
 } from "../../src/spaces/context-sessions.js";
 import {
@@ -88,6 +89,44 @@ test("active SpaceSession and per-agent AgentSession are unique and pressure is 
   });
 });
 
+test("a new AgentSession uses only its owner Agent's selected-model context capability", async () => {
+  await fixture(async (store) => {
+    store.update("agents", "agt_a", {
+      runtimeBinding: {
+        connection: {},
+        runtimeSnapshot: {
+          runtimeCapabilities: {
+            models: ["model-a", "model-b"],
+            modelContexts: [
+              {
+                model: "model-a",
+                contextWindowTokens: 258400,
+                measurement: "provider_reported",
+              },
+              {
+                model: "model-b",
+                contextWindowTokens: 100000,
+                measurement: "verified_config",
+              },
+            ],
+          },
+        },
+      },
+    });
+    store.update("accounts", "acc_a", { model: "model-a", modelVersion: 1 });
+    const spaceSession = ensureActiveSpaceSession(store, "spc_a");
+    const agentSession = ensureAgentSession(store, {
+      spaceSessionId: spaceSession.id,
+      accountId: "acc_a",
+      agentId: "agt_a",
+    });
+    assert.equal(agentSession.context.estimatedInputTokens, 0);
+    assert.equal(agentSession.context.contextWindowTokens, 258400);
+    assert.equal(agentSession.context.windowMeasurement, "provider_reported");
+    assert.equal(agentSession.context.effectiveLimitTokens, 258400);
+  });
+});
+
 test("provider binding and API history use positive integer CAS versions", async () => {
   await fixture(async (store) => {
     const spaceSession = ensureActiveSpaceSession(store, "spc_a");
@@ -162,6 +201,100 @@ test("/new archives the complete old context, is request-id idempotent, and refu
     assert.equal(newAgentSession.generation, 1);
     assert.equal(getApiHistory(store, { agentSessionId: newAgentSession.id, generation: 1 }), null);
     assert.equal(getProviderBinding(store, { agentSessionId: newAgentSession.id, generation: 1 }), null);
+  });
+});
+
+test("resume switches the active SpaceSession and preserves each Agent context binding", async () => {
+  await fixture(async (store) => {
+    const oldSpaceSession = ensureActiveSpaceSession(store, "spc_a");
+    const oldAgentSession = ensureAgentSession(store, {
+      spaceSessionId: oldSpaceSession.id,
+      accountId: "acc_a",
+      agentId: "agt_a",
+      context: { estimatedInputTokens: 70, effectiveLimitTokens: 100 },
+    });
+    const account = store.find("accounts", "acc_a");
+    const agent = store.find("agents", "agt_a");
+    const fingerprint = providerFingerprintForRuntime({
+      ...agent.runtimeProfile,
+      connection: agent.runtimeBinding.connection,
+    });
+    compareAndSetProviderBinding(store, {
+      agentSessionId: oldAgentSession.id,
+      generation: 1,
+      accountId: account.id,
+      providerFingerprint: fingerprint,
+      providerState: { threadId: "thr_resume" },
+      ifVersion: 0,
+    });
+    compareAndSetApiHistory(store, {
+      agentSessionId: oldAgentSession.id,
+      generation: 1,
+      baseHistoryVersion: 0,
+      turn,
+    });
+    store.insert("memoryRecallSessions", {
+      id: "mrs_resume",
+      agentId: "agt_a",
+      agentSessionId: oldAgentSession.id,
+      generation: 1,
+      status: "active",
+      deliveredSlugs: [],
+      cursors: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const created = startNewSpaceSession(store, {
+      spaceId: "spc_a",
+      requestId: "req_new_before_resume",
+    }, { now: "2026-01-02T00:00:00.000Z" });
+    const currentAgentSession = store.list("agentSessions").find((item) =>
+      item.spaceSessionId === created.newSession.id);
+    store.insert("runs", {
+      id: "run_target_busy",
+      spaceId: "spc_a",
+      spaceSessionId: oldSpaceSession.id,
+      status: "pending",
+    });
+    assert.throws(() => resumeSpaceSession(store, {
+      spaceId: "spc_a",
+      spaceSessionId: oldSpaceSession.id,
+      requestId: "req_resume_busy",
+    }), (error) => error.code === "session_busy");
+    assert.equal(store.find("spaces", "spc_a").activeSpaceSessionId, created.newSession.id);
+    store.update("runs", "run_target_busy", { status: "cancelled" });
+
+    const resumed = resumeSpaceSession(store, {
+      spaceId: "spc_a",
+      spaceSessionId: oldSpaceSession.id,
+      requestId: "req_resume",
+    }, { now: "2026-01-03T00:00:00.000Z" });
+    const retried = resumeSpaceSession(store, {
+      spaceId: "spc_a",
+      spaceSessionId: oldSpaceSession.id,
+      requestId: "req_resume",
+    });
+    assert.deepEqual(retried, resumed);
+    assert.equal(resumed.resumedSession.id, oldSpaceSession.id);
+    assert.equal(resumed.resumedSession.status, "active");
+    assert.equal(resumed.archivedSession.id, created.newSession.id);
+    assert.equal(resumed.archivedSession.archiveReason, "resume_switch");
+    assert.equal(store.find("spaces", "spc_a").activeSpaceSessionId, oldSpaceSession.id);
+    assert.equal(store.find("agentSessions", currentAgentSession.id).status, "archived");
+    assert.equal(store.find("agentSessions", oldAgentSession.id).status, "active");
+    assert.equal(store.find("agentSessions", oldAgentSession.id).generation, 1);
+    assert.equal(store.find("agentSessions", oldAgentSession.id).context.pressureRatio, 0.7);
+    assert.deepEqual(getProviderBinding(store, {
+      agentSessionId: oldAgentSession.id,
+      generation: 1,
+      accountId: "acc_a",
+    }).providerState, { threadId: "thr_resume" });
+    assert.deepEqual(getApiHistory(store, {
+      agentSessionId: oldAgentSession.id,
+      generation: 1,
+    }).turns, [turn]);
+    assert.equal(store.find("memoryRecallSessions", "mrs_resume").status, "active");
   });
 });
 

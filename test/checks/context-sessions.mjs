@@ -177,6 +177,13 @@ export async function run(ctx) {
     assertEqual(old.status, 200);
     assertTimelineSession(assert, active, secondSessionId, "active timeline");
     assertTimelineSession(assert, old, firstSessionId, "archived timeline");
+    assertEqual(active.json.agentSessions.length, 1);
+    assertEqual(active.json.agentSessions[0].spaceSessionId, secondSessionId);
+    assert(typeof active.json.agentSessions[0].context?.pressureRatio === "number",
+      "active timeline should project current context capacity");
+    assertEqual(active.json.agentSessions[0].context.contextWindowTokens, 258400);
+    assertEqual(active.json.agentSessions[0].context.windowMeasurement, "provider_reported");
+    assertEqual("checkpoints" in active.json.agentSessions[0], false);
     const activeIds = itemIds(active);
     const oldIds = itemIds(old);
     assert(activeIds.has(posted.json.message.id), "active timeline should contain the new Message");
@@ -193,7 +200,51 @@ export async function run(ctx) {
     assert(!archived.json.sessions.some((session) => session.id === secondSessionId));
   });
 
-  await check("p5-c1.6 /compact uses its dedicated job API and emits no Message", async () => {
+  await check("p5-c1.6 archived Session resumes as the active writable context", async () => {
+    const resumed = await httpRequest(
+      "POST",
+      `/api/spaces/${space.id}/sessions/${firstSessionId}/_resume`,
+      { requestId: "p5-c1-resume-first" },
+    );
+    assertEqual(resumed.status, 200);
+    assertEqual(resumed.json.archivedSession.id, secondSessionId);
+    assertEqual(resumed.json.archivedSession.status, "archived");
+    assertEqual(resumed.json.resumedSession.id, firstSessionId);
+    assertEqual(resumed.json.resumedSession.status, "active");
+    assertEqual(resumed.json.agentSessions.length, 1);
+
+    const archivedEvent = await sse.waitFor(
+      (event) => event.type === "space-session.archived"
+        && event.data.spaceSession.id === secondSessionId,
+      5000,
+    );
+    const resumedEvent = await sse.waitFor(
+      (event) => event.type === "space-session.resumed"
+        && event.data.spaceSession.id === firstSessionId,
+      5000,
+    );
+    assert(archivedEvent.seq < resumedEvent.seq, "archive event must precede resume event");
+
+    const active = await httpRequest("GET", `/api/spaces/${space.id}/timeline?limit=500`);
+    assertEqual(active.status, 200);
+    assertTimelineSession(assert, active, firstSessionId, "resumed timeline");
+    assert(itemIds(active).has(firstMessageId), "resumed Session should restore its old timeline");
+
+    const returned = await httpRequest(
+      "POST",
+      `/api/spaces/${space.id}/sessions/${secondSessionId}/_resume`,
+      { requestId: "p5-c1-resume-second" },
+    );
+    assertEqual(returned.status, 200);
+    assertEqual(returned.json.resumedSession.id, secondSessionId);
+    await sse.waitFor(
+      (event) => event.type === "space-session.resumed"
+        && event.data.spaceSession.id === secondSessionId,
+      5000,
+    );
+  });
+
+  await check("p5-c1.7 /compact uses its dedicated job API and emits no Message", async () => {
     const before = await httpRequest("GET", `/api/spaces/${space.id}/timeline?limit=500`);
     const invalid = await httpRequest("POST", `/api/spaces/${space.id}/session/_compact`, {
       requestId: "p5-c1-compact-invalid",

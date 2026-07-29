@@ -150,6 +150,13 @@ export function updateContextPressure(store, input = {}, { now } = {}) {
     throw invalid("effectiveLimitTokens must be a positive number");
   }
   if (!MEASUREMENTS.has(input.measurement)) throw invalid("measurement is invalid");
+  if (input.contextWindowTokens !== undefined && (
+    !Number.isInteger(input.contextWindowTokens) ||
+    input.contextWindowTokens <= 0 ||
+    !["provider_reported", "verified_config"].includes(input.windowMeasurement)
+  )) {
+    throw invalid("context window is invalid");
+  }
   return publicSession(store.update("agentSessions", session.id, {
     context: {
       ...session.context,
@@ -157,6 +164,10 @@ export function updateContextPressure(store, input = {}, { now } = {}) {
       effectiveLimitTokens: input.effectiveLimitTokens,
       pressureRatio: input.estimatedInputTokens / input.effectiveLimitTokens,
       measurement: input.measurement,
+      ...(input.contextWindowTokens === undefined ? {} : {
+        contextWindowTokens: input.contextWindowTokens,
+        windowMeasurement: input.windowMeasurement,
+      }),
     },
     updatedAt: nowIso(now),
   }));

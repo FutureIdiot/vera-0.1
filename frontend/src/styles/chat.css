@@ -764,6 +764,11 @@
   grid-column: 2;
 }
 
+.vera-composer__menu-item > .vera-composer__menu-icon {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
 .vera-composer__menu-item.is-active,
 .vera-composer__menu-item:hover:not(:disabled) {
   background: var(--vera-color-surface-strong);
@@ -790,6 +795,75 @@
   height: var(--vera-header-avatar-size);
   justify-content: center;
   width: var(--vera-header-avatar-size);
+}
+
+.vera-composer__session-menu {
+  box-shadow: none;
+  left: var(--vera-space-md);
+  right: auto;
+  width: min(
+    calc(100% - var(--vera-space-md) * 2),
+    calc(var(--vera-touch-target) * 7)
+  );
+}
+
+.vera-composer__attachment-menu {
+  left: calc(var(--vera-space-md) + var(--vera-composer-control-size) + var(--vera-space-2xs));
+  right: auto;
+  width: min(
+    calc(100% - var(--vera-space-md) * 2),
+    calc(var(--vera-touch-target) * 6)
+  );
+}
+
+.vera-composer__session-heading {
+  display: grid;
+  gap: var(--vera-space-2xs);
+  padding: var(--vera-space-md);
+}
+
+.vera-composer__session-heading > span {
+  color: var(--vera-color-text);
+}
+
+.vera-composer__session-heading > small,
+.vera-composer__session-context > span,
+.vera-composer__session-empty {
+  color: var(--vera-color-muted-text);
+  font-size: var(--vera-font-size-small);
+}
+
+.vera-composer__session-contexts {
+  border-block:
+    var(--vera-border-width) solid
+    color-mix(in srgb, var(--vera-color-border), transparent 45%);
+}
+
+.vera-composer__session-context {
+  display: grid;
+  gap: var(--vera-space-2xs);
+  padding: var(--vera-space-sm) var(--vera-space-md);
+}
+
+.vera-composer__session-context + .vera-composer__session-context {
+  border-top:
+    var(--vera-border-width) solid
+    color-mix(in srgb, var(--vera-color-border), transparent 45%);
+}
+
+.vera-composer__session-context > strong {
+  color: var(--vera-color-text);
+  font-size: var(--vera-font-size-base);
+  font-weight: var(--vera-font-weight-semibold);
+}
+
+.vera-composer__session-empty {
+  margin: 0;
+  padding: var(--vera-space-md);
+}
+
+.vera-composer__session-button .vera-vector-icon {
+  stroke-linecap: round;
 }
 
 @media (max-width: 480px) {

@@ -171,13 +171,20 @@ test("completed main CLI usage updates context pressure and schedules compaction
       run,
       input: {
         status: "completed",
-        usage: { inputTokens: 28000, outputTokens: 10, totalTokens: 28010 },
+        usage: {
+          inputTokens: 28000,
+          outputTokens: 10,
+          totalTokens: 28010,
+          contextWindowTokens: 50000,
+        },
       },
     });
     assert.equal(result.run.status, "completed");
     const session = store.find("agentSessions", agentSession.id);
     assert.equal(session.context.estimatedInputTokens, 28000);
     assert.equal(session.context.effectiveLimitTokens, 32768);
+    assert.equal(session.context.contextWindowTokens, 50000);
+    assert.equal(session.context.windowMeasurement, "provider_reported");
     assert.equal(session.context.measurement, "provider_reported");
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(compacted.length, 1);

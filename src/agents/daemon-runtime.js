@@ -217,11 +217,16 @@ export function createDaemonRuntime({
     const isApiMain = authority.run.role === "root" && authority.agent.runtimeProfile?.kind === "api";
     if (body.usage !== undefined) {
       strictObject(body.usage, {
-        allowed: ["inputTokens", "outputTokens", "thinkingTokens", "cacheReadTokens", "totalTokens"],
+        allowed: [
+          "inputTokens", "outputTokens", "thinkingTokens", "cacheReadTokens",
+          "totalTokens", "contextWindowTokens",
+        ],
         required: ["inputTokens"],
         name: "usage",
       });
       if (Object.values(body.usage).some((value) => !Number.isFinite(value) || value < 0) ||
+          (body.usage.contextWindowTokens !== undefined &&
+            (!Number.isInteger(body.usage.contextWindowTokens) || body.usage.contextWindowTokens <= 0)) ||
           body.status !== "completed" || isApiMain || authority.run.role === "child") {
         invalid("usage is only valid for a completed main CLI Run");
       }

@@ -275,6 +275,10 @@ export function mountSpaceView({
     const timeline = await spaces.fetchTimeline(space.id, { limit: TIMELINE_PAGE_SIZE });
     if (!mounted) return;
     if (timeline.spaceSession?.id) space = { ...space, activeSpaceSessionId: timeline.spaceSession.id };
+    composer?.setSessionContext({
+      spaceSession: timeline.spaceSession,
+      agentSessions: timeline.agentSessions,
+    });
     runProgress.setContext({
       spaceId: space.id,
       spaceSessionId: space.activeSpaceSessionId,
@@ -343,6 +347,10 @@ export function mountSpaceView({
       if (timeline.spaceSession?.id) {
         space = { ...space, activeSpaceSessionId: timeline.spaceSession.id };
       }
+      composer.setSessionContext({
+        spaceSession: timeline.spaceSession,
+        agentSessions: timeline.agentSessions,
+      });
       runProgress.setContext({
         spaceId: space.id,
         spaceSessionId: space.activeSpaceSessionId,
@@ -420,10 +428,11 @@ export function mountSpaceView({
       void reloadActiveTimeline().catch((err) => handleHydrationError("过程可见性刷新失败", err));
       return;
     }
-    if (envelope.type === "space-session.created" && envelope.data?.spaceId === space?.id) {
+    if (["space-session.created", "space-session.resumed"].includes(envelope.type) &&
+        envelope.data?.spaceId === space?.id) {
       space = { ...space, activeSpaceSessionId: envelope.data.spaceSession.id };
       runProgress.reset();
-      void reloadActiveTimeline().catch((err) => handleHydrationError("新对话加载失败", err));
+      void reloadActiveTimeline().catch((err) => handleHydrationError("Session 加载失败", err));
       return;
     }
     if (envelope.type === "agent-session.compaction.updated" &&
@@ -470,6 +479,17 @@ export function mountSpaceView({
       if (selection?.unsupported) return null;
       const response = await files.upload(space.id, selection);
       return response.file;
+    },
+    onListSessions: async () => {
+      if (!space) return { sessions: [] };
+      return spaces.listSessions(space.id, { status: "archived" });
+    },
+    onResumeSession: async (spaceSessionId) => {
+      if (!space) throw new Error("当前没有可恢复 Session 的 Space");
+      const result = await spaces.resumeSession(space.id, spaceSessionId, crypto.randomUUID());
+      space = { ...space, activeSpaceSessionId: result.resumedSession.id };
+      runProgress.reset();
+      await reloadActiveTimeline();
     },
     onSend: async (content, target, fileIds) => {
       if (!space) throw new Error("当前没有可发送消息的 Space");

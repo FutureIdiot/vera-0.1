@@ -12,6 +12,7 @@ const ACTIONS = [
   ["branch", "branch", "分支"],
   ["save", "bookmark", "保存"],
   ["copy", "copy", "复制"],
+  ["edit", "edit", "编辑"],
 ];
 
 function accountRunKey(item) {
@@ -271,7 +272,10 @@ export function applyMessageBubble(el, item, ctx = {}) {
     const available = action === "copy"
       ? Boolean(ctx.onCopy ?? globalThis.navigator?.clipboard?.writeText)
       : typeof ctx[`on${action.charAt(0).toUpperCase()}${action.slice(1)}`] === "function";
-    button.hidden = ["background", "stop"].includes(action) && !available;
+    const visibleForAuthor = isUser
+      ? ["copy", "edit"].includes(action)
+      : action !== "edit";
+    button.hidden = !visibleForAuthor || (["background", "stop"].includes(action) && !available);
     button.disabled = !available;
     button.title = available ? button.getAttribute("aria-label") : `${button.getAttribute("aria-label")}（下一步接入）`;
   }

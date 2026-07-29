@@ -17,6 +17,8 @@ import { answerApproval } from "./approvals.js";
 import { ApiError } from "../core/errors.js";
 import {
   ensureActiveSpaceSession,
+  projectAgentSession,
+  resumeSpaceSession,
   startNewSpaceSession,
 } from "./context-sessions.js";
 import { getContextCompactionJob } from "./context-compaction-store.js";
@@ -41,6 +43,19 @@ import {
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
+}
+
+function activeAgentSessionsForSpace(store, space, spaceSessionId) {
+  const activePairs = new Set((space.seats ?? []).flatMap((seat) => {
+    const account = store.find("accounts", seat.accountId);
+    return account?.ownerAgentId ? [`${account.id}\u0000${account.ownerAgentId}`] : [];
+  }));
+  return store.list("agentSessions")
+    .filter((session) =>
+      session.spaceSessionId === spaceSessionId &&
+      session.status === "active" &&
+      activePairs.has(`${session.accountId}\u0000${session.agentId}`))
+    .map(projectAgentSession);
 }
 
 export function registerSpaceRoutes(router, {
@@ -226,7 +241,7 @@ export function registerSpaceRoutes(router, {
   router.get(
     "/api/spaces/:id/timeline",
     asHandler(async ({ res, params, query }) => {
-      getSpaceOrThrow(store, params.id);
+      const space = getSpaceOrThrow(store, params.id);
       const spaceSession = ensureActiveSpaceSession(store, params.id);
       const before = query.get("before") || undefined;
       const limitParam = query.get("limit");
@@ -237,6 +252,7 @@ export function registerSpaceRoutes(router, {
         if (item.itemType === "activity") return observation?.projectActivity(item) ?? item;
         return item;
       });
+      timeline.agentSessions = activeAgentSessionsForSpace(store, space, spaceSession.id);
       sendJson(res, 200, timeline);
     }),
   );
@@ -327,6 +343,37 @@ export function registerSpaceRoutes(router, {
       if (!contextCompaction) throw new ApiError("context_capacity", "context compaction is unavailable");
       const job = contextCompaction.enqueue({ spaceId: params.id, requestId: body.requestId });
       sendJson(res, 202, { job });
+    }),
+  );
+
+  router.post(
+    "/api/spaces/:id/sessions/:spaceSessionId/_resume",
+    asHandler(async ({ req, res, params }) => {
+      getSpaceOrThrow(store, params.id);
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+          Object.keys(body).length !== 1 || typeof body.requestId !== "string" || !body.requestId) {
+        throw new ApiError("invalid_request", "body must be exactly { requestId }");
+      }
+      const repeated = store.list("contextControlRequests").some((item) =>
+        item.type === "resume" && item.spaceId === params.id && item.requestId === body.requestId);
+      const result = resumeSpaceSession(store, {
+        spaceId: params.id,
+        spaceSessionId: params.spaceSessionId,
+        requestId: body.requestId,
+      });
+      if (!repeated) {
+        hub.publish("space-session.archived", {
+          spaceId: params.id,
+          spaceSession: result.archivedSession,
+        });
+        hub.publish("space-session.resumed", {
+          spaceId: params.id,
+          spaceSession: result.resumedSession,
+          agentSessions: result.agentSessions,
+        });
+      }
+      sendJson(res, 200, result);
     }),
   );
 
