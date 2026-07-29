@@ -18,6 +18,7 @@ export const newSpaceId = () => makeId("spc");
 export const newMessageId = () => makeId("msg");
 export const newFileId = () => makeId("fil");
 export const newRunId = () => makeId("run");
+export const newRunMessageId = () => makeId("rmsg");
 export const newActivityId = () => makeId("act");
 export const newApprovalId = () => makeId("apr");
 export const newThemeId = () => makeId("thm");

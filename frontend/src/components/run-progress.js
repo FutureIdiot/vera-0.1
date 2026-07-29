@@ -117,7 +117,7 @@ export function createRunProgress({
   function foregroundRuns() {
     return [...entries.values()]
       .map((entry) => entry.run)
-      .filter((run) => active(run) && run.role === "main" && !run.backgroundedAt)
+      .filter((run) => active(run) && run.role === "root" && run.outputPolicy !== "source")
       .map((run) => structuredClone(run));
   }
 
@@ -128,7 +128,7 @@ export function createRunProgress({
   function eligible(entry) {
     const eligibleAt = Date.parse(entry.run.backgroundEligibleAt ?? "");
     return context.isGroupChat && entry.run.status === "running" &&
-      entry.run.role === "main" && !entry.run.backgroundedAt &&
+      entry.run.role === "root" && entry.run.outputPolicy !== "source" &&
       Number.isFinite(eligibleAt) && now() >= eligibleAt;
   }
 
@@ -149,7 +149,7 @@ export function createRunProgress({
   function scheduleEligibility(entry) {
     clearEligibilityTimer(entry);
     const eligibleAt = Date.parse(entry.run.backgroundEligibleAt ?? "");
-    if (!context.isGroupChat || entry.run.status !== "running" || entry.run.backgroundedAt ||
+    if (!context.isGroupChat || entry.run.status !== "running" || entry.run.outputPolicy === "source" ||
         !Number.isFinite(eligibleAt)) {
       return;
     }
@@ -296,7 +296,7 @@ export function createRunProgress({
   function actionForRun(runId) {
     const entry = entries.get(runId);
     if (!entry || !active(entry.run)) return null;
-    if (entry.run.backgroundedAt) return { kind: "stop", run: structuredClone(entry.run) };
+    if (entry.run.outputPolicy === "source") return { kind: "stop", run: structuredClone(entry.run) };
     if (eligible(entry)) return { kind: "background", run: structuredClone(entry.run) };
     return null;
   }

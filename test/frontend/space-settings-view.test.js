@@ -88,7 +88,7 @@ test("Direct Space settings omit the fixed participant list", async () => {
   });
 });
 
-test("Group Space settings expose silent response sources and preserve hidden block rules", async () => {
+test("Group Space settings expose focused response sources and preserve hidden block rules", async () => {
   await withFakeDom(async () => {
     const space = {
       id: "spc_group",
@@ -101,7 +101,7 @@ test("Group Space settings expose silent response sources and preserve hidden bl
           respondTo: ["user", "acc_b"],
           blockAccountIds: ["acc_b"],
         },
-        { accountId: "acc_b", responseMode: "focused" },
+        { accountId: "acc_b", responseMode: "mentioned" },
       ],
       notifications: { mode: "accountMessages", includeActivityErrors: true },
     };
@@ -119,7 +119,7 @@ test("Group Space settings expose silent response sources and preserve hidden bl
     const sourceField = rows[0].children[2];
     assert.equal(sourceField.hidden, true);
     assert.equal(sourceField.textContent, "响应来源UserBeta");
-    rows[0].children[1].value = "silent";
+    rows[0].children[1].value = "focused";
     rows[0].children[1].listeners.get("change")();
     assert.equal(sourceField.hidden, false);
     const sourceInputs = descendants(sourceField).filter((node) => node.tagName === "INPUT");
@@ -133,11 +133,11 @@ test("Group Space settings expose silent response sources and preserve hidden bl
     assert.deepEqual(patched.seats, [
       {
         accountId: "acc_a",
-        responseMode: "silent",
+        responseMode: "focused",
         respondTo: ["user"],
         blockAccountIds: ["acc_b"],
       },
-      { accountId: "acc_b", responseMode: "focused" },
+      { accountId: "acc_b", responseMode: "mentioned" },
     ]);
     dispose();
   });

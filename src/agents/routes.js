@@ -74,9 +74,34 @@ export function registerAgentRoutes(router, {
       );
 
       router.post(
-        "/api/agent/runs/:id/subagents",
+        "/api/agent/runs/:id/run-messages",
         asHandler(async ({ req, res, params }) => {
-          sendJson(res, 201, await daemonRuntime.createSubagent(params.id, await readJsonBody(req), req.headers));
+          sendJson(res, 201, await daemonRuntime.createRunMessage(
+            params.id,
+            await readJsonBody(req),
+            req.headers,
+          ));
+        }),
+      );
+
+      router.get(
+        "/api/agent/runs/:id/run-messages",
+        asHandler(async ({ req, res, params, query }) => {
+          const rawAfter = query.get("after");
+          const after = rawAfter === null ? 0 : Number(rawAfter);
+          sendJson(res, 200, await daemonRuntime.listRunMessages(params.id, after, req.headers));
+        }),
+      );
+
+      router.put(
+        "/api/agent/runs/:id/run-messages/:runMessageId/consumed",
+        asHandler(async ({ req, res, params }) => {
+          sendJson(res, 200, await daemonRuntime.consumeRunMessage(
+            params.id,
+            params.runMessageId,
+            await readJsonBody(req),
+            req.headers,
+          ));
         }),
       );
 

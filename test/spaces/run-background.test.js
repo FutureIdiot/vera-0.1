@@ -28,13 +28,17 @@ async function fixture(fn) {
   const agent = store.insert("agents", {
     id: "agt_alpha",
     runtimeRevision: "rev_alpha",
-    runtimeProfile: { kind: "cli", provider: "codex" },
+    runtimeProfile: { kind: "cli", provider: "codex", model: "model-a" },
+    runtimeBinding: { runtimeSnapshot: { runtimeCapabilities: { models: ["model-a"] } } },
   });
   const account = store.insert("accounts", {
     id: "acc_alpha",
     name: "Alpha",
     ownerAgentId: agent.id,
     activeAgentId: agent.id,
+    presence: "online",
+    model: "model-a",
+    modelVersion: 1,
   });
   store.insert("accounts", {
     id: "acc_beta",
@@ -73,8 +77,11 @@ async function fixture(fn) {
   });
   const run = store.insert("runs", {
     id: "run_alpha",
-    role: "main",
+    role: "root",
+    rootRunId: "run_alpha",
     parentRunId: null,
+    depth: 0,
+    outputPolicy: "space",
     agentId: agent.id,
     accountId: account.id,
     spaceId: space.id,
@@ -103,13 +110,36 @@ test("background overlay waits ten seconds, suppresses raw replay, and injects o
     clock = new Date("2026-07-29T00:00:10.000Z");
     const backgrounded = service.backgroundRun(run.id);
     assert.equal(backgrounded.backgroundedAt, clock.toISOString());
+    assert.equal(backgrounded.outputPolicy, "source");
     assert.equal(service.isActive(space.id, account.id), true);
 
     const scheduled = [];
+    let queuedIndex = 0;
     const missed = postMessage({
       store,
       hub,
-      daemonScheduler: { scheduleMainRun(input) { scheduled.push(input); } },
+      daemonScheduler: {
+        scheduleRootRun(input) {
+          scheduled.push(input);
+          queuedIndex += 1;
+          return store.insert("runs", {
+            id: `run_queued_${queuedIndex}`,
+            rootRunId: `run_queued_${queuedIndex}`,
+            parentRunId: null,
+            role: "root",
+            depth: 0,
+            outputPolicy: "space",
+            agentId: input.agent.id,
+            accountId: input.account.id,
+            spaceId: input.space.id,
+            spaceSessionId: input.spaceSession.id,
+            triggerMessageId: input.triggerMessage.id,
+            status: "pending",
+            deferredByRunId: input.deferredByRunId,
+            createdAt: clock.toISOString(),
+          });
+        },
+      },
       files: {
         assertMessageFileIds() { return []; },
         projectMessage(message) { return message; },
@@ -122,8 +152,25 @@ test("background overlay waits ten seconds, suppresses raw replay, and injects o
         content: "The deployment moved to Friday",
       },
     });
-    assert.equal(missed.runs.length, 0);
-    assert.equal(scheduled.length, 0, "even a direct mention is suppressed by the background overlay");
+    assert.equal(missed.runs.length, 1);
+    assert.equal(scheduled.length, 1, "a direct mention is retained as a deferred Root");
+    const ambient = postMessage({
+      store,
+      hub,
+      daemonScheduler: { scheduleRootRun() { throw new Error("broadcast must not trigger"); } },
+      files: {
+        assertMessageFileIds() { return []; },
+        projectMessage(message) { return message; },
+      },
+      runBackground: service,
+      spaceId: space.id,
+      body: {
+        author: { type: "user" },
+        target: { type: "broadcast" },
+        content: "The ambient deployment moved to Friday",
+      },
+    });
+    assert.equal(ambient.runs.length, 0);
     store.insert("messages", {
       id: "msg_own",
       spaceId: space.id,
@@ -140,40 +187,29 @@ test("background overlay waits ten seconds, suppresses raw replay, and injects o
       endedAt: "2026-07-29T00:00:13.000Z",
     });
     const task = service.finishRun(completed, { runtimeKind: "cli" });
-    assert.deepEqual(task.sourceMessageIds, [missed.message.id]);
-    assert.match(task.input.promptText, /deployment moved to Friday/u);
+    assert.deepEqual(task.sourceMessageIds, [ambient.message.id]);
+    assert.match(task.input.promptText, /ambient deployment moved to Friday/u);
+    assert.doesNotMatch(task.input.promptText, /The deployment moved to Friday/u);
     assert.doesNotMatch(task.input.promptText, /Still working/u);
     assert.equal(service.shouldHold(space.id, account.id), true);
 
-    store.insert("messages", {
-      id: "msg_deferred",
-      spaceId: space.id,
-      spaceSessionId: "sps_group",
-      author: { type: "user" },
-      target: { type: "broadcast" },
-      content: "what changed?",
-      runId: null,
-      status: "completed",
-      createdAt: "2026-07-29T00:00:14.000Z",
-    });
-    service.holdTrigger(space.id, account.id, "msg_deferred");
     const resumed = [];
-    service.setResumeDeferred((record) => resumed.push(record.deferredTriggerMessageId));
+    service.setResumePending((record) => resumed.push(...record.pendingRootRunIds));
     service.submitResult(task.id, { agent, account }, {
       status: "succeeded",
       summary: "Beta moved the deployment to Friday.",
     });
     await new Promise((resolve) => setImmediate(resolve));
-    assert.deepEqual(resumed, ["msg_deferred"]);
+    assert.deepEqual(resumed, [missed.runs[0].id]);
 
     const context = service.contextForRun({
       spaceId: space.id,
       spaceSessionId: "sps_group",
       accountId: account.id,
-      runId: "run_next",
+      runId: missed.runs[0].id,
     });
     assert.match(context.block, /Beta moved the deployment to Friday/u);
-    service.markDispatched(context.id, "run_next");
+    service.markDispatched(context.id, missed.runs[0].id);
     const watermark = service.contextForRun({
       spaceId: space.id,
       spaceSessionId: "sps_group",

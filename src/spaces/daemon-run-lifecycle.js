@@ -2,10 +2,7 @@
 // and frozen lease ownership are enforced by daemon-runtime before these
 // methods are called; this module owns timeline records and terminal state.
 
-import { newRunId } from "../core/id.js";
 import { ApiError } from "../core/errors.js";
-import { projectAgent } from "../agents/agents.js";
-import { projectAccount } from "../agents/accounts.js";
 import { createApprovalRequest, expirePendingApprovalsForRun } from "./approvals.js";
 import { createRunOutput } from "./run-output.js";
 import { compilePrompt } from "./view-compiler.js";
@@ -25,22 +22,6 @@ function stripInternal({ _seq, ...record }) {
   return structuredClone(record);
 }
 
-function workspaceForDaemon(workspace) {
-  return workspace ? {
-    hostId: workspace.hostId,
-    path: workspace.path,
-    status: workspace.status,
-    policy: structuredClone(workspace.policy ?? {}),
-  } : null;
-}
-
-function isolatedPrompt(input) {
-  const context = input.context === undefined
-    ? ""
-    : `\n\nContext:\n${typeof input.context === "string" ? input.context : JSON.stringify(input.context)}`;
-  return `${input.task}${context}`;
-}
-
 export function createDaemonRunLifecycle({
   store,
   hub,
@@ -51,9 +32,12 @@ export function createDaemonRunLifecycle({
   contextCompaction = null,
   observation = null,
   runBackground = null,
+  runMessages = null,
+  dispatchRunCancel = null,
 } = {}) {
   if (!store || !hub || !config) throw new Error("createDaemonRunLifecycle requires store, hub, and config");
   const outputs = new Map();
+  const sourceOutputs = new Map();
   const bindingRotations = new Map();
 
   function outputFor(run, agent, account) {
@@ -71,6 +55,9 @@ export function createDaemonRunLifecycle({
         effectiveModel: run.effectiveModel,
         delegated: false,
         projectActivity: observation?.projectActivity,
+        onMessageCompleted: (message, { agentRouting } = {}) => {
+          if (agentRouting !== "none") runMessages?.routeAccountMessage?.(message);
+        },
       });
       outputs.set(run.id, output);
     }
@@ -88,6 +75,11 @@ export function createDaemonRunLifecycle({
   }
 
   function appendDelta({ account, agent, run, input }) {
+    if (run.outputPolicy === "source") {
+      const current = sourceOutputs.get(run.id) ?? "";
+      sourceOutputs.set(run.id, `${current}${input.delta ?? ""}${input.paragraphEnd ? "\n\n" : ""}`);
+      return { replyMessageIds: [] };
+    }
     const output = outputFor(run, agent, account);
     if (input.delta) output.bubbles.delta(input.delta);
     if (input.paragraphEnd) output.bubbles.delta("\n\n");
@@ -95,16 +87,27 @@ export function createDaemonRunLifecycle({
   }
 
   function createMessage({ account, agent, run, input }) {
+    if (run.outputPolicy === "source") {
+      if (typeof input.content === "string" && input.content) {
+        sourceOutputs.set(run.id, input.content);
+      }
+      return { message: null };
+    }
     const output = outputFor(run, agent, account);
     // The daemon may stream deltas and then submit the authoritative full
     // content. In that case the POST is a finalize signal, not a second copy.
     // If no delta was sent, the full content is the fallback bubble.
-    output.bubbles.finish(output.bubbles.replyMessageIds.length ? undefined : input.content);
+    output.bubbles.finish(
+      output.bubbles.replyMessageIds.length ? undefined : input.content,
+      input.target,
+      input.agentRouting,
+    );
     const messageId = output.bubbles.replyMessageIds.at(-1);
     return { message: messageId ? stripInternal(store.find("messages", messageId)) : null };
   }
 
   function upsertActivity({ account, agent, run, input }) {
+    if (run.outputPolicy === "source") return { activity: null };
     const output = outputFor(run, agent, account);
     output.onActivity(input);
     const activity = store.list("activities").filter((item) => item.runId === run.id).at(-1) ?? null;
@@ -112,6 +115,9 @@ export function createDaemonRunLifecycle({
   }
 
   function createApproval({ account, agent, run, input, dispatchEvent }) {
+    if (run.outputPolicy === "source") {
+      throw new ApiError("forbidden", "source-only Runs cannot create public Approval");
+    }
     const { approval, answer } = createApprovalRequest({
       store,
       hub,
@@ -130,63 +136,6 @@ export function createDaemonRunLifecycle({
     return { approval };
   }
 
-  function createSubagent({ account, agent, session, run: parent, input, dispatchRun }) {
-    const currentParent = store.find("runs", parent.id);
-    if (!currentParent || currentParent.status !== "running") {
-      throw new ApiError("conflict", "Parent Run is no longer running");
-    }
-    const task = isolatedPrompt(input);
-    const child = store.insert("runs", {
-      id: newRunId(),
-      agentId: parent.agentId,
-      accountId: parent.accountId,
-      accountNameSnapshot: parent.accountNameSnapshot ?? account.name,
-      parentRunId: parent.id,
-      role: "subagent",
-      spaceId: parent.spaceId,
-      spaceSessionId: parent.spaceSessionId,
-      agentSessionId: null,
-      contextGeneration: null,
-      runtimeRevision: parent.runtimeRevision,
-      effectiveModel: parent.effectiveModel,
-      modelVersion: parent.modelVersion,
-      delegated: false,
-      triggerMessageId: parent.triggerMessageId,
-      replyMessageIds: [],
-      status: "running",
-      executionTransport: "daemon",
-      accountSessionId: session.id,
-      executionLeaseId: parent.executionLeaseId,
-      workspaceHostId: parent.workspaceHostId,
-      leaseAcquiredAt: parent.leaseAcquiredAt,
-      apiResultVersion: null,
-      createdAt: new Date().toISOString(),
-      endedAt: null,
-    });
-    hub.publish("run.started", { run: stripInternal(child) });
-    const runtimeKind = agent.runtimeProfile?.kind;
-    const inputEnvelope = runtimeKind === "api"
-      ? { kind: "api", sessionMode: "isolated", messages: [{ role: "user", content: task }] }
-      : { kind: "cli", sessionMode: "isolated", promptText: task };
-    const triggerMessage = store.find("messages", parent.triggerMessageId);
-    dispatchRun({
-      accountId: account.id,
-      event: {
-        type: "run.requested",
-        data: {
-          run: stripInternal(child),
-          triggerMessage: triggerMessage ? stripInternal(triggerMessage) : null,
-          agent: projectAgent(agent),
-          account: projectAccount(account),
-          workspace: workspaceForDaemon(account.workspace),
-          input: inputEnvelope,
-          activityVisibility: observation?.visibilityForSpace(parent.spaceId) ?? "status-only",
-        },
-      },
-    });
-    return { run: stripInternal(child) };
-  }
-
   function updateRun({ account, agent, run, input }) {
     if (input.agentState) declareState({ account, agent, run, declaration: input.agentState });
     if (input.status === undefined) return { run: stripInternal(store.find("runs", run.id)) };
@@ -195,20 +144,66 @@ export function createDaemonRunLifecycle({
     }
     const current = store.find("runs", run.id);
     if (!current || current.status !== "running") throw new ApiError("conflict", "Run is no longer running");
-    if (input.status === "completed" && agent.runtimeProfile?.kind === "api" &&
-        run.role === "main" && !Number.isInteger(current.apiResultVersion)) {
-      throw new ApiError("history_conflict", "API result must be committed before Run completion");
+    if (input.status === "completed") {
+      const activeDescendant = store.list("runs").some((candidate) => {
+        if (!["pending", "running"].includes(candidate.status)) return false;
+        let parent = store.find("runs", candidate.parentRunId);
+        while (parent) {
+          if (parent.id === current.id) return true;
+          parent = store.find("runs", parent.parentRunId);
+        }
+        return false;
+      });
+      if (activeDescendant) {
+        return { run: stripInternal(current), awaitingChildren: true };
+      }
     }
-    const output = outputFor(current, agent, account);
-    output.bubbles.finish();
+    if (input.status === "completed" && agent.runtimeProfile?.kind === "api" &&
+        run.role === "root" && !Number.isInteger(current.apiResultVersion)) {
+      const hasPublicReply = store.list("messages").some((message) =>
+        message.runId === current.id && message.status === "completed");
+      if (current.outputPolicy === "space" || hasPublicReply) {
+        return { run: stripInternal(current), awaitingCommit: true };
+      }
+    }
+    if (input.status === "completed" && current.outputPolicy === "source") {
+      const hasTerminalSourceMessage = store.list("runMessages").some((message) =>
+        message.sender?.type === "run" &&
+        message.sender.runId === current.id &&
+        ["result", "blocked"].includes(message.kind));
+      if (!hasTerminalSourceMessage) {
+        return { run: stripInternal(current), awaitingSourceResult: true };
+      }
+    }
+    if (input.status !== "completed") {
+      const descendants = store.list("runs")
+        .filter((candidate) => {
+          if (!["pending", "running"].includes(candidate.status)) return false;
+          let parent = store.find("runs", candidate.parentRunId);
+          while (parent) {
+            if (parent.id === current.id) return true;
+            parent = store.find("runs", parent.parentRunId);
+          }
+          return false;
+        })
+        .sort((left, right) => (right.depth ?? 0) - (left.depth ?? 0));
+      for (const descendant of descendants) {
+        if (descendant.status === "running") {
+          try { dispatchRunCancel?.(descendant); } catch {}
+        }
+        cancelRun(descendant.id);
+      }
+    }
+    const output = current.outputPolicy === "space" ? outputFor(current, agent, account) : null;
+    output?.bubbles.finish();
     expirePendingApprovalsForRun(store, hub, current.id);
     const replyMessageIds = [...new Set([
       ...(current.replyMessageIds ?? []),
-      ...output.bubbles.replyMessageIds,
+      ...(output?.bubbles.replyMessageIds ?? []),
       ...store.list("messages").filter((message) => message.runId === current.id).map((message) => message.id),
     ])];
     let shouldCompact = false;
-    if (input.status === "completed" && current.role === "main" &&
+    if (input.status === "completed" && current.role === "root" &&
         agent.runtimeProfile?.kind === "cli" && Number.isFinite(input.usage?.inputTokens)) {
       const runtime = {
         ...(agent.runtimeProfile ?? {}),
@@ -230,13 +225,42 @@ export function createDaemonRunLifecycle({
       replyMessageIds,
     };
     if (input.status === "failed") patch.error = input.error ?? { code: "internal", message: "run failed" };
+    if (current.outputPolicy === "source") {
+      runMessages?.completeSourceRun?.(current.id, {
+        status: input.status,
+        content: sourceOutputs.get(current.id) ?? "",
+        error: input.error,
+      });
+    }
+    runMessages?.failRecipient?.(current.id);
     const updated = store.update("runs", current.id, patch);
     outputs.delete(current.id);
+    sourceOutputs.delete(current.id);
     bindingRotations.delete(current.id);
     const catchupTask = runBackground?.finishRun?.(updated, {
       runtimeKind: agent.runtimeProfile?.kind,
     }) ?? null;
     hub.publish("run.ended", { run: stripInternal(updated) });
+    const hasOtherActiveRun = store.list("runs").some((candidate) =>
+      candidate.id !== updated.id &&
+      candidate.agentId === updated.agentId &&
+      candidate.accountId === updated.accountId &&
+      candidate.spaceId === updated.spaceId &&
+      ["pending", "running"].includes(candidate.status));
+    if (!hasOtherActiveRun) {
+      declareState({
+        account,
+        agent,
+        run: updated,
+        declaration: {
+          agentId: agent.id,
+          accountId: account.id,
+          spaceId: updated.spaceId,
+          status: "idle",
+          detail: "",
+        },
+      });
+    }
     for (const messageId of replyMessageIds) {
       const message = store.find("messages", messageId);
       if (message?.status === "completed") memoryDigestScheduler?.onMessageCommitted?.(message);
@@ -261,7 +285,7 @@ export function createDaemonRunLifecycle({
       throw new ApiError("conflict", "provider binding rotation generation is stale");
     }
     const current = store.find("runs", run.id);
-    if (!current || current.status !== "running" || current.role !== "main" ||
+    if (!current || current.status !== "running" || current.role !== "root" ||
         agent.runtimeProfile?.kind !== "cli" ||
         current.contextGeneration !== input.generation) {
       throw new ApiError("conflict", "provider binding rotation does not match the active CLI Run");
@@ -343,6 +367,13 @@ export function createDaemonRunLifecycle({
       ...(output?.bubbles.replyMessageIds ?? []),
       ...store.list("messages").filter((message) => message.runId === current.id).map((message) => message.id),
     ])];
+    if (current.outputPolicy === "source") {
+      runMessages?.completeSourceRun?.(current.id, {
+        status: "cancelled",
+        content: sourceOutputs.get(current.id) ?? "",
+        error: { code: "cancelled", message: "Run cancelled by owner" },
+      });
+    }
     const updated = store.update("runs", current.id, {
       status: "cancelled",
       endedAt: new Date().toISOString(),
@@ -350,7 +381,9 @@ export function createDaemonRunLifecycle({
       error: { code: "cancelled", message: "Run cancelled by owner" },
     });
     outputs.delete(current.id);
+    sourceOutputs.delete(current.id);
     bindingRotations.delete(current.id);
+    runMessages?.failRecipient?.(current.id);
     const hasOtherActiveRun = store.list("runs").some((candidate) =>
       candidate.id !== updated.id &&
       candidate.agentId === updated.agentId &&
@@ -385,7 +418,6 @@ export function createDaemonRunLifecycle({
   }
 
   return {
-    createSubagent,
     updateRun,
     createMessage,
     appendDelta,

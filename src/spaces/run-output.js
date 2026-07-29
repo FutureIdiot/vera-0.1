@@ -15,6 +15,7 @@ function truncate(text, maxLength) {
 export function createRunOutput({
   store, hub, config, spaceId, spaceSessionId, runId, agent, account, effectiveModel, delegated,
   projectActivity = (activity) => activity,
+  onMessageCompleted = null,
 }) {
   const bubbles = createBubbleStream({
     store,
@@ -28,6 +29,7 @@ export function createRunOutput({
     executingAgentId: agent.id,
     effectiveModel,
     delegated,
+    onMessageCompleted,
   });
   const activityIndex = new Map();
   const acceptsOutput = () => store.find("runs", runId)?.status === "running";

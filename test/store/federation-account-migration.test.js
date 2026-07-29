@@ -111,7 +111,7 @@ test("Phase 5.5 migration atomically moves runtime identity to Agent and Account
     const space = store.find("spaces", "spc_one");
     assert.deepEqual(space.seats, [
       {
-        accountId: "acc_a", responseMode: "silent", respondTo: ["user", "acc_b"], blockAccountIds: ["acc_b"],
+        accountId: "acc_a", responseMode: "focused", respondTo: ["user", "acc_b"], blockAccountIds: ["acc_b"],
       },
       { accountId: "acc_b", responseMode: "default" },
     ]);

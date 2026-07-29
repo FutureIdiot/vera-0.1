@@ -125,11 +125,18 @@ const DEFAULTS = {
     catchupMaxChars: 8000,
     summaryMaxChars: 2000,
     catchupTimeoutMs: 5 * 60 * 1000,
-    catchupTimeoutMs: 5 * 60 * 1000,
-    catchupTimeoutMs: 5 * 60 * 1000,
-    catchupTimeoutMs: 5 * 60 * 1000,
     summaryHeader: "=== 后台期间群聊摘要 ===",
     gapMarker: "=== 后台期间群聊摘要 ===\n后台期间的群聊上下文摘要不可用；为避免错误归因，原始消息未回放。",
+  },
+  agentCommunication: {
+    maxDepth: 4,
+    maxChildrenPerRun: 8,
+    maxMessagesPerRoot: 128,
+    maxContentChars: 12000,
+    maxSourceMessageIds: 16,
+    maxEvidenceChars: 16000,
+    deliveryTimeoutMs: 5 * 60 * 1000,
+    idempotencyRetentionMs: 24 * 60 * 60 * 1000,
   },
   agentDaemon: {
     heartbeatIntervalMs: 15000, // gateway 在 agent SSE 通道上发 agent.heartbeat 的间隔
@@ -408,20 +415,42 @@ export function loadConfig(env = process.env) {
         env.VERA_RUN_BACKGROUND_CATCHUP_TIMEOUT_MS,
         DEFAULTS.runBackground.catchupTimeoutMs,
       ),
-      catchupTimeoutMs: positiveInt(
-        env.VERA_RUN_BACKGROUND_CATCHUP_TIMEOUT_MS,
-        DEFAULTS.runBackground.catchupTimeoutMs,
-      ),
-      catchupTimeoutMs: positiveInt(
-        env.VERA_RUN_BACKGROUND_CATCHUP_TIMEOUT_MS,
-        DEFAULTS.runBackground.catchupTimeoutMs,
-      ),
-      catchupTimeoutMs: positiveInt(
-        env.VERA_RUN_BACKGROUND_CATCHUP_TIMEOUT_MS,
-        DEFAULTS.runBackground.catchupTimeoutMs,
-      ),
       summaryHeader: env.VERA_RUN_BACKGROUND_SUMMARY_HEADER || DEFAULTS.runBackground.summaryHeader,
       gapMarker: env.VERA_RUN_BACKGROUND_GAP_MARKER || DEFAULTS.runBackground.gapMarker,
+    },
+    agentCommunication: {
+      maxDepth: positiveInt(
+        env.VERA_AGENT_COMMUNICATION_MAX_DEPTH,
+        DEFAULTS.agentCommunication.maxDepth,
+      ),
+      maxChildrenPerRun: positiveInt(
+        env.VERA_AGENT_COMMUNICATION_MAX_CHILDREN_PER_RUN,
+        DEFAULTS.agentCommunication.maxChildrenPerRun,
+      ),
+      maxMessagesPerRoot: positiveInt(
+        env.VERA_AGENT_COMMUNICATION_MAX_MESSAGES_PER_ROOT,
+        DEFAULTS.agentCommunication.maxMessagesPerRoot,
+      ),
+      maxContentChars: positiveInt(
+        env.VERA_AGENT_COMMUNICATION_MAX_CONTENT_CHARS,
+        DEFAULTS.agentCommunication.maxContentChars,
+      ),
+      maxSourceMessageIds: positiveInt(
+        env.VERA_AGENT_COMMUNICATION_MAX_SOURCE_MESSAGE_IDS,
+        DEFAULTS.agentCommunication.maxSourceMessageIds,
+      ),
+      maxEvidenceChars: positiveInt(
+        env.VERA_AGENT_COMMUNICATION_MAX_EVIDENCE_CHARS,
+        DEFAULTS.agentCommunication.maxEvidenceChars,
+      ),
+      deliveryTimeoutMs: positiveInt(
+        env.VERA_AGENT_COMMUNICATION_DELIVERY_TIMEOUT_MS,
+        DEFAULTS.agentCommunication.deliveryTimeoutMs,
+      ),
+      idempotencyRetentionMs: positiveInt(
+        env.VERA_AGENT_COMMUNICATION_IDEMPOTENCY_RETENTION_MS,
+        DEFAULTS.agentCommunication.idempotencyRetentionMs,
+      ),
     },
     agentDaemon: {
       heartbeatIntervalMs: num(env.VERA_AGENT_HEARTBEAT_INTERVAL_MS, DEFAULTS.agentDaemon.heartbeatIntervalMs),

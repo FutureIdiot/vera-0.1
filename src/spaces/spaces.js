@@ -10,7 +10,7 @@ function stripInternal({ _seq, ...rest }) {
 }
 
 // Seat 固定Space中的Account身份；实际执行Agent由Account Session决定。
-const RESPONSE_MODES = ["default", "silent", "focused"];
+const RESPONSE_MODES = ["default", "focused", "mentioned"];
 
 function assertExactObject(value, allowed, { required = [], name = "body", allowEmpty = true } = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

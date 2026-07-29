@@ -42,6 +42,7 @@ function fixture({ envelopes = [], executor, eventResponses, maxConnectionFailur
   const calls = [];
   let loginCount = 0;
   let eventsCount = 0;
+  let apiCommitted = false;
   const fetchImpl = async (url, init) => {
     const body = init.body ? JSON.parse(init.body) : null;
     calls.push({ url, method: init.method, headers: init.headers, body, redirect: init.redirect });
@@ -61,6 +62,15 @@ function fixture({ envelopes = [], executor, eventResponses, maxConnectionFailur
       return response;
     }
     if (url.endsWith("/api/agent/memory-tasks/events")) return new Response(stream([]), { status: 200 });
+    if (url.endsWith("/api-result")) {
+      apiCommitted = true;
+      return new Response(JSON.stringify({ historyVersion: 1 }), { status: 200 });
+    }
+    if (init.method === "PATCH" && body?.status === "completed") {
+      return new Response(JSON.stringify(apiCommitted
+        ? { run: { id: "run_a", status: "completed" } }
+        : { run: { id: "run_a", status: "running" }, awaitingCommit: true }), { status: 200 });
+    }
     if (url.includes("/messages")) {
       return new Response(JSON.stringify({ id: `msg_${calls.length}`, content: body.content }), { status: 201 });
     }

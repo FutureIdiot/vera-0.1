@@ -83,8 +83,11 @@ async function fixture(fn) {
   });
   const run = store.insert("runs", {
     id: "run_antigravity",
-    role: "main",
+    role: "root",
+    rootRunId: "run_antigravity",
     parentRunId: null,
+    depth: 0,
+    outputPolicy: "space",
     spaceId: space.id,
     spaceSessionId: spaceSession.id,
     agentSessionId: agentSession.id,
@@ -179,6 +182,101 @@ test("completed main CLI usage updates context pressure and schedules compaction
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(compacted.length, 1);
     assert.equal(compacted[0].agentId, agent.id);
+  });
+});
+
+test("API Root exposes a commit checkpoint before terminal history completion", async () => {
+  await fixture(async ({ store, hub, agent, account, run }) => {
+    store.update("agents", agent.id, {
+      runtimeProfile: { ...agent.runtimeProfile, kind: "api" },
+    });
+    const lifecycle = createDaemonRunLifecycle({ store, hub, config: CONFIG });
+    const waiting = lifecycle.updateRun({
+      account,
+      agent: store.find("agents", agent.id),
+      run,
+      input: { status: "completed" },
+    });
+    assert.equal(waiting.awaitingCommit, true);
+    assert.equal(store.find("runs", run.id).status, "running");
+    store.update("runs", run.id, { apiResultVersion: 1 });
+    const completed = lifecycle.updateRun({
+      account,
+      agent: store.find("agents", agent.id),
+      run: store.find("runs", run.id),
+      input: { status: "completed" },
+    });
+    assert.equal(completed.run.status, "completed");
+  });
+});
+
+test("Root completion waits for active descendants before becoming terminal", async () => {
+  await fixture(async ({ store, hub, agent, account, run }) => {
+    store.insert("runs", {
+      ...structuredClone(run),
+      id: "run_child",
+      rootRunId: run.id,
+      parentRunId: run.id,
+      role: "child",
+      depth: 1,
+      outputPolicy: "source",
+      agentSessionId: null,
+      contextGeneration: null,
+      status: "running",
+    });
+    const lifecycle = createDaemonRunLifecycle({ store, hub, config: CONFIG });
+    const waiting = lifecycle.updateRun({
+      account,
+      agent,
+      run,
+      input: { status: "completed", usage: { inputTokens: 10 } },
+    });
+    assert.equal(waiting.awaitingChildren, true);
+    assert.equal(store.find("runs", run.id).status, "running");
+
+    store.update("runs", "run_child", {
+      status: "completed",
+      endedAt: "2026-07-29T00:00:01.000Z",
+    });
+    const completed = lifecycle.updateRun({
+      account,
+      agent,
+      run,
+      input: { status: "completed", usage: { inputTokens: 10 } },
+    });
+    assert.equal(completed.run.status, "completed");
+  });
+});
+
+test("Root failure cancels its active descendant subtree", async () => {
+  await fixture(async ({ store, hub, agent, account, run }) => {
+    store.insert("runs", {
+      ...structuredClone(run),
+      id: "run_child",
+      rootRunId: run.id,
+      parentRunId: run.id,
+      role: "child",
+      depth: 1,
+      outputPolicy: "source",
+      agentSessionId: null,
+      contextGeneration: null,
+      status: "running",
+    });
+    const dispatched = [];
+    const lifecycle = createDaemonRunLifecycle({
+      store,
+      hub,
+      config: CONFIG,
+      dispatchRunCancel: (child) => dispatched.push(child.id),
+    });
+    lifecycle.updateRun({
+      account,
+      agent,
+      run,
+      input: { status: "failed", error: { code: "provider_error", message: "failed" } },
+    });
+    assert.equal(store.find("runs", "run_child").status, "cancelled");
+    assert.deepEqual(dispatched, ["run_child"]);
   });
 });
 

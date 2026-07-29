@@ -75,7 +75,8 @@ class FakeElement {
 function run(id, accountId = "acc_gemini") {
   return {
     id,
-    role: "main",
+    role: "root",
+    rootRunId: id,
     parentRunId: null,
     agentId: `agt_${accountId}`,
     accountId,
@@ -86,6 +87,7 @@ function run(id, accountId = "acc_gemini") {
     status: "running",
     backgroundEligibleAt: "2026-07-29T00:00:10.000Z",
     backgroundedAt: null,
+    outputPolicy: "space",
     createdAt: "2026-07-29T00:00:00.000Z",
   };
 }
@@ -152,7 +154,7 @@ test("group Chat gives each running Account a status placeholder and reveals bac
   }
 });
 
-test("a backgrounded Run leaves the composer foreground set but remains stoppable from its bubble", () => {
+test("a backgrounded Run exits the composer foreground set and remains stoppable from its bubble", () => {
   const previousDocument = globalThis.document;
   globalThis.document = {
     createElement: (tagName) => new FakeElement(tagName),
@@ -166,7 +168,13 @@ test("a backgrounded Run leaves the composer foreground set but remains stoppabl
 
     progress.handleEvent({
       type: "run.backgrounded",
-      data: { run: { ...run("run_gemini"), backgroundedAt: "2026-07-29T00:00:11.000Z" } },
+      data: {
+        run: {
+          ...run("run_gemini"),
+          backgroundedAt: "2026-07-29T00:00:11.000Z",
+          outputPolicy: "source",
+        },
+      },
     });
     assert.deepEqual(progress.foregroundRuns(), []);
     assert.equal(progress.actionForRun("run_gemini").kind, "stop");

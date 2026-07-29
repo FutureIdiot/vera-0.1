@@ -124,11 +124,12 @@ test("private Chat replaces the single send control with direct stop while a for
     const send = composer.element.children[3].children.at(-1);
     composer.setForegroundRuns([{
       id: "run_private",
-      role: "main",
+      role: "root",
       status: "running",
       accountId: "acc_alpha",
       accountNameSnapshot: "Alpha",
       backgroundedAt: null,
+      outputPolicy: "space",
     }], { isGroupChat: false });
     assert.equal(send.type, "button");
     assert.equal(send.attributes["aria-label"], "中止工作");
@@ -159,8 +160,8 @@ test("group Chat uses the single stop control to open an upward Account chooser"
     const stopMenu = composer.element.children[2];
     const send = composer.element.children[3].children.at(-1);
     composer.setForegroundRuns([
-      { id: "run_alpha", role: "main", status: "running", accountId: "acc_alpha", backgroundedAt: null },
-      { id: "run_beta", role: "main", status: "pending", accountId: "acc_beta_1", backgroundedAt: null },
+      { id: "run_alpha", role: "root", status: "running", accountId: "acc_alpha", outputPolicy: "space" },
+      { id: "run_beta", role: "root", status: "pending", accountId: "acc_beta_1", outputPolicy: "space" },
     ], { isGroupChat: true });
 
     send.listeners.get("click")();

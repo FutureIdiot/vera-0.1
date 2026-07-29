@@ -72,7 +72,7 @@ export function createRunBackgroundService({
   if (!store || !hub || !config?.runBackground) {
     throw new Error("createRunBackgroundService requires store, hub, and runBackground config");
   }
-  let resumeDeferred = null;
+  let resumePending = null;
   const taskTimers = new Map();
 
   function clearTaskTimer(catchupId) {
@@ -89,8 +89,8 @@ export function createRunBackgroundService({
       summary: null,
       updatedAt: now().toISOString(),
     });
-    if (updated.deferredTriggerMessageId) {
-      void Promise.resolve(resumeDeferred?.(stripInternal(updated))).catch(() => {});
+    if ((updated.pendingRootRunIds ?? []).length) {
+      void Promise.resolve(resumePending?.(stripInternal(updated))).catch(() => {});
     }
     return updated;
   }
@@ -151,8 +151,9 @@ export function createRunBackgroundService({
     if (existing) return stripInternal(store.find("runs", runId));
     const space = store.find("spaces", run.spaceId);
     if (!space || space.archivedAt || (space.seats?.length ?? 0) < 2 ||
-        run.role !== "main" || run.status !== "running" || run.parentRunId !== null) {
-      throw new ApiError("conflict", "Only an active group main Run can move to background");
+        run.role !== "root" || run.status !== "running" || run.parentRunId !== null ||
+        run.outputPolicy !== "space") {
+      throw new ApiError("conflict", "Only an active group Root Run can move to background");
     }
     const eligibleAt = Date.parse(run.backgroundEligibleAt ?? "");
     if (!Number.isFinite(eligibleAt) || now().getTime() < eligibleAt) {
@@ -162,7 +163,10 @@ export function createRunBackgroundService({
       throw new ApiError("conflict", "Account already has a background Run in this Space");
     }
     const backgroundedAt = now().toISOString();
-    const updated = store.update("runs", run.id, { backgroundedAt });
+    const updated = store.update("runs", run.id, {
+      backgroundedAt,
+      outputPolicy: "source",
+    });
     store.insert("runCatchups", {
       id: `catchup:${run.id}`,
       runId: run.id,
@@ -176,8 +180,10 @@ export function createRunBackgroundService({
       terminalSeq: null,
       sourceMessageIds: [],
       summary: null,
-      deferredTriggerMessageId: null,
-      reservedRunId: null,
+      pendingRootRunIds: [],
+      excludedTriggerMessageIds: [],
+      reservedRunIds: [],
+      consumedRunIds: [],
       createdAt: backgroundedAt,
       updatedAt: backgroundedAt,
       consumedAt: null,
@@ -201,12 +207,17 @@ export function createRunBackgroundService({
     const record = recordForRun(run.id);
     if (!record || record.status !== "collecting") return null;
     const terminalSeq = latestMessageSeq(store, run.spaceId, run.spaceSessionId);
+    const triggerIds = new Set((record.pendingRootRunIds ?? [])
+      .map((runId) => store.find("runs", runId)?.triggerMessageId)
+      .filter(Boolean));
+    for (const messageId of record.excludedTriggerMessageIds ?? []) triggerIds.add(messageId);
     const candidates = store.list("messages")
       .filter((message) =>
         message.spaceId === run.spaceId &&
         message.spaceSessionId === run.spaceSessionId &&
         (message._seq ?? 0) > record.cursorSeq &&
         (message._seq ?? 0) <= terminalSeq &&
+        !triggerIds.has(message.id) &&
         message.runId !== run.id &&
         !(message.author?.type === "account" && message.author.accountId === run.accountId))
       .sort((left, right) => (left._seq ?? 0) - (right._seq ?? 0));
@@ -222,6 +233,9 @@ export function createRunBackgroundService({
         updatedAt: timestamp,
         consumedAt: timestamp,
       });
+      if ((record.pendingRootRunIds ?? []).length) {
+        void Promise.resolve(resumePending?.(stripInternal(record))).catch(() => {});
+      }
       return null;
     }
     if (run.status !== "completed") {
@@ -232,6 +246,9 @@ export function createRunBackgroundService({
         summary: null,
         updatedAt: timestamp,
       });
+      if ((record.pendingRootRunIds ?? []).length) {
+        void Promise.resolve(resumePending?.(stripInternal(record))).catch(() => {});
+      }
       return null;
     }
     const updated = store.update("runCatchups", record.id, {
@@ -274,15 +291,35 @@ export function createRunBackgroundService({
     } else {
       throw new ApiError("invalid_request", "catch-up result is invalid");
     }
-    if (updated.deferredTriggerMessageId) void Promise.resolve(resumeDeferred?.(stripInternal(updated))).catch(() => {});
+    if ((updated.pendingRootRunIds ?? []).length) {
+      void Promise.resolve(resumePending?.(stripInternal(updated))).catch(() => {});
+    }
     return stripInternal(updated);
   }
 
-  function holdTrigger(spaceId, accountId, triggerMessageId) {
-    const record = pendingFor(spaceId, accountId);
+  function blockingFor(spaceId, accountId) {
+    return activeFor(spaceId, accountId) ?? pendingFor(spaceId, accountId);
+  }
+
+  function deferRoot(spaceId, accountId, runId) {
+    const record = blockingFor(spaceId, accountId);
+    if (!record) return false;
+    const pendingRootRunIds = [...new Set([...(record.pendingRootRunIds ?? []), runId])];
+    store.update("runCatchups", record.id, {
+      pendingRootRunIds,
+      updatedAt: now().toISOString(),
+    });
+    return true;
+  }
+
+  function excludeTrigger(spaceId, accountId, messageId) {
+    const record = blockingFor(spaceId, accountId);
     if (!record) return false;
     store.update("runCatchups", record.id, {
-      deferredTriggerMessageId: triggerMessageId,
+      excludedTriggerMessageIds: [...new Set([
+        ...(record.excludedTriggerMessageIds ?? []),
+        messageId,
+      ])],
       updatedAt: now().toISOString(),
     });
     return true;
@@ -294,12 +331,12 @@ export function createRunBackgroundService({
       const watermark = watermarkFor(spaceId, spaceSessionId, accountId);
       return watermark ? { id: null, afterSeq: watermark.terminalSeq, block: null } : null;
     }
-    if (record.reservedRunId && record.reservedRunId !== runId) {
-      throw new ApiError("account_busy", "catch-up context is reserved by another Run");
-    }
-    if (!record.reservedRunId) {
+    const pendingIds = record.pendingRootRunIds ?? [];
+    const reserved = new Set(record.reservedRunIds ?? []);
+    if (pendingIds.length > 0 && !pendingIds.includes(runId)) return null;
+    if (!reserved.has(runId)) {
       store.update("runCatchups", record.id, {
-        reservedRunId: runId,
+        reservedRunIds: [...reserved, runId],
         updatedAt: now().toISOString(),
       });
     }
@@ -314,20 +351,24 @@ export function createRunBackgroundService({
 
   function markDispatched(catchupId, runId) {
     const record = store.find("runCatchups", catchupId);
-    if (!record || record.reservedRunId !== runId || record.consumedAt) return;
+    if (!record || !(record.reservedRunIds ?? []).includes(runId) || record.consumedAt) return;
     const timestamp = now().toISOString();
+    const consumedRunIds = [...new Set([...(record.consumedRunIds ?? []), runId])];
+    const pendingIds = record.pendingRootRunIds ?? [];
+    const complete = pendingIds.length === 0 || pendingIds.every((id) => consumedRunIds.includes(id));
     store.update("runCatchups", record.id, {
-      status: "consumed",
-      consumedAt: timestamp,
+      status: complete ? "consumed" : record.status,
+      consumedRunIds,
+      consumedAt: complete ? timestamp : null,
       updatedAt: timestamp,
     });
   }
 
   function releaseReservation(catchupId, runId) {
     const record = store.find("runCatchups", catchupId);
-    if (!record || record.reservedRunId !== runId || record.consumedAt) return;
+    if (!record || !(record.reservedRunIds ?? []).includes(runId) || record.consumedAt) return;
     store.update("runCatchups", record.id, {
-      reservedRunId: null,
+      reservedRunIds: record.reservedRunIds.filter((id) => id !== runId),
       updatedAt: now().toISOString(),
     });
   }
@@ -347,15 +388,17 @@ export function createRunBackgroundService({
     submitResult,
     isActive: (spaceId, accountId) => Boolean(activeFor(spaceId, accountId)),
     shouldHold: (spaceId, accountId) => Boolean(pendingFor(spaceId, accountId)),
-    holdTrigger,
+    blockingFor,
+    deferRoot,
+    excludeTrigger,
     contextForRun,
     markDispatched,
     releaseReservation,
-    setResumeDeferred(handler) {
-      resumeDeferred = handler;
+    setResumePending(handler) {
+      resumePending = handler;
       for (const record of store.list("runCatchups")) {
-        if (record.deferredTriggerMessageId && ["ready", "failed"].includes(record.status)) {
-          void Promise.resolve(resumeDeferred?.(stripInternal(record))).catch(() => {});
+        if ((record.pendingRootRunIds ?? []).length && ["ready", "failed", "consumed"].includes(record.status)) {
+          void Promise.resolve(resumePending?.(stripInternal(record))).catch(() => {});
         }
       }
     },

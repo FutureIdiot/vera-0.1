@@ -49,6 +49,9 @@ export function createSpacesClient(http) {
     backgroundRun(runId) {
       return http.post(`/api/runs/${runId}/background`, {});
     },
+    replyToBackgroundRun(runId, body) {
+      return http.post(`/api/runs/${runId}/user-messages`, body);
+    },
     createSpace(body) {
       return http.post("/api/spaces", body);
     },

@@ -1,4 +1,4 @@
-// m. 响应规则收口：Account Seat / silent / respondTo / focused /
+// m. 响应规则收口：Account Seat / focused / respondTo / mentioned /
 // blockAccountIds 声告段过滤 + 直向 @ 穿透。
 
 export async function run(ctx) {
@@ -9,13 +9,13 @@ export async function run(ctx) {
     return response.json.group;
   };
 
-  await check("m.1 silent 默认（respondTo=null）：广播不响应、定向 @ 响应", async () => {
+  await check("m.1 mentioned：广播不响应、定向 @ 响应", async () => {
     const onlineS1 = await createOnlineMockAccount({ name: "VerifyMockS1" });
     const agentS1 = onlineS1.agent;
     const accountS1 = onlineS1.account;
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m1-space",
-      seats: [{ accountId: accountS1.id, responseMode: "silent" }],
+      seats: [{ accountId: accountS1.id, responseMode: "mentioned" }],
     });
     assertEqual(spaceResp.status, 201);
     const m1Space = spaceResp.json.space;
@@ -30,7 +30,7 @@ export async function run(ctx) {
       content: "m.1 broadcast",
     });
     assertEqual(bc.status, 201);
-    assertEqual(bc.json.runs.length, 0, "silent 默认不应响应 broadcast");
+    assertEqual(bc.json.runs.length, 0, "mentioned 不应响应 broadcast");
 
     const dc = await httpRequest("POST", `/api/spaces/${m1Space.id}/messages`, {
       author: { type: "user" },
@@ -38,12 +38,12 @@ export async function run(ctx) {
       content: "m.1 direct @",
     });
     assertEqual(dc.status, 201);
-    assertEqual(dc.json.runs.length, 1, "silent 默认应响应 direct @");
+    assertEqual(dc.json.runs.length, 1, "mentioned 应响应 direct @");
     assertEqual(dc.json.runs[0].agentId, agentS1.id);
     await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === dc.json.runs[0].id, 10000);
   });
 
-  await check("m.2 silent + respondTo=['user']：user 广播响应、agent 广播不响应、direct @ 响应", async () => {
+  await check("m.2 focused + respondTo=['user']：user 广播响应、Account 广播不响应、direct @ 响应", async () => {
     const onlineS2 = await createOnlineMockAccount({ name: "VerifyMockS2" });
     const agentS2 = onlineS2.agent;
     const accountS2 = onlineS2.account;
@@ -55,8 +55,8 @@ export async function run(ctx) {
       name: "m2-space",
       groupId: group.id,
       seats: [
-        { accountId: accountS2.id, responseMode: "silent", respondTo: ["user"] },
-        { accountId: accountS2b.id, responseMode: "focused" },
+        { accountId: accountS2.id, responseMode: "focused", respondTo: ["user"] },
+        { accountId: accountS2b.id, responseMode: "mentioned" },
       ],
     });
     assertEqual(spaceResp.status, 201);
@@ -69,7 +69,7 @@ export async function run(ctx) {
       content: "m.2 user broadcast",
     });
     assertEqual(bc1.status, 201);
-    assertEqual(bc1.json.runs.length, 1, "silent+respondTo=['user'] 应响应 user broadcast");
+    assertEqual(bc1.json.runs.length, 1, "focused+respondTo=['user'] 应响应 user broadcast");
     assertEqual(bc1.json.runs[0].agentId, agentS2.id);
     await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === bc1.json.runs[0].id, 10000);
 
@@ -79,7 +79,7 @@ export async function run(ctx) {
       content: "m.2 agent broadcast",
     });
     assertEqual(bc2.status, 201);
-    assertEqual(bc2.json.runs.length, 0, "silent+respondTo=['user'] 不应响应 agent broadcast");
+    assertEqual(bc2.json.runs.length, 0, "focused+respondTo=['user'] 不应响应 Account broadcast");
 
     const dc = await httpRequest("POST", `/api/spaces/${m2Space.id}/messages`, {
       author: { type: "user" },
@@ -87,18 +87,18 @@ export async function run(ctx) {
       content: "m.2 direct @",
     });
     assertEqual(dc.status, 201);
-    assertEqual(dc.json.runs.length, 1, "silent+respondTo=['user'] 应响应 direct @");
+    assertEqual(dc.json.runs.length, 1, "focused+respondTo=['user'] 应响应 direct @");
     assertEqual(dc.json.runs[0].agentId, agentS2.id);
     await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === dc.json.runs[0].id, 10000);
   });
 
-  await check("m.3 focused：广播不响应、定向 @ 响应", async () => {
+  await check("m.3 mentioned：广播不响应、定向 @ 响应", async () => {
     const onlineF3 = await createOnlineMockAccount({ name: "VerifyMockF3" });
     const agentF3 = onlineF3.agent;
     const accountF3 = onlineF3.account;
     const spaceResp = await httpRequest("POST", "/api/spaces", {
       name: "m3-space",
-      seats: [{ accountId: accountF3.id, responseMode: "focused" }],
+      seats: [{ accountId: accountF3.id, responseMode: "mentioned" }],
     });
     assertEqual(spaceResp.status, 201);
     const m3Space = spaceResp.json.space;
@@ -109,7 +109,7 @@ export async function run(ctx) {
       content: "m.3 broadcast",
     });
     assertEqual(bc.status, 201);
-    assertEqual(bc.json.runs.length, 0, "focused 不应响应 broadcast");
+    assertEqual(bc.json.runs.length, 0, "mentioned 不应响应 broadcast");
 
     const dc = await httpRequest("POST", `/api/spaces/${m3Space.id}/messages`, {
       author: { type: "user" },
@@ -117,7 +117,7 @@ export async function run(ctx) {
       content: "m.3 direct @",
     });
     assertEqual(dc.status, 201);
-    assertEqual(dc.json.runs.length, 1, "focused 应响应 direct @");
+    assertEqual(dc.json.runs.length, 1, "mentioned 应响应 direct @");
     assertEqual(dc.json.runs[0].agentId, agentF3.id);
     await sse.waitFor((e) => e.type === "run.ended" && e.data.run.id === dc.json.runs[0].id, 10000);
   });

@@ -5,6 +5,7 @@ import { createDaemonRunResults } from "./daemon-run-results.js";
 const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const DIRECTED_DAEMON_EVENTS = new Set([
   "run.requested",
+  "run-message.available",
   "run.activity-visibility.updated",
   "approval.answered",
   "agent-session.compact.requested",
@@ -37,6 +38,7 @@ export function createDaemonRuntime({
   config = {},
   runLifecycle = {},
   observation = null,
+  runMessages = null,
   setTimer = setInterval,
   clearTimer = clearInterval,
 } = {}) {
@@ -66,7 +68,7 @@ export function createDaemonRuntime({
       agentSession.status !== "active" || agentSession.agentId !== authority.agent.id ||
       agentSession.accountId !== authority.account.id || agentSession.spaceSessionId !== run.spaceSessionId ||
       agentSession.generation !== run.contextGeneration);
-    const isolatedMismatch = run?.role === "subagent" &&
+    const isolatedMismatch = run?.role === "child" &&
       (run.agentSessionId !== null || run.contextGeneration !== null);
     if (!run || run.accountId !== authority.account.id || run.agentId !== authority.agent.id ||
         run.accountSessionId !== authority.session.id || run.executionTransport !== "daemon" ||
@@ -165,15 +167,40 @@ export function createDaemonRuntime({
     return dispatchEvent({ accountId, event });
   }
 
-  async function createSubagent(runId, body, headers) {
-    strictObject(body, { allowed: ["task", "context"], required: ["task"] });
-    requiredText(body.task, "task");
-    if (body.context !== undefined &&
-        (typeof body.context !== "string" && (!body.context || typeof body.context !== "object" || Array.isArray(body.context)))) {
-      invalid("context must be a string or object");
+  async function createRunMessage(runId, body, headers) {
+    strictObject(body, {
+      allowed: ["kind", "recipient", "recipientAgentId", "content", "sourceMessageIds", "idempotencyKey"],
+      required: ["kind", "content", "idempotencyKey"],
+    });
+    requiredText(body.kind, "kind");
+    requiredText(body.content, "content");
+    requiredText(body.idempotencyKey, "idempotencyKey");
+    if (body.recipient !== undefined) strictObject(body.recipient, {
+      allowed: ["type", "runId"], required: ["type"], name: "recipient",
+    });
+    if (body.recipientAgentId !== undefined) requiredText(body.recipientAgentId, "recipientAgentId");
+    if (body.sourceMessageIds !== undefined &&
+        (!Array.isArray(body.sourceMessageIds) || body.sourceMessageIds.some((id) => typeof id !== "string"))) {
+      invalid("sourceMessageIds must be an array of strings");
     }
     const authority = await runAuthority(runId, headers);
-    return invoke("createSubagent", { ...authority, input: structuredClone(body), dispatchRun });
+    if (!runMessages) conflict("RunMessage service is unavailable");
+    return body.kind === "delegate"
+      ? runMessages.createDelegate(authority.run.id, structuredClone(body))
+      : runMessages.createMessage(authority.run.id, structuredClone(body));
+  }
+
+  async function listRunMessages(runId, after, headers) {
+    const authority = await runAuthority(runId, headers);
+    if (!runMessages) conflict("RunMessage service is unavailable");
+    return runMessages.inbox(authority.run.id, after);
+  }
+
+  async function consumeRunMessage(runId, runMessageId, body, headers) {
+    strictObject(body, { allowed: [] });
+    const authority = await runAuthority(runId, headers);
+    if (!runMessages) conflict("RunMessage service is unavailable");
+    return { runMessage: runMessages.consume(authority.run.id, runMessageId) };
   }
 
   async function updateRun(runId, body, headers) {
@@ -187,7 +214,7 @@ export function createDaemonRuntime({
       allowed: ["code", "message"], required: ["code", "message"], name: "error",
     });
     if (body.status !== "failed" && body.error !== undefined) invalid("error is only valid for failed Runs");
-    const isApiMain = authority.run.role !== "subagent" && authority.agent.runtimeProfile?.kind === "api";
+    const isApiMain = authority.run.role === "root" && authority.agent.runtimeProfile?.kind === "api";
     if (body.usage !== undefined) {
       strictObject(body.usage, {
         allowed: ["inputTokens", "outputTokens", "thinkingTokens", "cacheReadTokens", "totalTokens"],
@@ -195,16 +222,9 @@ export function createDaemonRuntime({
         name: "usage",
       });
       if (Object.values(body.usage).some((value) => !Number.isFinite(value) || value < 0) ||
-          body.status !== "completed" || isApiMain || authority.run.role === "subagent") {
+          body.status !== "completed" || isApiMain || authority.run.role === "child") {
         invalid("usage is only valid for a completed main CLI Run");
       }
-    }
-    if (body.status === "completed" && isApiMain) {
-      const committed = Number.isInteger(authority.run.apiResultVersion) || store.list("apiHistories").some((history) =>
-        history.agentSessionId === authority.run.agentSessionId &&
-        history.generation === authority.run.contextGeneration &&
-        history.turns?.some((turn) => turn.runId === authority.run.id));
-      if (!committed) throw new ApiError("history_conflict", "API result must be committed before Run completion");
     }
     const input = structuredClone(body);
     if (body.agentState !== undefined) {
@@ -221,8 +241,14 @@ export function createDaemonRuntime({
 
   async function submitOutput(kind, runId, body, headers) {
     if (kind === "createMessage") {
-      strictObject(body, { allowed: ["target", "content", "fileIds"], required: ["content"] });
+      strictObject(body, {
+        allowed: ["target", "content", "fileIds", "agentRouting"],
+        required: ["content"],
+      });
       if (typeof body.content !== "string") invalid("content must be a string");
+      if (body.agentRouting !== undefined && !["default", "none"].includes(body.agentRouting)) {
+        invalid("agentRouting must be default or none");
+      }
       if (body.target !== undefined && (!body.target || typeof body.target !== "object" || Array.isArray(body.target))) {
         invalid("target must be an object");
       }
@@ -263,6 +289,30 @@ export function createDaemonRuntime({
       }
     }
     const authority = await runAuthority(runId, headers);
+    if (kind === "createMessage" && body.target !== undefined) {
+      const keys = Object.keys(body.target).sort().join(",");
+      const direct = body.target.type === "direct" &&
+        keys === "accountIds,type" &&
+        Array.isArray(body.target.accountIds) &&
+        body.target.accountIds.length > 0 &&
+        new Set(body.target.accountIds).size === body.target.accountIds.length &&
+        body.target.accountIds.every((id) => typeof id === "string");
+      const broadcast = body.target.type === "broadcast" && keys === "type";
+      const space = store.find("spaces", authority.run.spaceId);
+      const seatIds = new Set((space?.seats ?? []).map((seat) => seat.accountId));
+      if (!direct && !broadcast) {
+        invalid("target must be an exact broadcast or seated Account direct target");
+      }
+      if (direct && body.target.accountIds.some((id) => !seatIds.has(id))) {
+        throw new ApiError("forbidden", "direct output target is not seated in this Space");
+      }
+      if (direct && store.list("messages").some((message) => message.runId === authority.run.id)) {
+        throw new ApiError(
+          "conflict",
+          "direct output target must be frozen before the Run starts streaming",
+        );
+      }
+    }
     if (kind === "upsertActivity" && body.detail &&
         observation?.visibilityForRun?.(authority.run) !== "observed") {
       throw new ApiError("forbidden", "Activity detail is only accepted for the observed private Space");
@@ -288,7 +338,9 @@ export function createDaemonRuntime({
     openEvents,
     dispatchEvent,
     dispatchRun,
-    createSubagent,
+    createRunMessage,
+    listRunMessages,
+    consumeRunMessage,
     updateRun,
     createMessage: (id, body, headers) => submitOutput("createMessage", id, body, headers),
     appendDelta: (id, body, headers) => submitOutput("appendDelta", id, body, headers),

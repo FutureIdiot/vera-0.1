@@ -816,3 +816,31 @@
     transition: none;
   }
 }
+.vera-run-message {
+  align-self: center;
+  width: min(100%, 34rem);
+  padding: var(--vera-space-md);
+  border: 1px solid var(--vera-color-border);
+  border-radius: var(--vera-bubble-radius);
+  background: var(--vera-color-surface);
+}
+
+.vera-run-message__header {
+  margin-bottom: var(--vera-space-sm);
+  color: var(--vera-color-muted-text);
+  font-size: var(--vera-font-size-small);
+}
+
+.vera-run-message__content {
+  white-space: pre-wrap;
+}
+
+.vera-run-message__reply {
+  display: grid;
+  gap: var(--vera-space-sm);
+  margin-top: var(--vera-space-sm);
+}
+
+.vera-run-message__reply textarea {
+  resize: vertical;
+}

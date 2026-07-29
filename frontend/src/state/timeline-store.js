@@ -115,6 +115,11 @@ export function createTimelineStore({ maxItems = 200 } = {}) {
         if (change) notify(change.changedKey);
         return;
       }
+      case "run-message.user.created": {
+        const change = upsert("run-message", data.runMessage);
+        notify(change.changedKey, change.removedKeys);
+        return;
+      }
       default:
         // 未知 type（含 run.*/agent.state.updated/space.updated/agent.updated/
         // stream.reset）：时间线不关心，静默忽略（客户端义务：向前兼容）。

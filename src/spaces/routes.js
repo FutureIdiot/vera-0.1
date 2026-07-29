@@ -47,6 +47,7 @@ export function registerSpaceRoutes(router, {
   store, hub, config, daemonScheduler, memoryDigestScheduler,
   daemonRuntime, daemonRunLifecycle, contextCompaction, memory, files, observation,
   runBackground, controlService,
+  runMessages,
 }) {
   router.get(
     "/api/groups",
@@ -357,6 +358,7 @@ export function registerSpaceRoutes(router, {
         files,
         observation,
         runBackground,
+        runMessages,
         spaceId: params.id,
         body,
       });
@@ -369,21 +371,33 @@ export function registerSpaceRoutes(router, {
     asHandler(async ({ res, params }) => {
       const run = store.find("runs", params.id);
       if (!run) throw new ApiError("not_found", `run ${params.id} does not exist`);
-      if (["pending", "running"].includes(run.status)) {
-        if (run.executionTransport === "daemon") {
-          if (run.status === "running") {
+      const subtree = store.list("runs")
+        .filter((candidate) => {
+          if (candidate.id === run.id) return true;
+          let parent = store.find("runs", candidate.parentRunId);
+          while (parent) {
+            if (parent.id === run.id) return true;
+            parent = store.find("runs", parent.parentRunId);
+          }
+          return false;
+        })
+        .filter((candidate) => ["pending", "running"].includes(candidate.status))
+        .sort((left, right) => (right.depth ?? 0) - (left.depth ?? 0));
+      for (const target of subtree) {
+        if (target.executionTransport === "daemon") {
+          if (target.status === "running") {
             try {
               daemonRuntime?.dispatchEvent({
-                accountId: run.accountId,
-                event: { type: "run.cancelled", data: { runId: run.id } },
+                accountId: target.accountId,
+                event: { type: "run.cancelled", data: { runId: target.id } },
               });
             } catch {
               // Gateway cancellation remains authoritative even if the daemon
               // channel vanished between the owner action and this write.
             }
           }
-          daemonRunLifecycle?.cancelRun(run.id);
-        } else cancelRun(params.id);
+          daemonRunLifecycle?.cancelRun(target.id);
+        } else cancelRun(target.id);
       }
       const current = store.find("runs", params.id);
       sendJson(res, 200, { run: stripInternal(current) });
@@ -395,6 +409,25 @@ export function registerSpaceRoutes(router, {
     asHandler(async ({ res, params }) => {
       if (!runBackground) throw new ApiError("conflict", "Run backgrounding is unavailable");
       sendJson(res, 200, { run: runBackground.backgroundRun(params.id) });
+    }),
+  );
+
+  router.post(
+    "/api/runs/:id/user-messages",
+    asHandler(async ({ req, res, params }) => {
+      if (!runMessages) throw new ApiError("conflict", "RunMessage service is unavailable");
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+          Object.keys(body).sort().join(",") !== "content,idempotencyKey,replyToRunMessageId" ||
+          typeof body.content !== "string" ||
+          typeof body.replyToRunMessageId !== "string" ||
+          typeof body.idempotencyKey !== "string") {
+        throw new ApiError(
+          "invalid_request",
+          "body must be exactly { content, replyToRunMessageId, idempotencyKey }",
+        );
+      }
+      sendJson(res, 201, runMessages.createUserInstruction(params.id, body));
     }),
   );
 

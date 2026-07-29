@@ -247,7 +247,8 @@ test("Account Session revocation wins the adapter abort race and publishes one f
 test("startup recovery terminalizes orphaned Runs and their in-flight records", async () => {
   await fixture(async ({ store, agent, account, space, spaceSession, agentSession }) => {
     store.insert("runs", {
-      id: "run_interrupted", agentId: agent.id, accountId: account.id, role: "main", parentRunId: null,
+      id: "run_interrupted", agentId: agent.id, accountId: account.id, role: "root",
+      rootRunId: "run_interrupted", parentRunId: null, depth: 0, outputPolicy: "space",
       spaceId: space.id, spaceSessionId: spaceSession.id, agentSessionId: agentSession.id,
       contextGeneration: 1, triggerMessageId: "msg_trigger", replyMessageIds: [], status: "running",
       createdAt: "2026-07-15T00:00:00.000Z", endedAt: null,
@@ -266,6 +267,22 @@ test("startup recovery terminalizes orphaned Runs and their in-flight records", 
       agentId: agent.id, prompt: "approve", options: ["allow", "deny"], status: "pending", answer: null,
       createdAt: "2026-07-15T00:00:01.000Z",
     });
+    store.insert("runMessages", {
+      id: "rmsg_interrupted",
+      spaceId: space.id,
+      spaceSessionId: spaceSession.id,
+      rootRunId: "run_interrupted",
+      sequence: 1,
+      sender: { type: "user" },
+      recipient: { type: "run", runId: "run_interrupted", agentId: agent.id },
+      kind: "instruction",
+      content: "continue",
+      sourceMessageIds: [],
+      idempotencyKey: "restart",
+      deliveryState: "delivered",
+      createdAt: "2026-07-15T00:00:01.000Z",
+      deliveredAt: "2026-07-15T00:00:02.000Z",
+    });
     recoverInterruptedRuns(store, { now: "2026-07-16T00:00:00.000Z" });
     assert.equal(store.find("runs", "run_interrupted").status, "failed");
     assert.deepEqual(store.find("runs", "run_interrupted").replyMessageIds, ["msg_streaming"]);
@@ -275,6 +292,7 @@ test("startup recovery terminalizes orphaned Runs and their in-flight records", 
       [store.find("approvals", "apr_pending").status, store.find("approvals", "apr_pending").answer],
       ["expired", "deny"],
     );
+    assert.equal(store.find("runMessages", "rmsg_interrupted").deliveryState, "failed");
   }, { suffix: "startup_recovery" });
 });
 

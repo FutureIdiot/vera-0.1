@@ -10,6 +10,7 @@ import { renderActivity, applyActivity } from "../components/activity-item.js";
 import { renderApprovalCard, applyApprovalCard } from "../components/approval-card.js";
 import { createComposer } from "../components/composer.js";
 import { createRunProgress } from "../components/run-progress.js";
+import { renderRunMessageCard } from "../components/run-message-card.js";
 import { createFilesClient, FILE_ACCEPT } from "../api/files-client.js";
 import { timelineItemsMatch } from "../state/timeline-cache.js";
 
@@ -23,13 +24,14 @@ function keyOf(item) {
 
 function envelopeSpaceId(envelope) {
   const data = envelope?.data;
-  return data?.spaceId ?? data?.message?.spaceId ?? data?.activity?.spaceId ?? data?.approval?.spaceId ?? data?.run?.spaceId ?? null;
+  return data?.spaceId ?? data?.message?.spaceId ?? data?.activity?.spaceId ?? data?.approval?.spaceId
+    ?? data?.runMessage?.spaceId ?? data?.run?.spaceId ?? null;
 }
 
 function envelopeSpaceSessionId(envelope) {
   const data = envelope?.data;
   return data?.spaceSessionId ?? data?.message?.spaceSessionId ?? data?.activity?.spaceSessionId
-    ?? data?.approval?.spaceSessionId ?? data?.run?.spaceSessionId ?? null;
+    ?? data?.approval?.spaceSessionId ?? data?.runMessage?.spaceSessionId ?? data?.run?.spaceSessionId ?? null;
 }
 
 export function mountSpaceView({
@@ -158,6 +160,16 @@ export function mountSpaceView({
     if (item.itemType === "message") return renderMessageBubble(item, messageContext(items, index));
     if (item.itemType === "activity") return renderActivity(item, activityContext());
     if (item.itemType === "approval") return renderApprovalCard(item, { onAnswer: handleAnswer });
+    if (item.itemType === "run-message") {
+      return renderRunMessageCard(item, {
+        onReply: (message, content) => spaces.replyToBackgroundRun(message.rootRunId, {
+          content,
+          replyToRunMessageId: message.id,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+        onError: (error) => setStatus(`后台回复失败：${error.message}`),
+      });
+    }
     return null;
   }
 

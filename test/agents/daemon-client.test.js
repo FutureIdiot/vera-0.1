@@ -19,6 +19,7 @@ function stream(frames) {
 function fixture({
   envelopes = [], memoryEnvelopes = [], executor, memoryExecutor, eventResponses,
   bindingRotationResponse = null, terminalResponse = null,
+  responseHandler = null,
   runtime = null, loginStatus = 200, maxConnectionFailures = 3,
 } = {}) {
   const calls = [];
@@ -52,6 +53,8 @@ function fixture({
         headers: { "content-type": "application/json" },
       });
     }
+    const customResponse = await responseHandler?.({ url, init, body, calls });
+    if (customResponse) return customResponse;
     if (url.includes("/messages")) {
       return new Response(JSON.stringify({ id: `msg_${calls.length}`, content: body.content }), { status: 201 });
     }
@@ -142,8 +145,56 @@ test("CLI isolated input stays isolated and does not submit API history", async 
   const statePatches = calls
     .filter((call) => call.method === "PATCH" && call.body?.agentState)
     .map((call) => call.body.agentState.status);
-  assert.deepEqual(statePatches, ["on_task", "typing", "idle"]);
+  assert.deepEqual(statePatches, ["on_task", "typing"]);
   assert.equal(calls.find((call) => call.method === "PATCH" && call.body?.status === "completed")?.body.status, "completed");
+});
+
+test("source-only Child output uses one terminal RunMessage and no public output endpoint", async () => {
+  const input = { kind: "cli", sessionMode: "isolated", promptText: "bounded delegated prompt" };
+  let terminalAttempts = 0;
+  const { client, calls } = fixture({
+    envelopes: [requested(input, {
+      role: "child",
+      outputPolicy: "source",
+      rootRunId: "run_root",
+      parentRunId: "run_root",
+    })],
+    executor: async (context) => {
+      await context.onActivity({ phase: "thinking", kind: "reasoning", summary: "private work" });
+      await context.onDelta("private result");
+      return { content: "authoritative private result" };
+    },
+    responseHandler: ({ url, init, body }) => {
+      if (url.endsWith("/run-messages") && init.method === "POST") {
+        return new Response(JSON.stringify({ runMessage: { id: "rmsg_terminal" } }), { status: 201 });
+      }
+      if (init.method === "PATCH" && body?.status === "completed") {
+        terminalAttempts += 1;
+        return new Response(JSON.stringify(terminalAttempts === 1
+          ? { run: { id: "run_a", status: "running" }, awaitingSourceResult: true }
+          : { run: { id: "run_a", status: "completed" } }), { status: 200 });
+      }
+      return null;
+    },
+  });
+  await client.start();
+  await client.wait();
+  await settle();
+
+  const terminalMessage = calls.find((call) =>
+    call.url.endsWith("/run-messages") &&
+    call.method === "POST" &&
+    call.body?.kind === "result");
+  assert.deepEqual(terminalMessage.body, {
+    kind: "result",
+    content: "authoritative private result",
+    idempotencyKey: "terminal:run_a",
+  });
+  assert.equal(calls.some((call) =>
+    call.url.endsWith("/delta") ||
+    call.url.endsWith("/messages") ||
+    call.url.endsWith("/activities")), false);
+  assert.equal(terminalAttempts, 2);
 });
 
 test("CLI main rotation updates generation before binding CAS and submits provider usage", async () => {
@@ -254,6 +305,79 @@ test("a background terminal catch-up uses the isolated executor and reports no C
   assert.equal(calls.some((call) => call.url.endsWith("/activities") && call.body?.summary?.includes("catch-up")), false);
 });
 
+test("a Root synthesizes late Child results at an isolated coordination checkpoint", async () => {
+  const input = { kind: "cli", sessionMode: "main", promptText: "main prompt" };
+  let terminalAttempts = 0;
+  let coordinationInput = null;
+  const executor = {
+    async execute() {
+      return { content: "@Beta please inspect the boundary" };
+    },
+    async executeCoordination(context) {
+      coordinationInput = context.input;
+      await context.onDelta("Beta confirmed the boundary.");
+      return { content: "Beta confirmed the boundary." };
+    },
+  };
+  const delayedEvents = new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(
+        `data: ${JSON.stringify(requested(input))}\n\n`,
+      ));
+      setTimeout(() => controller.close(), 250);
+    },
+  }), { status: 200 });
+  const { client, calls } = fixture({
+    eventResponses: [delayedEvents],
+    executor,
+    runtime: {
+      hostId: "host_a",
+      kind: "cli",
+      provider: "codex",
+      model: "model_a",
+      revision: "rev_a",
+      runtimeCapabilities: { models: ["model_a"] },
+    },
+    responseHandler: ({ url, init, body }) => {
+      if (init.method === "PATCH" && body?.status === "completed") {
+        terminalAttempts += 1;
+        return new Response(JSON.stringify(terminalAttempts === 1
+          ? { run: { id: "run_a", status: "running" }, awaitingChildren: true }
+          : { run: { id: "run_a", status: "completed" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (init.method === "GET" && url.includes("/run-messages?")) {
+        return new Response(JSON.stringify({
+          runMessages: [{
+            id: "rmsg_result",
+            sequence: 2,
+            sender: { type: "run", runId: "run_child", agentId: "agt_beta" },
+            recipient: { type: "run", runId: "run_a", agentId: "agt_a" },
+            kind: "result",
+            content: "Boundary is intact.",
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return null;
+    },
+  });
+  await client.start();
+  await client.wait();
+  await settle();
+
+  assert.equal(coordinationInput.sessionMode, "isolated");
+  assert.match(coordinationInput.promptText, /Boundary is intact/u);
+  assert.equal(terminalAttempts, 2);
+  assert.equal(calls.some((call) =>
+    call.url.endsWith("/run-messages/rmsg_result/consumed") &&
+    call.method === "PUT"), true);
+  assert.equal(calls.some((call) =>
+    call.url.endsWith("/messages") &&
+    call.body?.content === "Beta confirmed the boundary."), true);
+});
+
 test("requestApproval posts once and resolves only its approval.answered event", async () => {
   const calls = [];
   let accountController;
@@ -315,7 +439,6 @@ test("requestApproval posts once and resolves only its approval.answered event",
     "needs_you",
     "on_task",
     "typing",
-    "idle",
   ]);
   assert.equal(calls.some((call) => call.method === "PATCH" && call.body?.status === "completed"), true);
 });

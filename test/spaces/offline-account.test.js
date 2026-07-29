@@ -75,7 +75,7 @@ test("direct @ skips an offline Account, writes one error Activity, and is never
       store,
       hub,
       daemonScheduler: {
-        scheduleMainRun(input) {
+        scheduleRootRun(input) {
           scheduled.push(input);
           return { id: `run_scheduled_${scheduled.length}`, status: "pending", triggerMessageId: input.triggerMessage.id };
         },

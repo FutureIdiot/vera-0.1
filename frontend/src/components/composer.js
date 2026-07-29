@@ -385,7 +385,8 @@ export function createComposer({
 
   function setForegroundRuns(runs = [], options = {}) {
     foregroundRuns = runs
-      .filter((run) => run?.role === "main" && ["pending", "running"].includes(run.status) && !run.backgroundedAt)
+      .filter((run) => run?.role === "root" && ["pending", "running"].includes(run.status) &&
+        run.outputPolicy !== "source")
       .map((run) => structuredClone(run));
     isGroupChat = Boolean(options.isGroupChat);
     if (foregroundRuns.length === 0 || !isGroupChat) stopMenu.hidden = true;

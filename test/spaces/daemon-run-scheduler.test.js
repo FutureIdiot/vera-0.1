@@ -121,7 +121,7 @@ for (const kind of ["cli", "api"]) {
           async searchForInjection() { return { block: null, response: { items: [], cursor: null } }; },
         },
       });
-      const run = scheduler.scheduleMainRun({ agent, account, space, spaceSession, agentSession, triggerMessage });
+      const run = scheduler.scheduleRootRun({ agent, account, space, spaceSession, agentSession, triggerMessage });
       assert.equal(run.status, "pending");
       assert.equal(run.executionTransport, "daemon");
       assert.equal(run.accountSessionId, "acs_runtime");
@@ -167,7 +167,7 @@ test("daemon scheduler refuses an Account model outside its owner Agent inventor
       daemonRuntime: { dispatchRun() { throw new Error("must not dispatch"); } },
     });
     assert.throws(
-      () => scheduler.scheduleMainRun({
+      () => scheduler.scheduleRootRun({
         agent,
         account: store.find("accounts", account.id),
         space,
@@ -191,7 +191,7 @@ test("daemon scheduler terminalizes a pending Run when no active Account Session
       daemonRuntime: { dispatchRun() { throw new Error("must not dispatch"); } },
     });
     assert.throws(
-      () => scheduler.scheduleMainRun({ agent, account, space, spaceSession, agentSession, triggerMessage }),
+      () => scheduler.scheduleRootRun({ agent, account, space, spaceSession, agentSession, triggerMessage }),
       (error) => error.code === "account_reauthentication_required",
     );
     assert.equal(store.list("runs").length, 0);

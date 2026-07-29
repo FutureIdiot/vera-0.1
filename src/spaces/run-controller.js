@@ -1,4 +1,4 @@
-// One main Run binds one active AgentSession generation and one Account. The
+// One Root Run binds one active AgentSession generation and one Account. The
 // gateway owns API history and CLI provider bindings; adapters only translate
 // the typed input they receive.
 
@@ -68,6 +68,19 @@ export function recoverInterruptedRuns(store, { now = new Date().toISOString() }
       error: { code: "internal", message: "Run interrupted by gateway restart" },
     });
   }
+  for (const message of store.list("runMessages")) {
+    if (!["queued", "delivered"].includes(message.deliveryState) ||
+        message.recipient?.type !== "run") {
+      continue;
+    }
+    const recipient = store.find("runs", message.recipient.runId);
+    if (!recipient || !["pending", "running"].includes(recipient.status)) {
+      store.update("runMessages", message.id, {
+        deliveryState: "failed",
+        deliveredAt: message.deliveredAt ?? timestamp,
+      });
+    }
+  }
 }
 
 export function executeRun({
@@ -92,8 +105,11 @@ export function executeRun({
     id: newRunId(),
     agentId: agent.id,
     accountId: account.id,
+    rootRunId: null,
     parentRunId: null,
-    role: "main",
+    role: "root",
+    depth: 0,
+    outputPolicy: "space",
     spaceId: space.id,
     spaceSessionId: activeSpaceSession.id,
     agentSessionId: activeAgentSession.id,
@@ -113,6 +129,7 @@ export function executeRun({
     createdAt: new Date().toISOString(),
     endedAt: null,
   };
+  run.rootRunId = run.id;
   const storedRun = store.insert("runs", run);
   const controller = new AbortController();
   abortControllers.set(storedRun.id, controller);

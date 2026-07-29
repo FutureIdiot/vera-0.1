@@ -115,6 +115,8 @@ function purgeSpaceGraph(store, spaceId, deletedMemories) {
     "spaceSessions",
     "contextCompactionJobs",
     "contextControlRequests",
+    "runCatchups",
+    "runMessages",
   ]) {
     removeMatching(store, collection, (record) => record.spaceId === spaceId);
   }

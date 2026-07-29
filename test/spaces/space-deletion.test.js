@@ -56,6 +56,32 @@ async function fixture(run, { writeMemoryFile } = {}) {
     status: "completed",
     createdAt: NOW,
   });
+  store.insert("runCatchups", {
+    id: "rcp_delete",
+    spaceId: "spc_delete",
+    spaceSessionId: "sps_delete",
+    runId: "run_deleted",
+    agentId: "agt_alpha",
+    accountId: "acc_alpha",
+    status: "consumed",
+    createdAt: NOW,
+  });
+  store.insert("runMessages", {
+    id: "rmsg_delete",
+    spaceId: "spc_delete",
+    spaceSessionId: "sps_delete",
+    rootRunId: "run_deleted",
+    sequence: 1,
+    sender: { type: "user" },
+    recipient: { type: "run", runId: "run_deleted", agentId: "agt_alpha" },
+    kind: "instruction",
+    content: "deleted with Space",
+    sourceMessageIds: [],
+    idempotencyKey: "delete",
+    deliveryState: "failed",
+    createdAt: NOW,
+    deliveredAt: NOW,
+  });
   await memory.applyOperation({
     operationId: "mop_exclusive",
     agentId: "agt_alpha",
@@ -113,6 +139,14 @@ test("permanent Space deletion keeps Memory by default and tombstones deleted Me
     assert.equal(deleted.deletedMemoryCount, 0);
     assert.equal(store.find("spaces", "spc_delete"), null);
     assert.equal(store.find("messages", "msg_delete"), null);
+    assert.equal(
+      store.list("runMessages").some((item) => item.spaceId === "spc_delete"),
+      false,
+    );
+    assert.equal(
+      store.list("runCatchups").some((item) => item.spaceId === "spc_delete"),
+      false,
+    );
     const exclusive = await memory.getMemory("agt_alpha", "exclusive-memory");
     assert.deepEqual(exclusive.sources, [{
       kind: "deleted-message",

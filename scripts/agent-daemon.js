@@ -66,7 +66,39 @@ export async function main({ env = process.env, fetchImpl = globalThis.fetch, ex
         onActivity: context.onActivity,
         persistProviderBinding: context.persistProviderBinding,
         rotateProviderBinding: context.rotateProviderBinding,
+        delegate: context.delegate,
+        sendRunMessage: context.sendRunMessage,
+        readRunMessages: context.readRunMessages,
       });
+    },
+    async executeCoordination(context) {
+      const directory = await mkdtemp(join(tmpdir(), "vera-coordination-"));
+      try {
+        const { input, run } = context;
+        const executionRuntime = { ...runtime, model: run.effectiveModel };
+        return await adapter.run({
+          runtime: executionRuntime,
+          workspacePath: directory,
+          agent: context.agent,
+          account: context.account,
+          sessionMode: "isolated",
+          prompt: input.kind === "cli" ? { text: input.promptText } : { apiMessages: input.messages },
+          providerBinding: null,
+          historyVersion: null,
+          spaceSessionId: run.spaceSessionId,
+          agentSessionId: null,
+          contextGeneration: null,
+          accountId: run.accountId,
+          signal: context.signal,
+          onDelta: context.onDelta,
+          onActivity: () => {},
+          delegate: context.delegate,
+          sendRunMessage: context.sendRunMessage,
+          readRunMessages: context.readRunMessages,
+        });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
     },
     async executeCatchup(context) {
       const directory = await mkdtemp(join(tmpdir(), "vera-catchup-"));

@@ -209,7 +209,7 @@ export async function run(ctx) {
         connection: { command: "/nonexistent/opencode", args: [], secretRef: null }, model: "navy/paused",
       });
       const openSpace = await verifiedRequest("POST", "/api/spaces", {
-        name: "Paused OpenCode", seats: [{ accountId: openCode.json.account.id, responseMode: "silent" }],
+        name: "Paused OpenCode", seats: [{ accountId: openCode.json.account.id, responseMode: "focused" }],
       });
       const openMessage = await verifiedRequest("POST", `/api/spaces/${openSpace.json.space.id}/messages`, {
         author: { type: "user" }, target: { type: "broadcast" }, content: "Do not execute OpenCode digest.",

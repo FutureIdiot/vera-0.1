@@ -11,6 +11,22 @@ export function getTimeline(store, spaceId, { spaceSessionId, before, limit = 50
     ...store.list("messages").filter((m) => m.spaceId === spaceId && m.spaceSessionId === resolvedSpaceSessionId).map((m) => ({ ...m, itemType: "message" })),
     ...store.list("activities").filter((a) => a.spaceId === spaceId && a.spaceSessionId === resolvedSpaceSessionId).map((a) => ({ ...a, itemType: "activity" })),
     ...store.list("approvals").filter((a) => a.spaceId === spaceId && a.spaceSessionId === resolvedSpaceSessionId).map((a) => ({ ...a, itemType: "approval" })),
+    ...store.list("runMessages")
+      .filter((message) =>
+        message.spaceId === spaceId &&
+        message.spaceSessionId === resolvedSpaceSessionId &&
+        message.recipient?.type === "user")
+      .map((message) => ({
+        id: message.id,
+        spaceId: message.spaceId,
+        spaceSessionId: message.spaceSessionId,
+        rootRunId: message.rootRunId,
+        kind: message.kind,
+        content: message.content,
+        createdAt: message.createdAt,
+        _seq: message._seq,
+        itemType: "run-message",
+      })),
   ];
 
   items.sort((a, b) => b._seq - a._seq); // 倒序：最新在前
@@ -23,7 +39,7 @@ export function getTimeline(store, spaceId, { spaceSessionId, before, limit = 50
 
   const page = items.slice(start, start + limit).map(stripInternal);
   const pageItemIds = new Set(page.map((item) => item.id));
-  const pageRunIds = new Set(page.map((item) => item.runId).filter(Boolean));
+  const pageRunIds = new Set(page.flatMap((item) => [item.runId, item.rootRunId]).filter(Boolean));
   const runs = store.list("runs")
     .filter((run) => run.spaceId === spaceId && run.spaceSessionId === resolvedSpaceSessionId)
     .filter((run) => pageRunIds.has(run.id) || pageItemIds.has(run.triggerMessageId) ||

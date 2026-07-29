@@ -78,7 +78,8 @@ async function fixture(run) {
       fileIds: [], runId: null, status: "completed", createdAt: "2026-07-19T00:00:00.000Z",
     });
     store.insert("runs", {
-      id: "run_runtime", role: "main", parentRunId: null, spaceId: "spc_runtime",
+      id: "run_runtime", role: "root", rootRunId: "run_runtime", parentRunId: null, depth: 0,
+      outputPolicy: "space", spaceId: "spc_runtime",
       spaceSessionId: "sps_runtime", agentSessionId: "ags_runtime", contextGeneration: 1,
       accountId, agentId, runtimeRevision: "sha256:runtime", effectiveModel: "mock-v1", modelVersion: 1,
       delegated: false, triggerMessageId: "msg_trigger", replyMessageIds: [], status: "running",
@@ -97,10 +98,18 @@ test("daemon Run endpoints authenticate the current Session lease and delegate s
   await fixture(async ({ store, hub, config, controlService, accountId, agentId, headers }) => {
     const calls = [];
     const lifecycle = Object.fromEntries([
-      "createSubagent", "updateRun", "createMessage", "appendDelta",
+      "updateRun", "createMessage", "appendDelta",
       "upsertActivity", "createApproval", "rotateProviderBinding", "submitCompactionResult",
     ].map((name) => [name, async (input) => { calls.push({ name, input }); return { ok: name }; }]));
-    const daemonRuntime = createDaemonRuntime({ store, hub, config, controlService, runLifecycle: lifecycle });
+    const runMessages = {
+      createDelegate(runId, input) {
+        calls.push({ name: "createDelegate", runId, input });
+        return { runMessage: { id: "rmsg_runtime" }, run: { id: "run_child" } };
+      },
+    };
+    const daemonRuntime = createDaemonRuntime({
+      store, hub, config, controlService, runLifecycle: lifecycle, runMessages,
+    });
     const router = createRouter();
     registerAgentRoutes(router, { store, controlService, daemonRuntime, agentStates: { list() { return []; } } });
     store.insert("contextCompactionJobs", {
@@ -112,7 +121,13 @@ test("daemon Run endpoints authenticate the current Session lease and delegate s
     });
 
     const requests = [
-      ["POST", "/api/agent/runs/run_runtime/subagents", { task: "inspect" }, 201],
+      ["POST", "/api/agent/runs/run_runtime/run-messages", {
+        kind: "delegate",
+        recipientAgentId: "agt_target",
+        content: "inspect",
+        sourceMessageIds: [],
+        idempotencyKey: "delegate-1",
+      }, 201],
       ["POST", "/api/agent/runs/run_runtime/provider-binding-rotation", {
         generation: 1, reason: "missing",
       }, 200],
@@ -136,10 +151,11 @@ test("daemon Run endpoints authenticate the current Session lease and delegate s
       assert.equal(response.status, expected, `${method} ${path}`);
     }
     assert.deepEqual(calls.map((call) => call.name), [
-      "createSubagent", "rotateProviderBinding", "createMessage", "appendDelta", "upsertActivity",
+      "createDelegate", "rotateProviderBinding", "createMessage", "appendDelta", "upsertActivity",
       "createApproval", "updateRun", "submitCompactionResult",
     ]);
-    assert.ok(calls.slice(0, 7).every((call) => call.input.run.id === "run_runtime"));
+    assert.equal(calls[0].runId, "run_runtime");
+    assert.ok(calls.slice(1, 7).every((call) => call.input.run.id === "run_runtime"));
     assert.equal(calls.at(-1).input.target.accountId, accountId);
 
     const invalidSession = await request(router, "POST", "/api/agent/runs/run_runtime/delta", { delta: "x" }, {
@@ -238,18 +254,24 @@ test("provider binding CAS is limited to the active CLI Execution and rejects un
   });
 });
 
-test("API main completion remains blocked until api-result history CAS succeeds", async () => {
+test("API main completion exposes the lifecycle commit checkpoint until history CAS succeeds", async () => {
   await fixture(async ({ store, hub, config, controlService, headers }) => {
     const agent = store.find("agents", store.find("runs", "run_runtime").agentId);
     store.update("agents", agent.id, {
       runtimeProfile: { ...agent.runtimeProfile, kind: "api" },
     });
-    const lifecycle = { updateRun: async () => ({ run: { id: "run_runtime", status: "completed" } }) };
+    const lifecycleCalls = [];
+    const lifecycle = {
+      updateRun: async ({ run }) => {
+        lifecycleCalls.push(run.apiResultVersion);
+        return Number.isInteger(run.apiResultVersion)
+          ? { run: { id: "run_runtime", status: "completed" } }
+          : { run: { id: "run_runtime", status: "running" }, awaitingCommit: true };
+      },
+    };
     const daemonRuntime = createDaemonRuntime({ store, hub, config, controlService, runLifecycle: lifecycle });
-    await assert.rejects(
-      daemonRuntime.updateRun("run_runtime", { status: "completed" }, headers),
-      (error) => error.code === "history_conflict",
-    );
+    const waiting = await daemonRuntime.updateRun("run_runtime", { status: "completed" }, headers);
+    assert.equal(waiting.awaitingCommit, true);
     store.insert("messages", {
       id: "msg_reply", runId: "run_runtime", content: "done", status: "completed",
       createdAt: "2026-07-19T00:00:01.000Z",
@@ -261,6 +283,7 @@ test("API main completion remains blocked until api-result history CAS succeeds"
     assert.equal(result.historyVersion, 1);
     const completed = await daemonRuntime.updateRun("run_runtime", { status: "completed" }, headers);
     assert.equal(completed.run.status, "completed");
+    assert.deepEqual(lifecycleCalls, [undefined, 1]);
   });
 });
 

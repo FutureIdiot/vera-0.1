@@ -118,7 +118,7 @@ export async function run(ctx) {
 
   await check("p.3 Space 设置一次 PATCH 后由活跃列表返回权威形状", async () => {
     const response = await httpRequest("PATCH", `/api/spaces/${spaceId}`, {
-      seats: [{ accountId: owningAccount.id, responseMode: "silent", respondTo: ["user"] }],
+      seats: [{ accountId: owningAccount.id, responseMode: "focused", respondTo: ["user"] }],
       notifications: { mode: "accountMessages", includeActivityErrors: true },
       pinned: false,
       projectId: null,

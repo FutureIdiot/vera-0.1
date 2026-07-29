@@ -87,7 +87,7 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
       name.textContent = account?.name ?? "未知 Account";
       const mode = document.createElement("select");
       mode.setAttribute("aria-label", `${name.textContent} 响应模式`);
-      for (const [value, label] of [["default", "默认"], ["silent", "静默"], ["focused", "专注"]]) {
+      for (const [value, label] of [["default", "默认"], ["focused", "专注"], ["mentioned", "仅点名"]]) {
         const option = document.createElement("option");
         option.value = value;
         option.textContent = label;
@@ -96,7 +96,7 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
       mode.value = seat.responseMode ?? "default";
       const sourceField = document.createElement("div");
       sourceField.className = "vera-space-response-sources";
-      sourceField.hidden = mode.value !== "silent";
+      sourceField.hidden = mode.value !== "focused";
       const sourceLabel = document.createElement("small");
       sourceLabel.textContent = "响应来源";
       const sourceOptions = document.createElement("div");
@@ -127,7 +127,7 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
       }
       sourceField.append(sourceLabel, sourceOptions);
       mode.addEventListener("change", () => {
-        sourceField.hidden = mode.value !== "silent";
+        sourceField.hidden = mode.value !== "focused";
       });
       row.append(name, mode, sourceField);
       participants.appendChild(row);

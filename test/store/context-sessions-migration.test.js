@@ -51,7 +51,9 @@ test("P5-C1 migration backfills session identity, reconstructs verifiable API tu
     }
     const migratedRun = store.find("runs", "run_api");
     assert.equal(migratedRun.accountId, "acc_api");
-    assert.equal(migratedRun.role, "main");
+    assert.equal(migratedRun.role, "root");
+    assert.equal(migratedRun.rootRunId, migratedRun.id);
+    assert.equal(migratedRun.outputPolicy, "space");
     assert.equal(migratedRun.parentRunId, null);
     assert.equal(migratedRun.contextGeneration, 1);
     const cliSession = store.list("agentSessions").find((item) => item.agentId === "agt_cli");

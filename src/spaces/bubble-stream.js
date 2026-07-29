@@ -13,10 +13,13 @@ function stripInternal({ _seq, ...rest }) {
 export function createBubbleStream({
   store, hub, config, spaceId, spaceSessionId, runId,
   accountId, accountNameSnapshot, executingAgentId, effectiveModel, delegated,
+  onMessageCompleted = null,
 }) {
   const splitter = createBubbleSplitter(config.bubbles);
   const replyMessageIds = [];
   let current = null;
+  let targetOverride = null;
+  let agentRouting = "default";
 
   function acceptsOutput() {
     return store.find("runs", runId)?.status === "running";
@@ -34,7 +37,7 @@ export function createBubbleStream({
       executingAgentId,
       effectiveModel,
       delegated,
-      target: { type: "broadcast" },
+      target: targetOverride ?? { type: "broadcast" },
       content: initialContent,
       runId,
       status: "streaming",
@@ -58,8 +61,12 @@ export function createBubbleStream({
       current = null;
       return;
     }
-    const updated = store.update("messages", current.id, { content: finalText, status: "completed" });
+    const updated = store.update("messages", current.id, {
+      content: finalText,
+      status: "completed",
+    });
     hub.publish("message.completed", { message: stripInternal(updated) });
+    onMessageCompleted?.(updated, { agentRouting });
     current = null;
   }
 
@@ -88,11 +95,13 @@ export function createBubbleStream({
   // 不留任何 status: "streaming" 的悬空消息。
   // fallbackContent：adapter 允许不调 onDelta 只在返回值里给全文
   // （adapter-interface.md「run() 返回」），零 delta 时用它兜底产气泡。
-  function finish(fallbackContent) {
+  function finish(fallbackContent, target = null, nextAgentRouting = "default") {
     if (!acceptsOutput()) {
       current = null;
       return;
     }
+    if (target) targetOverride = structuredClone(target);
+    agentRouting = nextAgentRouting;
     if (replyMessageIds.length === 0 && !splitter.peek() && fallbackContent) {
       delta(fallbackContent);
     }

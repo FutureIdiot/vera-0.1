@@ -110,7 +110,7 @@ export function createDaemonRunResults({
       invalid("provider binding rotation generation or reason is invalid");
     }
     const authority = await runAuthority(runId, headers);
-    if (authority.agent.runtimeProfile?.kind !== "cli" || authority.run.role !== "main" ||
+    if (authority.agent.runtimeProfile?.kind !== "cli" || authority.run.role !== "root" ||
         authority.run.agentSessionId == null) {
       throw new ApiError("forbidden", "Provider binding rotation requires a main CLI Execution");
     }
@@ -144,7 +144,7 @@ export function createDaemonRunResults({
     }
     if (body.usage !== undefined) safeOpaque(body.usage, "usage");
     const authority = await runAuthority(runId, headers);
-    if (authority.agent.runtimeProfile?.kind !== "api" || authority.run.role === "subagent" ||
+    if (authority.agent.runtimeProfile?.kind !== "api" || authority.run.role === "child" ||
         body.agentSessionId !== authority.run.agentSessionId || body.generation !== authority.run.contextGeneration ||
         !Array.isArray(body.assistantMessageIds) || body.assistantMessageIds.length === 0) {
       throw new ApiError("history_conflict", "API result does not match the main Execution context");

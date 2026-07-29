@@ -252,7 +252,8 @@ test("compaction freezes its source boundary and includes only the Run already a
       runId: null, status: "completed", createdAt: "2026-01-01T00:00:01.000Z",
     });
     store.insert("runs", {
-      id: "run_ahead", agentId: "agt_a", accountId: "acc_a", role: "main", parentRunId: null,
+      id: "run_ahead", agentId: "agt_a", accountId: "acc_a", role: "root",
+      rootRunId: "run_ahead", parentRunId: null, depth: 0, outputPolicy: "space",
       spaceId: "spc_a", spaceSessionId: spaceSession.id, agentSessionId: agentSession.id,
       contextGeneration: 1, triggerMessageId: "msg_before", replyMessageIds: [], status: "running",
       createdAt: "2026-01-01T00:00:01.000Z", endedAt: null,
@@ -275,7 +276,8 @@ test("compaction freezes its source boundary and includes only the Run already a
       runId: null, status: "completed", createdAt: "2026-01-01T00:00:03.000Z",
     });
     store.insert("runs", {
-      id: "run_late", agentId: "agt_a", accountId: "acc_a", role: "main", parentRunId: null,
+      id: "run_late", agentId: "agt_a", accountId: "acc_a", role: "root",
+      rootRunId: "run_late", parentRunId: null, depth: 0, outputPolicy: "space",
       spaceId: "spc_a", spaceSessionId: spaceSession.id, agentSessionId: agentSession.id,
       contextGeneration: 1, triggerMessageId: "msg_late", replyMessageIds: [], status: "pending",
       createdAt: "2026-01-01T00:00:03.000Z", endedAt: null,

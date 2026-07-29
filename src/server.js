@@ -58,7 +58,7 @@ import { createGatewayUpdateControl } from "./core/gateway-updates.js";
 import { registerSystemUpdateRoutes } from "./api/system-update-routes.js";
 import { createObservationService, registerObservationRoutes } from "./spaces/observation.js";
 import { createRunBackgroundService } from "./spaces/run-background.js";
-import { scheduleDeferredMessage } from "./spaces/messages.js";
+import { createRunMessageService } from "./spaces/run-messages.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
@@ -254,6 +254,23 @@ memoryDreamService.start();
 memoryDreamScheduler.start();
 
 const runBackground = createRunBackgroundService({ store, hub, config });
+let daemonScheduler = null;
+const runMessages = createRunMessageService({
+  store,
+  hub,
+  config,
+  controlService,
+  runBackground,
+  scheduleChildRun: (input) => daemonScheduler.scheduleChildRun(input),
+  notifyRunMessage: (runId, afterSequence) => {
+    const run = store.find("runs", runId);
+    if (!run || run.executionTransport !== "daemon") return;
+    daemonRuntime?.dispatchRun({
+      accountId: run.accountId,
+      event: { type: "run-message.available", data: { runId, afterSequence } },
+    });
+  },
+});
 const daemonRunLifecycle = createDaemonRunLifecycle({
   store,
   hub,
@@ -264,6 +281,14 @@ const daemonRunLifecycle = createDaemonRunLifecycle({
   contextCompaction,
   observation,
   runBackground,
+  runMessages,
+  dispatchRunCancel: (run) => {
+    if (run.executionTransport !== "daemon") return;
+    daemonRuntime?.dispatchEvent({
+      accountId: run.accountId,
+      event: { type: "run.cancelled", data: { runId: run.id } },
+    });
+  },
 });
 daemonRuntime = createDaemonRuntime({
   store,
@@ -273,8 +298,9 @@ daemonRuntime = createDaemonRuntime({
   config,
   runLifecycle: daemonRunLifecycle,
   observation,
+  runMessages,
 });
-const daemonScheduler = createDaemonRunScheduler({
+daemonScheduler = createDaemonRunScheduler({
   store,
   hub,
   config,
@@ -286,13 +312,11 @@ const daemonScheduler = createDaemonRunScheduler({
   contextCompaction,
   observation,
   runBackground,
+  runMessages,
 });
-runBackground.setResumeDeferred((record) => scheduleDeferredMessage({
-  store,
-  daemonScheduler,
-  runBackground,
-  record,
-}));
+runBackground.setResumePending((record) => {
+  for (const runId of record.pendingRootRunIds ?? []) daemonScheduler.dispatchPendingRoot(runId);
+});
 
 const router = createRouter();
 
@@ -331,6 +355,7 @@ registerSpaceRoutes(router, {
   store, hub, config, daemonScheduler, daemonRuntime, daemonRunLifecycle,
   memoryDigestScheduler, contextCompaction, memory, files, observation,
   runBackground, controlService,
+  runMessages,
 });
 registerObservationRoutes(router, { observation });
 registerFilesRoutes(router, { files, hub });

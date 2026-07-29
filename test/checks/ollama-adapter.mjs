@@ -247,12 +247,12 @@ export async function runReal(ctx) {
         model,
       });
       assertEqual(created.status, 201);
-      const { agent } = created.json;
+      const { agent, account } = created.json;
       const other = await request("POST", "/api/agents", { name: "Raw fixture peer" });
       assertEqual(other.status, 201);
       const madeSpace = await request("POST", "/api/spaces", {
         name: "Gemma raw qualification",
-        seats: [{ agentId: agent.id, responseMode: "silent" }],
+        seats: [{ accountId: account.id, responseMode: "focused" }],
       });
       const space = madeSpace.json.space;
       const post = async (author, content) => (await request("POST", `/api/spaces/${space.id}/messages`, {

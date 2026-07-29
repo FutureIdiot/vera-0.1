@@ -42,12 +42,16 @@ export async function run(ctx) {
 
   await check("f. reconnect with ?since=<seq> replays only missed events", async () => {
     assert(typeof ctx.firstRunStartedSeq === "number", "firstRunStartedSeq must be captured by the 'e.' check above");
-    const expected = sse.events.filter((e) => e.seq > ctx.firstRunStartedSeq).length;
+    // Use a cursor that is intentionally still inside the configured ring.
+    // The complete first Run now emits enough typed lifecycle events that its
+    // start may legitimately have rolled out before this assertion.
+    const replayCursor = sse.events.at(-10)?.seq ?? ctx.firstRunStartedSeq;
+    const expected = sse.events.filter((e) => e.seq > replayCursor).length;
 
-    const replaySse = await connectSse({ port: ctx.port, since: ctx.firstRunStartedSeq });
+    const replaySse = await connectSse({ port: ctx.port, since: replayCursor });
     await sleep(300);
     assert(replaySse.events.length >= expected, `expected replay to include >= ${expected} events, got ${replaySse.events.length}`);
-    assert(replaySse.events.every((e) => e.seq > ctx.firstRunStartedSeq), "replay must only include events after since");
+    assert(replaySse.events.every((e) => e.seq > replayCursor), "replay must only include events after since");
     assert(!replaySse.events.some((e) => e.type === "stream.reset"), "clean replay should not contain stream.reset");
   });
 }
