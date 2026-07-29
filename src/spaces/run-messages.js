@@ -69,17 +69,10 @@ export function createRunMessageService({
   function delegationTargets(run) {
     const space = store.find("spaces", run.spaceId);
     if (!space || space.archivedAt) return [];
-    let accounts;
     if (space.spaceType === "garage") {
       return [];
     }
-    if (space.groupId) {
-      const ids = new Set((space.seats ?? []).map((seat) => seat.accountId));
-      accounts = store.list("accounts").filter((account) => ids.has(account.id));
-    } else {
-      accounts = store.list("accounts");
-    }
-    return accounts
+    return store.list("accounts")
       .filter((account) =>
         account.ownerAgentId &&
         account.ownerAgentId !== run.agentId &&

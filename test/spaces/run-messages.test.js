@@ -51,8 +51,10 @@ test("delegate freezes an isolated cross-Agent Child and returns its result only
   try {
     const agentA = store.insert("agents", agent("agt_a"));
     const agentB = store.insert("agents", agent("agt_b"));
+    const agentC = store.insert("agents", agent("agt_c"));
     const accountA = store.insert("accounts", account("acc_a", agentA.id));
     const accountB = store.insert("accounts", account("acc_b", agentB.id));
+    const accountC = store.insert("accounts", account("acc_c", agentC.id));
     store.insert("groups", {
       id: "grp_one", name: "Group", accountIds: [accountA.id, accountB.id],
     });
@@ -96,6 +98,7 @@ test("delegate freezes an isolated cross-Agent Child and returns its result only
     const sessions = new Map([
       [accountA.id, { id: "acs_a", agentId: agentA.id }],
       [accountB.id, { id: "acs_b", agentId: agentB.id }],
+      [accountC.id, { id: "acs_c", agentId: agentC.id }],
     ]);
     const scheduled = [];
     const notifications = [];
@@ -108,21 +111,28 @@ test("delegate freezes an isolated cross-Agent Child and returns its result only
       notifyRunMessage(runId, sequence) { notifications.push({ runId, sequence }); },
     });
 
-    assert.deepEqual(service.delegationTargets(store.find("runs", "run_root")), [{
-      agentId: agentB.id,
-      accountId: accountB.id,
-      name: accountB.name,
-    }]);
+    assert.deepEqual(service.delegationTargets(store.find("runs", "run_root")), [
+      {
+        agentId: agentB.id,
+        accountId: accountB.id,
+        name: accountB.name,
+      },
+      {
+        agentId: agentC.id,
+        accountId: accountC.id,
+        name: accountC.name,
+      },
+    ]);
     const first = service.createDelegate("run_root", {
       kind: "delegate",
-      recipientAgentId: agentB.id,
+      recipientAgentId: agentC.id,
       content: "Inspect the boundary",
       sourceMessageIds: [source.id],
       idempotencyKey: "tool-call-1",
     });
     const repeated = service.createDelegate("run_root", {
       kind: "delegate",
-      recipientAgentId: agentB.id,
+      recipientAgentId: agentC.id,
       content: "This retry body is ignored",
       sourceMessageIds: [],
       idempotencyKey: "tool-call-1",
@@ -144,7 +154,7 @@ test("delegate freezes an isolated cross-Agent Child and returns its result only
     assert.equal(first.run.agentSessionId, null);
     assert.equal(first.run.contextGeneration, null);
     assert.equal(first.run.outputPolicy, "source");
-    assert.equal(first.run.accountId, accountB.id);
+    assert.equal(first.run.accountId, accountC.id);
 
     store.update("runs", first.run.id, { status: "running" });
     store.insert("runs", {
@@ -152,8 +162,8 @@ test("delegate freezes an isolated cross-Agent Child and returns its result only
       id: "run_root_b",
       rootRunId: "run_root_b",
       parentRunId: null,
-      agentId: agentB.id,
-      accountId: accountB.id,
+      agentId: agentC.id,
+      accountId: accountC.id,
       triggerMessageId: "msg_other",
     });
     assert.throws(
@@ -183,6 +193,8 @@ test("delegate freezes an isolated cross-Agent Child and returns its result only
       ...structuredClone(store.find("runs", "run_root_b")),
       id: "run_root_b_same_trigger",
       rootRunId: "run_root_b_same_trigger",
+      agentId: agentB.id,
+      accountId: accountB.id,
       triggerMessageId: source.id,
     });
     const siblingOutput = store.insert("messages", {
