@@ -117,6 +117,11 @@ export function createDaemonRunLifecycle({
   }
 
   function createApproval({ account, agent, run, input, dispatchEvent }) {
+    const space = store.find("spaces", run.spaceId);
+    const seat = space?.seats?.find((candidate) => candidate.accountId === account.id);
+    if ((seat?.approvalPolicy ?? "ask") === "approve") {
+      return { approval: null, answer: "allow" };
+    }
     if (run.outputPolicy === "source") {
       throw new ApiError("forbidden", "source-only Runs cannot create public Approval");
     }

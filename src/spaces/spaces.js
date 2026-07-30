@@ -11,6 +11,7 @@ function stripInternal({ _seq, ...rest }) {
 
 // Seat 固定Space中的Account身份；实际执行Agent由Account Session决定。
 const RESPONSE_MODES = ["default", "focused", "mentioned"];
+const APPROVAL_POLICIES = ["ask", "approve"];
 
 function assertExactObject(value, allowed, { required = [], name = "body", allowEmpty = true } = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -37,13 +38,16 @@ function normalizeSeats(store, seats) {
     }
     assertExactObject(
       seat,
-      ["accountId", "responseMode", "respondTo", "blockAccountIds"],
+      ["accountId", "responseMode", "respondTo", "blockAccountIds", "approvalPolicy"],
       { required: ["accountId"], name: "seat" },
     );
     if (seen.has(seat.accountId)) throw new ApiError("invalid_request", `duplicate seat for ${seat.accountId}`);
     seen.add(seat.accountId);
     if (seat.responseMode !== undefined && !RESPONSE_MODES.includes(seat.responseMode)) {
       throw new ApiError("invalid_request", `invalid responseMode for ${seat.accountId}`);
+    }
+    if (seat.approvalPolicy !== undefined && !APPROVAL_POLICIES.includes(seat.approvalPolicy)) {
+      throw new ApiError("invalid_request", `invalid approvalPolicy for ${seat.accountId}`);
     }
     for (const field of ["respondTo", "blockAccountIds"]) {
       if (seat[field] !== undefined && !Array.isArray(seat[field])) {
@@ -61,6 +65,7 @@ function normalizeSeats(store, seats) {
     const normalized = {
       accountId: seat.accountId,
       responseMode: seat.responseMode ?? "default",
+      approvalPolicy: seat.approvalPolicy ?? "ask",
     };
     if (respondTo.length > 0) normalized.respondTo = [...new Set(respondTo)];
     if (blockAccountIds.length > 0) normalized.blockAccountIds = [...new Set(blockAccountIds)];
@@ -138,6 +143,10 @@ function assertSpaceMembership(store, groupId, seats) {
 function normalizeSpace(space) {
   const normalized = stripInternal(space);
   delete normalized.topic;
+  normalized.seats = (space.seats ?? []).map((seat) => ({
+    ...seat,
+    approvalPolicy: seat.approvalPolicy ?? "ask",
+  }));
   normalized.notifications = normalizeNotifications(space.notifications);
   normalized.archivedAt = space.archivedAt ?? null;
   normalized.pinned = space.pinned ?? false;

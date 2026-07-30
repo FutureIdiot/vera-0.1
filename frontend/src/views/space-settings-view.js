@@ -17,10 +17,12 @@ function projectSeat(
   seat,
   responseMode = seat?.responseMode ?? "default",
   respondTo = seat?.respondTo,
+  approvalPolicy = seat?.approvalPolicy ?? "ask",
 ) {
   return {
     accountId: seat.accountId,
     responseMode,
+    approvalPolicy,
     ...(Array.isArray(respondTo) && respondTo.length ? { respondTo: [...respondTo] } : {}),
     ...(Array.isArray(seat.blockAccountIds) && seat.blockAccountIds.length
       ? { blockAccountIds: [...seat.blockAccountIds] }
@@ -65,6 +67,7 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   const grouped = Boolean(space.groupId);
   const participants = grouped ? document.createElement("fieldset") : null;
   const seatControls = new Map();
+  const permissionControls = new Map();
 
   if (participants) {
     const participantLegend = document.createElement("legend");
@@ -137,10 +140,48 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
 
   renderParticipants();
 
+  const permissions = document.createElement("fieldset");
+  const permissionLegend = document.createElement("legend");
+  permissionLegend.textContent = "权限";
+  const permissionList = document.createElement("div");
+  permissionList.className = "vera-settings-list vera-space-permission-list";
+  permissions.append(permissionLegend, permissionList);
+
+  function renderPermissions() {
+    permissionList.replaceChildren();
+    permissionControls.clear();
+    const currentBootstrap = runtime.getBootstrap();
+    const accountById = new Map(currentBootstrap.accounts.map((account) => [account.id, account]));
+    const agentById = new Map((currentBootstrap.agents ?? []).map((agent) => [agent.id, agent]));
+    for (const seat of space.seats ?? []) {
+      const account = accountById.get(seat.accountId);
+      const agentId = account?.activeAgentId ?? account?.ownerAgentId;
+      const agentName = agentById.get(agentId)?.name ?? account?.name ?? "未知 Agent";
+      const row = document.createElement("div");
+      row.className = "vera-settings-row vera-space-permission-row";
+      const identity = document.createElement("span");
+      identity.textContent = agentName;
+      const policy = document.createElement("select");
+      policy.setAttribute("aria-label", `${agentName} 权限策略`);
+      for (const [value, label] of [["ask", "Ask for"], ["approve", "Approve for me"]]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        policy.appendChild(option);
+      }
+      policy.value = seat.approvalPolicy ?? "ask";
+      row.append(identity, policy);
+      permissionList.appendChild(row);
+      permissionControls.set(seat.accountId, policy);
+    }
+  }
+
+  renderPermissions();
+
   /*
    * Direct Space的唯一Seat由目录归属固定；Group成员由Group管理。
-   * 本页只编辑Group现有Seat的responseMode/respondTo，
-   * 隐藏的blockAccountIds在projectSeat中原样保留。
+   * 本页编辑所有现有Seat的approvalPolicy，以及Group Seat的
+   * responseMode/respondTo；隐藏的blockAccountIds在projectSeat中原样保留。
    */
   const notifications = document.createElement("fieldset");
   const notificationLegend = document.createElement("legend");
@@ -166,7 +207,7 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
   save.disabled = !space.seats?.length;
   form.append(basic);
   if (participants) form.appendChild(participants);
-  form.append(notifications, error, save);
+  form.append(permissions, notifications, error, save);
   const historyLink = document.createElement("a");
   historyLink.className = "vera-text-button";
   historyLink.href = `#/spaces/${encodeURIComponent(space.id)}/history`;
@@ -183,6 +224,7 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
     notificationMode.value = space.notifications?.mode ?? "accountMessages";
     includeErrors.input.checked = space.notifications?.includeActivityErrors !== false;
     renderParticipants();
+    renderPermissions();
     save.disabled = !space.seats?.length;
     shell?.setSpace(space);
   }
@@ -196,7 +238,12 @@ export function mountSpaceSettingsView({ root, platform, runtime, spaceId, shell
       const respondTo = controls
         ? [...controls.respondTo].filter(([, input]) => input.checked).map(([sourceId]) => sourceId)
         : seat.respondTo;
-      return projectSeat(seat, controls?.mode.value ?? seat.responseMode, respondTo);
+      return projectSeat(
+        seat,
+        controls?.mode.value ?? seat.responseMode,
+        respondTo,
+        permissionControls.get(seat.accountId)?.value ?? seat.approvalPolicy,
+      );
     });
     if (!seats.length) {
       error.textContent = "这个 Space 的参与 Account 数据异常，无法保存。";

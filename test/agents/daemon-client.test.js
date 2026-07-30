@@ -444,6 +444,34 @@ test("requestApproval posts once and resolves only its approval.answered event",
   assert.equal(calls.some((call) => call.method === "PATCH" && call.body?.status === "completed"), true);
 });
 
+test("requestApproval accepts one current Space policy decision without caching it", async () => {
+  let approvalCalls = 0;
+  const input = { kind: "cli", sessionMode: "isolated", promptText: "approve" };
+  const { client, calls } = fixture({
+    envelopes: [requested(input)],
+    executor: async ({ requestApproval }) => ({
+      content: [
+        await requestApproval({ prompt: "Allow first?", options: ["allow", "deny"] }),
+        await requestApproval({ prompt: "Allow second?", options: ["allow", "deny"] }),
+      ].join(","),
+    }),
+    responseHandler: ({ url }) => {
+      if (!url.endsWith("/approvals")) return null;
+      approvalCalls += 1;
+      return new Response(JSON.stringify({ approval: null, answer: "allow" }), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  await client.start();
+  await client.wait();
+  await settle();
+
+  assert.equal(approvalCalls, 2);
+  assert.equal(calls.find((call) => call.url.endsWith("/messages")).body.content, "allow,allow");
+});
+
 test("invalid mixed wire input never reaches executor and fails the Run", async () => {
   let executed = false;
   const event = requested({

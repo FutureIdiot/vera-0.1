@@ -154,6 +154,30 @@ test("daemon binding rotation advances generation once, recompiles, and retries 
   });
 });
 
+test("Space approve policy returns allow without creating an Approval", async () => {
+  await fixture(async ({ store, hub, agent, account, space, run }) => {
+    store.update("spaces", space.id, {
+      seats: [{
+        accountId: account.id,
+        responseMode: "default",
+        approvalPolicy: "approve",
+      }],
+    });
+    const lifecycle = createDaemonRunLifecycle({ store, hub, config: CONFIG });
+    const since = hub.currentSeq();
+    const result = lifecycle.createApproval({
+      account,
+      agent,
+      run: { ...run, outputPolicy: "source" },
+      input: { prompt: "Allow?", options: ["allow", "deny"] },
+    });
+
+    assert.deepEqual(result, { approval: null, answer: "allow" });
+    assert.equal(store.list("approvals").length, 0);
+    assert.deepEqual(hub.replaySince(since), []);
+  });
+});
+
 test("completed main CLI usage updates context pressure and schedules compaction", async () => {
   await fixture(async ({ store, hub, agent, account, agentSession, run }) => {
     const compacted = [];

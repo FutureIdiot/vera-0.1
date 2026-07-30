@@ -31,7 +31,12 @@ test("Group member updates synchronize every Space seat while preserving remaini
       name: "Grouped",
       groupId: group.id,
       seats: [
-        { accountId: "acc_a", responseMode: "focused", respondTo: ["user", "acc_b"] },
+        {
+          accountId: "acc_a",
+          responseMode: "focused",
+          approvalPolicy: "approve",
+          respondTo: ["user", "acc_b"],
+        },
         { accountId: "acc_b", responseMode: "default", blockAccountIds: ["acc_a"] },
       ],
       createdAt: "2026-07-26T00:00:00.000Z",
@@ -50,8 +55,13 @@ test("Group member updates synchronize every Space seat while preserving remaini
     );
     assert.equal(result.spaces.length, 1);
     assert.deepEqual(result.spaces[0].seats, [
-      { accountId: "acc_a", responseMode: "focused", respondTo: ["user"] },
-      { accountId: "acc_c", responseMode: "default" },
+      {
+        accountId: "acc_a",
+        responseMode: "focused",
+        approvalPolicy: "approve",
+        respondTo: ["user"],
+      },
+      { accountId: "acc_c", responseMode: "default", approvalPolicy: "ask" },
     ]);
   } finally {
     await store.close();

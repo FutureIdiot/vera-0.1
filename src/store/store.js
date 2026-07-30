@@ -143,6 +143,14 @@ function normalizeSpaceFields(data, markDirty) {
         : timestamp;
       changed = true;
     }
+    for (const seat of space.seats ?? []) {
+      if (!("approvalPolicy" in seat)) {
+        seat.approvalPolicy = "ask";
+        changed = true;
+      } else if (!["ask", "approve"].includes(seat.approvalPolicy)) {
+        throw new Error(`space ${space.id} seat ${seat.accountId ?? "unknown"} has invalid approvalPolicy`);
+      }
+    }
   }
   if (changed) markDirty("spaces");
   return changed;

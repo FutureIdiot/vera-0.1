@@ -16,6 +16,7 @@
 .vera-space-participant + .vera-space-participant { border-top: var(--vera-border-width) solid var(--vera-color-border); }
 .vera-space-participant__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vera-space-form .vera-space-participant select { width: auto; }
+.vera-space-form .vera-space-permission-row select { width: auto; }
 .vera-space-response-sources { display: grid; gap: var(--vera-space-xs); grid-column: 1 / -1; }
 .vera-space-response-sources[hidden] { display: none; }
 .vera-space-response-sources > small { color: var(--vera-color-muted-text); }

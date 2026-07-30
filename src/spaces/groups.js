@@ -48,6 +48,7 @@ function cleanSeat(seat, memberIds) {
   return {
     accountId: seat.accountId,
     responseMode: seat.responseMode ?? "default",
+    approvalPolicy: seat.approvalPolicy ?? "ask",
     ...(respondTo.length ? { respondTo } : {}),
     ...(blockAccountIds.length ? { blockAccountIds } : {}),
   };
@@ -59,7 +60,11 @@ function syncGroupSpaces(store, groupId, accountIds, updatedAt) {
   for (const space of store.list("spaces").filter((candidate) => candidate.groupId === groupId)) {
     const existing = new Map(space.seats.map((seat) => [seat.accountId, seat]));
     const seats = accountIds.map((accountId) => cleanSeat(
-      existing.get(accountId) ?? { accountId, responseMode: "default" },
+      existing.get(accountId) ?? {
+        accountId,
+        responseMode: "default",
+        approvalPolicy: "ask",
+      },
       memberIds,
     ));
     const updated = store.update("spaces", space.id, { seats, updatedAt });

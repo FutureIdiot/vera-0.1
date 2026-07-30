@@ -399,6 +399,7 @@ export function createDaemonRunHandler({
         options: sessionRule ? ["allow", "allow_session", "deny"] : ["allow", "deny"],
         ...(sessionRule ? { sessionRule } : {}),
       });
+      if (response?.approval === null && response?.answer === "allow") return "allow";
       const approval = response?.approval ?? response;
       if (!approval?.id) throw new DaemonRunError("invalid_response", "gateway did not create Approval");
       if (controller.signal.aborted) return "deny";

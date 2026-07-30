@@ -50,6 +50,7 @@ export async function run(ctx) {
     assertEqual(createEvent.data.space.pinned, true);
     assertEqual(createEvent.data.space.spaceType, "garage");
     assertEqual(createEvent.data.space.projectId, projectId);
+    assertEqual(createEvent.data.space.seats[0].approvalPolicy, "ask");
 
     const referenced = await httpRequest("DELETE", `/api/projects/${projectId}`);
     assertEqual(referenced.status, 409);
@@ -93,6 +94,15 @@ export async function run(ctx) {
     });
     assertEqual(badMode.status, 400);
 
+    const badApprovalPolicy = await httpRequest("PATCH", `/api/spaces/${spaceId}`, {
+      seats: [{
+        accountId: owningAccount.id,
+        responseMode: "focused",
+        approvalPolicy: "always",
+      }],
+    });
+    assertEqual(badApprovalPolicy.status, 400);
+
     const badNotifications = await httpRequest("PATCH", `/api/spaces/${spaceId}`, {
       notifications: { mode: "sometimes", includeActivityErrors: true },
     });
@@ -118,7 +128,12 @@ export async function run(ctx) {
 
   await check("p.3 Space 设置一次 PATCH 后由活跃列表返回权威形状", async () => {
     const response = await httpRequest("PATCH", `/api/spaces/${spaceId}`, {
-      seats: [{ accountId: owningAccount.id, responseMode: "focused", respondTo: ["user"] }],
+      seats: [{
+        accountId: owningAccount.id,
+        responseMode: "focused",
+        approvalPolicy: "approve",
+        respondTo: ["user"],
+      }],
       notifications: { mode: "accountMessages", includeActivityErrors: true },
       pinned: false,
       projectId: null,
@@ -128,6 +143,7 @@ export async function run(ctx) {
     const space = listed.json.spaces.find((candidate) => candidate.id === spaceId);
     assert(space, "updated Space should remain active");
     assert(!Object.hasOwn(space, "topic"), "Space must not expose topic");
+    assertEqual(space.seats[0].approvalPolicy, "approve");
     assertEqual(space.seats[0].respondTo[0], "user");
     assertEqual(space.pinned, false);
     assertEqual(space.spaceType, "garage");

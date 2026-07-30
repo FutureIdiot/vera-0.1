@@ -21,9 +21,13 @@ function createFixture(space, { onPatch } = {}) {
   const bootstrap = {
     seq: 1,
     accounts: [
-      { id: "acc_a", name: "Alpha" },
-      { id: "acc_b", name: "Beta" },
+      { id: "acc_a", name: "Alpha", ownerAgentId: "agt_a", activeAgentId: "agt_a" },
+      { id: "acc_b", name: "Beta", ownerAgentId: "agt_b", activeAgentId: "agt_b" },
       { id: "acc_c", name: "Not in this Space" },
+    ],
+    agents: [
+      { id: "agt_a", name: "Agent Alpha" },
+      { id: "agt_b", name: "Agent Beta" },
     ],
     spaces: [space],
   };
@@ -84,6 +88,11 @@ test("Direct Space settings omit the fixed participant list", async () => {
     assert.equal(descendants(fixture.root).some((node) => node.className === "vera-space-participant"), false);
     assert.equal(fixture.root.textContent.includes("参与 Account"), false);
     assert.equal(fixture.root.textContent.includes("Not in this Space"), false);
+    const permissionRows = descendants(fixture.root)
+      .filter((node) => node.className === "vera-settings-row vera-space-permission-row");
+    assert.equal(permissionRows.length, 1);
+    assert.equal(permissionRows[0].children[0].textContent, "Agent Alpha");
+    assert.equal(permissionRows[0].children[1].value, "ask");
     dispose();
   });
 });
@@ -98,10 +107,11 @@ test("Group Space settings expose focused response sources and preserve hidden b
         {
           accountId: "acc_a",
           responseMode: "default",
+          approvalPolicy: "approve",
           respondTo: ["user", "acc_b"],
           blockAccountIds: ["acc_b"],
         },
-        { accountId: "acc_b", responseMode: "mentioned" },
+        { accountId: "acc_b", responseMode: "mentioned", approvalPolicy: "ask" },
       ],
       notifications: { mode: "accountMessages", includeActivityErrors: true },
     };
@@ -128,16 +138,27 @@ test("Group Space settings expose focused response sources and preserve hidden b
       ["acc_b", true],
     ]);
     sourceInputs[1].checked = false;
+    const permissionRows = descendants(fixture.root)
+      .filter((node) => node.className === "vera-settings-row vera-space-permission-row");
+    assert.deepEqual(permissionRows.map((row) => [
+      row.children[0].textContent,
+      row.children[1].value,
+    ]), [
+      ["Agent Alpha", "approve"],
+      ["Agent Beta", "ask"],
+    ]);
+    permissionRows[1].children[1].value = "approve";
     const form = descendants(fixture.root).find((node) => node.className === "vera-space-form");
     await form.listeners.get("submit")({ preventDefault() {} });
     assert.deepEqual(patched.seats, [
       {
         accountId: "acc_a",
         responseMode: "focused",
+        approvalPolicy: "approve",
         respondTo: ["user"],
         blockAccountIds: ["acc_b"],
       },
-      { accountId: "acc_b", responseMode: "mentioned" },
+      { accountId: "acc_b", responseMode: "mentioned", approvalPolicy: "approve" },
     ]);
     dispose();
   });
