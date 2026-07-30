@@ -11,7 +11,6 @@ import { getActiveContext } from "../../src/spaces/context-sessions.js";
 import { createDaemonRunLifecycle } from "../../src/spaces/daemon-run-lifecycle.js";
 
 const CONFIG = {
-  bubbles: { boundaryPattern: "\\n\\s*\\n", minLength: 1, maxLength: 800 },
   activity: { summaryMaxLength: 160, detailMaxLength: 2000 },
   antigravity: { contextWindowTokens: 32768, maxInputBytes: 131072 },
   viewCompiler: {
@@ -223,7 +222,7 @@ test("failed public Root persists the concrete provider error and marks partial 
       account,
       agent,
       run,
-      input: { delta: "已经生成的部分回答", paragraphEnd: false },
+      input: { delta: "已经生成的部分回答" },
     });
     const since = hub.currentSeq();
     const result = lifecycle.updateRun({

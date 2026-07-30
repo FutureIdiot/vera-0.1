@@ -263,9 +263,8 @@ export function createDaemonRuntime({
         invalid("fileIds must be an array of strings");
       }
     } else if (kind === "appendDelta") {
-      strictObject(body, { allowed: ["delta", "paragraphEnd"], required: ["delta"] });
+      strictObject(body, { allowed: ["delta"], required: ["delta"] });
       if (typeof body.delta !== "string") invalid("delta must be a string");
-      if (body.paragraphEnd !== undefined && typeof body.paragraphEnd !== "boolean") invalid("paragraphEnd must be boolean");
     } else if (kind === "upsertActivity") {
       strictObject(body, {
         allowed: ["phase", "kind", "label", "summary", "detail", "toolStatus", "callId"],

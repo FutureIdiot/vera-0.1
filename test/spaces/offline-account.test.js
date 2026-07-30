@@ -8,7 +8,6 @@ import { postMessage } from "../../src/spaces/messages.js";
 import { createStore } from "../../src/store/store.js";
 
 const CONFIG = {
-  bubbles: { boundaryPattern: "\\n\\s*\\n", minLength: 1, maxLength: 800 },
   activity: { detailMaxLength: 2000 },
   viewCompiler: {
     groupDeltaMaxMessages: 20,

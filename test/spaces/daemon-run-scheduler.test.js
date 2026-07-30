@@ -10,7 +10,6 @@ import { getActiveContext } from "../../src/spaces/context-sessions.js";
 import { createDaemonRunScheduler } from "../../src/spaces/daemon-run-scheduler.js";
 
 const CONFIG = {
-  bubbles: { boundaryPattern: "\\n\\s*\\n", minLength: 1, maxLength: 800 },
   activity: { summaryMaxLength: 160, detailMaxLength: 2000 },
   viewCompiler: {
     groupDeltaMaxMessages: 20,

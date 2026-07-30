@@ -20,7 +20,6 @@ import {
 import { withAccountExecutionLock } from "../../src/spaces/execution-lock.js";
 
 const CONFIG = {
-  bubbles: { boundaryPattern: "\\n\\s*\\n", minLength: 1, maxLength: 800 },
   activity: { detailMaxLength: 2000 },
   viewCompiler: {
     groupDeltaMaxMessages: 20,

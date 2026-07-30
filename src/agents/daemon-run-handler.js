@@ -343,14 +343,14 @@ export function createDaemonRunHandler({
       throw new DaemonRunError("cancelled", "delegation was cancelled");
     };
     const sendRunMessage = (message = {}) => report(current.id, "/run-messages", "POST", message);
-    const onDelta = (delta, options = {}) => {
+    const onDelta = (delta) => {
       void declareAgentStatus("typing");
       if (current.outputPolicy === "source") {
-        sourceContent += `${String(delta ?? "")}${options.paragraphEnd ? "\n\n" : ""}`;
+        sourceContent += String(delta ?? "");
         return Promise.resolve(null);
       }
       return enqueue(() => report(current.id, "/delta", "POST", {
-        delta: String(delta ?? ""), ...(options.paragraphEnd ? { paragraphEnd: true } : {}),
+        delta: String(delta ?? ""),
       }));
     };
     const onMessage = (message) => {

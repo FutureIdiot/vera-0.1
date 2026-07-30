@@ -1,7 +1,7 @@
 // mock adapter（docs/adapter-interface.md 示例 C）：回显文本，供 gateway 与
 // 前端在无真实 CLI 时测试。
 //
-// - 内容带两个段落，配合 bubble-splitter 验证多气泡切分。
+// - 内容带两个段落，验证段落边界完整保留在同一 provider Message。
 // - CLI provider binding 存一个自增计数器 { count }，并把计数带进回复文本，
 //   用来黑盒验证同一 AgentSession generation 的CAS连续性。
 // - 演示一条 phase:"tool" 的 activity，同一 callId 从 pending 原地更新到

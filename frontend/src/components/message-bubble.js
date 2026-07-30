@@ -4,6 +4,7 @@
 // 不改变消息仍由 Account 署名的事实。名称优先使用冻结快照，再查当前 Account 投影。
 
 import { setIconButtonContent } from "./vector-icon.js";
+import { renderMarkdownContent } from "./markdown-content.js";
 
 const ACTIONS = [
   ["background", "garage", "Go to background"],
@@ -241,8 +242,14 @@ export function applyMessageBubble(el, item, ctx = {}) {
   authorEl.hidden = !authorName;
   workStatusEl.textContent = ctx.workStatus ?? "";
   workStatusEl.hidden = !workStatusEl.textContent;
-  textEl.textContent = item.content ?? "";
-  contentEl.classList.toggle("is-empty", !textEl.textContent);
+  const messageContent = item.content ?? "";
+  if (isUser) {
+    textEl.classList.remove("is-markdown");
+    textEl.textContent = messageContent;
+  } else {
+    renderMarkdownContent(textEl, messageContent);
+  }
+  contentEl.classList.toggle("is-empty", !messageContent);
 
   attachmentsEl.replaceChildren();
   for (const attachment of item.attachments ?? []) {

@@ -35,9 +35,6 @@ export async function run(ctx) {
       "isolation.agentState",
       "memory.injectionBudgetResidentLines",
       "memory.injectionBudgetRetrievalTokens",
-      "presentation.bubbleBoundaryPattern",
-      "presentation.bubbleMinLength",
-      "presentation.bubbleMaxLength",
     ];
     for (const key of expectedKeys) {
       assert(Object.prototype.hasOwnProperty.call(s, key), `settings should include key ${key}`);
@@ -50,9 +47,13 @@ export async function run(ctx) {
     }
     assertEqual(s["memory.injectionBudgetResidentLines"], 25);
     assertEqual(s["memory.injectionBudgetRetrievalTokens"], 384);
-    assertEqual(s["presentation.bubbleBoundaryPattern"], "\\n\\s*\\n");
-    assertEqual(s["presentation.bubbleMinLength"], 1);
-    assertEqual(s["presentation.bubbleMaxLength"], 800);
+    for (const retired of [
+      "presentation.bubbleBoundaryPattern",
+      "presentation.bubbleMinLength",
+      "presentation.bubbleMaxLength",
+    ]) {
+      assert(!Object.prototype.hasOwnProperty.call(s, retired), `${retired} must be retired`);
+    }
   });
 
   await check("n.2 isolation.memory 固定 isolated，旧值不可再写入", async () => {
@@ -87,7 +88,7 @@ export async function run(ctx) {
     assertEqual(badEnum.json.error.code, "invalid_request");
 
     const badNumber = await httpRequest("PATCH", "/api/settings", {
-      settings: { "presentation.bubbleMaxLength": "not-a-number" },
+      settings: { "appearance.bubbleGap.phone": "not-a-number" },
     });
     assertEqual(badNumber.status, 400);
     assertEqual(badNumber.json.error.code, "invalid_request");
@@ -126,12 +127,15 @@ export async function run(ctx) {
     assertEqual(get.json.settings["isolation.memory"], "isolated");
   });
 
-  await check("n.4 旧 isolation.memory 与全局 Digest override 被移除，重启幂等", async () => {
+  await check("n.4 旧 isolation.memory、全局 Digest 与机械气泡切分 override 被移除，重启幂等", async () => {
     const migDir = await mkdtemp(join(tmpdir(), "vera-settings-persist-"));
     const settingsPath = join(migDir, "settings.json");
     await writeFile(settingsPath, JSON.stringify({
       "isolation.memory": "globalReadable",
       "memory.digestTrigger": "realtime",
+      "presentation.bubbleBoundaryPattern": "\\n\\s*\\n",
+      "presentation.bubbleMinLength": 1,
+      "presentation.bubbleMaxLength": 800,
     }, null, 2), "utf8");
     const migPort1 = await getFreePort();
     const child1 = spawn(process.execPath, [join(repoRoot, "src/server.js")], {
@@ -162,17 +166,19 @@ export async function run(ctx) {
       const patchResp = await httpRequest(
         "PATCH",
         "/api/settings",
-        { settings: { "presentation.bubbleMaxLength": 1200 } },
+        { settings: { "appearance.bubbleGap.phone": 6 } },
         migPort1,
       );
       assertEqual(patchResp.status, 200);
       assertEqual(patchResp.json.settings["memory.digestTrigger"], undefined);
-      assertEqual(patchResp.json.settings["presentation.bubbleMaxLength"], 1200);
+      assertEqual(patchResp.json.settings["presentation.bubbleMaxLength"], undefined);
+      assertEqual(patchResp.json.settings["appearance.bubbleGap.phone"], 6);
 
       await killChild(child1);
       const afterFirstStart = JSON.parse(await readFile(settingsPath, "utf8"));
       assert(!Object.prototype.hasOwnProperty.call(afterFirstStart, "isolation.memory"), "legacy memory isolation override should be removed");
       assert(!Object.prototype.hasOwnProperty.call(afterFirstStart, "memory.digestTrigger"), "legacy global Digest override should be removed");
+      assert(!Object.keys(afterFirstStart).some((key) => key.startsWith("presentation.bubble")), "legacy mechanical bubble overrides should be removed");
 
       const migPort2 = await getFreePort();
       const child2 = spawn(process.execPath, [join(repoRoot, "src/server.js")], {
@@ -198,7 +204,8 @@ export async function run(ctx) {
         const get = await httpRequest("GET", "/api/settings", undefined, migPort2);
         assertEqual(get.status, 200);
         assertEqual(get.json.settings["memory.digestTrigger"], undefined);
-        assertEqual(get.json.settings["presentation.bubbleMaxLength"], 1200);
+        assertEqual(get.json.settings["presentation.bubbleMaxLength"], undefined);
+        assertEqual(get.json.settings["appearance.bubbleGap.phone"], 6);
         assertEqual(get.json.settings["isolation.memory"], "isolated");
       } finally {
         await killChild(child2);
@@ -206,6 +213,7 @@ export async function run(ctx) {
       const afterSecondStart = JSON.parse(await readFile(settingsPath, "utf8"));
       assert(!Object.prototype.hasOwnProperty.call(afterSecondStart, "isolation.memory"), "restart must not recreate memory isolation override");
       assert(!Object.prototype.hasOwnProperty.call(afterSecondStart, "memory.digestTrigger"), "restart must not recreate global Digest override");
+      assert(!Object.keys(afterSecondStart).some((key) => key.startsWith("presentation.bubble")), "restart must not recreate mechanical bubble overrides");
     } finally {
       await rm(migDir, { recursive: true, force: true });
     }

@@ -1,8 +1,8 @@
-// 把一次 run 的 onDelta 增量喂给 bubble-splitter，并把切分结果落成 Message
-// 记录 + 发出 SSE 事件序列（message.created streaming -> message.delta ×N ->
-// message.completed），一个 run 产生 N 条 Message 记录。
+// Projects one provider assistant Message into one persisted Vera Message.
+// Streaming deltas only grow the current Message; paragraph and Markdown
+// boundaries remain content. A new Message is opened only after the adapter
+// explicitly completes the previous provider Message.
 
-import { createBubbleSplitter } from "./bubble-splitter.js";
 import { newMessageId } from "../core/id.js";
 import { touchSpaceUpdatedAt } from "./spaces.js";
 
@@ -10,12 +10,11 @@ function stripInternal({ _seq, ...rest }) {
   return rest;
 }
 
-export function createBubbleStream({
-  store, hub, config, spaceId, spaceSessionId, runId,
+export function createMessageStream({
+  store, hub, spaceId, spaceSessionId, runId,
   accountId, accountNameSnapshot, executingAgentId, effectiveModel, delegated,
   onMessageCompleted = null,
 }) {
-  const splitter = createBubbleSplitter(config.bubbles);
   const replyMessageIds = [];
   let current = null;
   let targetOverride = null;
@@ -28,7 +27,7 @@ export function createBubbleStream({
   function open(initialContent = "") {
     if (!acceptsOutput()) return false;
     const now = new Date().toISOString();
-    const message = {
+    const stored = store.insert("messages", {
       id: newMessageId(),
       spaceId,
       spaceSessionId,
@@ -42,73 +41,83 @@ export function createBubbleStream({
       runId,
       status: "streaming",
       createdAt: now,
-    };
-    const stored = store.insert("messages", message);
+    });
     replyMessageIds.push(stored.id);
     hub.publish("message.created", { message: stripInternal(stored) });
     hub.publish("space.updated", { space: touchSpaceUpdatedAt(store, spaceId, now) });
     current = stored;
     if (initialContent) {
-      hub.publish("message.delta", { messageId: stored.id, spaceId, spaceSessionId, delta: initialContent });
+      hub.publish("message.delta", {
+        messageId: stored.id,
+        spaceId,
+        spaceSessionId,
+        delta: initialContent,
+      });
     }
     return true;
   }
 
-  function close(finalText, status = "completed") {
-    if (!current) return;
+  function close(status = "completed", finalContent = null) {
+    if (!current) return null;
     const authoritative = store.find("messages", current.id);
     if (!acceptsOutput() || authoritative?.status !== "streaming") {
       current = null;
-      return;
+      return null;
     }
-    const updated = store.update("messages", current.id, {
-      content: finalText,
+    const patch = {
+      content: typeof finalContent === "string" ? finalContent : authoritative.content,
       status,
-    });
+    };
+    if (targetOverride) patch.target = structuredClone(targetOverride);
+    const updated = store.update("messages", current.id, patch);
     hub.publish("message.completed", { message: stripInternal(updated) });
     if (status === "completed") onMessageCompleted?.(updated, { agentRouting });
     current = null;
+    targetOverride = null;
+    agentRouting = "default";
+    return updated;
   }
 
   function delta(text) {
     if (!text || !acceptsOutput()) return;
-    const completed = splitter.feed(text);
-
-    if (completed.length === 0) {
-      if (!current && !open()) return;
-      current = store.update("messages", current.id, { content: current.content + text });
-      hub.publish("message.delta", { messageId: current.id, spaceId, spaceSessionId, delta: text });
-      return;
-    }
-
     if (!current && !open()) return;
-    close(completed[0]);
-    for (let i = 1; i < completed.length; i += 1) {
-      open();
-      close(completed[i]);
-    }
-    const remainder = splitter.peek();
-    if (remainder) open(remainder);
+    current = store.update("messages", current.id, {
+      content: `${current.content}${text}`,
+    });
+    hub.publish("message.delta", {
+      messageId: current.id,
+      spaceId,
+      spaceSessionId,
+      delta: text,
+    });
   }
 
-  // run 结束（成功/失败/取消）时调用：把剩余未定稿的文本收尾成最后一个气泡，
-  // 不留任何 status: "streaming" 的悬空消息。
-  // fallbackContent：adapter 允许不调 onDelta 只在返回值里给全文
-  // （adapter-interface.md「run() 返回」），零 delta 时用它兜底产气泡。
-  function finish(fallbackContent, target = null, nextAgentRouting = "default") {
+  // Completes the current provider Message. If the adapter did not stream,
+  // content creates the complete fallback Message. A later complete() call
+  // therefore represents a real next provider Message.
+  function complete(content, target = null, nextAgentRouting = "default") {
+    if (!acceptsOutput()) {
+      current = null;
+      return null;
+    }
+    targetOverride = target ? structuredClone(target) : null;
+    agentRouting = nextAgentRouting;
+    if (!current && typeof content === "string" && content) open(content);
+    return close("completed", typeof content === "string" ? content : null);
+  }
+
+  function finish(fallbackContent) {
     if (!acceptsOutput()) {
       current = null;
       return;
     }
-    if (target) targetOverride = structuredClone(target);
-    agentRouting = nextAgentRouting;
-    if (replyMessageIds.length === 0 && !splitter.peek() && fallbackContent) {
-      delta(fallbackContent);
+    if (current) {
+      close();
+      return;
     }
-    const rest = splitter.flush();
-    for (const text of rest) {
-      if (!current) open();
-      close(text);
+    if (replyMessageIds.length === 0 && fallbackContent) {
+      open(fallbackContent);
+      close();
     }
   }
 
@@ -117,13 +126,10 @@ export function createBubbleStream({
       current = null;
       return;
     }
-    if (replyMessageIds.length === 0 && !splitter.peek() && fallbackContent) {
-      delta(fallbackContent);
-    }
-    const rest = splitter.flush();
-    for (const text of rest) {
-      if (!current) open();
-      close(text, "failed");
+    if (!current && replyMessageIds.length === 0 && fallbackContent) open(fallbackContent);
+    if (current) {
+      close("failed");
+      return;
     }
     const messageId = replyMessageIds.at(-1);
     const message = messageId ? store.find("messages", messageId) : null;
@@ -134,6 +140,7 @@ export function createBubbleStream({
 
   return {
     delta,
+    complete,
     finish,
     fail,
     get replyMessageIds() {

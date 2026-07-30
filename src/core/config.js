@@ -15,12 +15,6 @@ const DEFAULTS = {
   store: {
     debounceMs: 200,
   },
-  // 多气泡规则（api-contract.md）：按段落边界切分流式回复。
-  bubbles: {
-    boundaryPattern: "\\n\\s*\\n",
-    minLength: 1,
-    maxLength: 800,
-  },
   activity: {
     summaryMaxLength: 160,
     detailMaxLength: 2000,
@@ -252,11 +246,6 @@ export function loadConfig(env = process.env) {
     },
     store: {
       debounceMs: num(env.VERA_STORE_DEBOUNCE_MS, DEFAULTS.store.debounceMs),
-    },
-    bubbles: {
-      boundaryPattern: env.VERA_BUBBLE_BOUNDARY_PATTERN || DEFAULTS.bubbles.boundaryPattern,
-      minLength: num(env.VERA_BUBBLE_MIN_LENGTH, DEFAULTS.bubbles.minLength),
-      maxLength: num(env.VERA_BUBBLE_MAX_LENGTH, DEFAULTS.bubbles.maxLength),
     },
     activity: {
       summaryMaxLength: num(env.VERA_ACTIVITY_SUMMARY_MAX_LENGTH, DEFAULTS.activity.summaryMaxLength),

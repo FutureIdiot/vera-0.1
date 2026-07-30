@@ -281,7 +281,7 @@ export function executeRun({
       effectiveModel: runtime.model ?? "",
       delegated: agent.id !== account.ownerAgentId,
     });
-    const { bubbles, onActivity, requestApproval } = output;
+    const { messages, onActivity, requestApproval } = output;
 
     let bindingRotationUsed = false;
     const ctx = {
@@ -296,7 +296,16 @@ export function executeRun({
       providerBinding,
       historyVersion: runtime.kind === "api" ? historyVersion : undefined,
       workspacePath: process.cwd(),
-      onDelta: (text) => bubbles.delta(text),
+      onDelta: (text) => messages.delta(text),
+      onMessage: (message) => {
+        const structured = message && typeof message === "object" ? message : null;
+        const content = typeof message === "string" ? message : structured?.content;
+        return messages.complete(
+          typeof content === "string" ? content : "",
+          structured?.target,
+          structured?.agentRouting,
+        );
+      },
       onActivity,
       requestApproval,
       persistProviderBinding: (providerState, ifVersion) => {
@@ -314,7 +323,7 @@ export function executeRun({
         if (!["missing", "invalid"].includes(reason)) {
           throw new ApiError("invalid_request", "provider binding rotation reason is invalid");
         }
-        if (bindingRotationUsed || bubbles.replyMessageIds.length > 0) {
+        if (bindingRotationUsed || messages.replyMessageIds.length > 0) {
           throw new ApiError("conflict", "provider binding can rotate only once before the first reply");
         }
         bindingRotationUsed = true;
@@ -347,9 +356,9 @@ export function executeRun({
     let runError = null;
     try {
       const result = await adapter.run(ctx);
-      bubbles.finish(result?.content);
+      messages.finish(result?.content);
       if (runtime.kind === "api") {
-        const replies = bubbles.replyMessageIds.map((id) => store.find("messages", id));
+        const replies = messages.replyMessageIds.map((id) => store.find("messages", id));
         if (replies.length === 0 || replies.some((message) => message?.status !== "completed")) {
           throw new ApiError("history_conflict", "API Run has no completed reply Messages");
         }
@@ -426,7 +435,7 @@ export function executeRun({
         runError = error;
       }
       if (status === "failed") {
-        bubbles.fail();
+        messages.fail();
         onActivity(runFailureActivity({
           code: runError?.code ?? "internal",
           message: runError instanceof AdapterError || runError instanceof ApiError
@@ -434,13 +443,13 @@ export function executeRun({
             : "Run 执行失败。",
         }));
       } else {
-        bubbles.finish();
+        messages.finish();
       }
     }
-    await finishRunning({ status, error: runError, bubbles });
+    await finishRunning({ status, error: runError, messages });
   }
 
-  async function finishRunning({ status, error, bubbles }) {
+  async function finishRunning({ status, error, messages }) {
     abortControllers.delete(storedRun.id);
     const current = store.find("runs", storedRun.id);
     if (!current || !["pending", "running"].includes(current.status)) {
@@ -453,7 +462,7 @@ export function executeRun({
     const patch = {
       status: controller.signal.aborted ? "cancelled" : status,
       endedAt: new Date().toISOString(),
-      replyMessageIds: bubbles?.replyMessageIds ?? [],
+      replyMessageIds: messages?.replyMessageIds ?? [],
     };
     if (error) patch.error = {
       code: code ?? "internal",

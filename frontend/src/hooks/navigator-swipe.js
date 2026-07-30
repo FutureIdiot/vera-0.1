@@ -12,6 +12,16 @@ export function attachNavigatorSwipe(element, {
   let suppressClick = false;
   let suppressionTimer = null;
 
+  function commitSwipe(event, { open }) {
+    start = null;
+    event.preventDefault();
+    suppressClick = true;
+    clearTimeout(suppressionTimer);
+    suppressionTimer = setTimeout(() => { suppressClick = false; }, 400);
+    if (open) onClose?.();
+    else onOpen?.();
+  }
+
   function onPointerDown(event) {
     if (event.pointerType !== "touch" || !isEnabled()) return;
     const open = Boolean(isOpen());
@@ -34,6 +44,8 @@ export function attachNavigatorSwipe(element, {
     }
     if (Math.abs(dx) > intentPx && Math.abs(dx) > Math.abs(dy) * axisRatio) {
       event.preventDefault();
+      const committed = Math.abs(dx) > thresholdPx && (start.open ? dx < 0 : dx > 0);
+      if (committed) commitSwipe(event, start);
     }
   }
 
@@ -46,12 +58,7 @@ export function attachNavigatorSwipe(element, {
     const horizontal = Math.abs(dx) > thresholdPx && Math.abs(dx) > dy * axisRatio;
     const committed = horizontal && (open ? dx < 0 : dx > 0);
     if (!committed) return;
-    event.preventDefault();
-    suppressClick = true;
-    clearTimeout(suppressionTimer);
-    suppressionTimer = setTimeout(() => { suppressClick = false; }, 0);
-    if (open) onClose?.();
-    else onOpen?.();
+    commitSwipe(event, { open });
   }
 
   function onClick(event) {

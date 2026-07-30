@@ -23,33 +23,23 @@ export async function run(ctx) {
     }
   });
 
-  await check("q.2 presentation settings hot-update the active bubble consumer", async () => {
-    const created = await createOnlineMockAccount({ name: "F4 bubble runtime" });
-    const agentId = created.agent.id;
+  await check("q.2 provider paragraphs remain in one Message", async () => {
+    const created = await createOnlineMockAccount({ name: "F4 provider message" });
     const accountId = created.account.id;
-    const space = await httpRequest("POST", "/api/spaces", { name: "F4 bubble runtime", seats: [{ accountId }] });
+    const space = await httpRequest("POST", "/api/spaces", { name: "F4 provider message", seats: [{ accountId }] });
     assertEqual(space.status, 201);
-    const setting = await httpRequest("PATCH", "/api/settings", {
-      settings: {
-        "presentation.bubbleBoundaryPattern": "\\n\\s*\\n",
-        "presentation.bubbleMinLength": 1,
-        "presentation.bubbleMaxLength": 20,
-      },
-    });
-    assertEqual(setting.status, 200);
     const sent = await httpRequest("POST", `/api/spaces/${space.json.space.id}/messages`, {
       author: { type: "user", userId: "owner" },
       target: { type: "direct", accountIds: [accountId] },
-      content: "runtime-setting-abcdefghijklmnopqrstuvwxyz",
+      content: "provider-message-boundary",
     });
     assertEqual(sent.status, 201);
     const runId = sent.json.runs[0].id;
     await sse.waitFor((event) => event.type === "run.ended" && event.data.run.id === runId);
     const timeline = await httpRequest("GET", `/api/spaces/${space.json.space.id}/timeline?limit=100`);
     const replies = timeline.json.items.filter((item) => item.itemType === "message" && item.runId === runId);
-    assert(replies.length > 2, `20-char runtime max should split the mock reply into several bubbles, got ${JSON.stringify(replies.map((item) => item.content))}`);
-    assert(replies.every((item) => item.content.length <= 20), "every committed reply bubble should obey the live max");
-    await httpRequest("PATCH", "/api/settings", { settings: { "presentation.bubbleMaxLength": null } });
+    assertEqual(replies.length, 1);
+    assert(replies[0].content.includes("\n\n"), "mock provider paragraphs should remain in one Message");
   });
 
   await check("q.3 resident-index budget hot-updates before a new external session", async () => {

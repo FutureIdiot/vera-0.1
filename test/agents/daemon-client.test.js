@@ -133,7 +133,7 @@ test("CLI isolated input stays isolated and does not submit API history", async 
   let received;
   const { client, calls } = fixture({ envelopes: [requested(input, { effectiveModel: "model_b" })], executor: async (context) => {
     received = { input: context.input, effectiveModel: context.run.effectiveModel };
-    await context.onDelta("done", { paragraphEnd: true });
+    await context.onDelta("done");
     return { content: "done" };
   } });
   await client.start();
@@ -142,7 +142,7 @@ test("CLI isolated input stays isolated and does not submit API history", async 
 
   assert.deepEqual(received, { input, effectiveModel: "model_b" });
   assert.equal(calls.some((call) => call.url.endsWith("/api-result")), false);
-  assert.equal(calls.find((call) => call.url.endsWith("/delta")).body.paragraphEnd, true);
+  assert.deepEqual(calls.find((call) => call.url.endsWith("/delta")).body, { delta: "done" });
   const statePatches = calls
     .filter((call) => call.method === "PATCH" && call.body?.agentState)
     .map((call) => call.body.agentState.status);

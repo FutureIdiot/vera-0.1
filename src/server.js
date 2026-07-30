@@ -230,7 +230,7 @@ async function executeMemoryDream({ job, payload, signal }) {
   return adapter.dreamMemory({ runtime, taskModel, payload, signal });
 }
 
-applyRuntimeSettings({ settings: settingsStore.getAll(), config, memoryRetrieval });
+applyRuntimeSettings({ settings: settingsStore.getAll(), memoryRetrieval });
 const memoryDigestService = createMemoryDigestService({
   store,
   memory,
@@ -384,7 +384,7 @@ registerMemoryRoutes(router, {
 registerSettingsRoutes(router, {
   settingsStore,
   onSettingsChanged: (settings) => {
-    applyRuntimeSettings({ settings, config, memoryRetrieval });
+    applyRuntimeSettings({ settings, memoryRetrieval });
   },
 });
 registerSystemUpdateRoutes(router, { updateControl });

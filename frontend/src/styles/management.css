@@ -29,7 +29,14 @@
 
 .vera-settings-index,
 .vera-management-content,
-.vera-management-form { display: grid; gap: var(--vera-space-lg); overflow-y: auto; padding: var(--vera-space-md) var(--vera-window-margin) var(--vera-space-lg); }
+.vera-management-form {
+  display: grid;
+  flex: 1;
+  gap: var(--vera-space-lg);
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--vera-space-md) var(--vera-window-margin) var(--vera-space-lg);
+}
 .vera-management-section,
 .vera-status-card { min-width: 0; }
 .vera-management-section h2,

@@ -79,13 +79,12 @@ export function createDaemonRunLifecycle({
   function appendDelta({ account, agent, run, input }) {
     if (run.outputPolicy === "source") {
       const current = sourceOutputs.get(run.id) ?? "";
-      sourceOutputs.set(run.id, `${current}${input.delta ?? ""}${input.paragraphEnd ? "\n\n" : ""}`);
+      sourceOutputs.set(run.id, `${current}${input.delta ?? ""}`);
       return { replyMessageIds: [] };
     }
     const output = outputFor(run, agent, account);
-    if (input.delta) output.bubbles.delta(input.delta);
-    if (input.paragraphEnd) output.bubbles.delta("\n\n");
-    return { replyMessageIds: [...output.bubbles.replyMessageIds] };
+    if (input.delta) output.messages.delta(input.delta);
+    return { replyMessageIds: [...output.messages.replyMessageIds] };
   }
 
   function createMessage({ account, agent, run, input }) {
@@ -97,15 +96,14 @@ export function createDaemonRunLifecycle({
     }
     const output = outputFor(run, agent, account);
     // The daemon may stream deltas and then submit the authoritative full
-    // content. In that case the POST is a finalize signal, not a second copy.
-    // If no delta was sent, the full content is the fallback bubble.
-    output.bubbles.finish(
-      output.bubbles.replyMessageIds.length ? undefined : input.content,
+    // content. In that case this completes the current provider Message.
+    // Without deltas, content creates that complete provider Message.
+    const completed = output.messages.complete(
+      input.content,
       input.target,
       input.agentRouting,
     );
-    const messageId = output.bubbles.replyMessageIds.at(-1);
-    return { message: messageId ? stripInternal(store.find("messages", messageId)) : null };
+    return { message: completed ? stripInternal(completed) : null };
   }
 
   function upsertActivity({ account, agent, run, input }) {
@@ -204,15 +202,15 @@ export function createDaemonRunLifecycle({
     const output = current.outputPolicy === "space" ? outputFor(current, agent, account) : null;
     if (input.status === "failed") {
       const error = input.error ?? { code: "internal", message: "Run 执行失败。" };
-      output?.bubbles.fail();
+      output?.messages.fail();
       output?.onActivity(runFailureActivity(error));
     } else {
-      output?.bubbles.finish();
+      output?.messages.finish();
     }
     expirePendingApprovalsForRun(store, hub, current.id);
     const replyMessageIds = [...new Set([
       ...(current.replyMessageIds ?? []),
-      ...(output?.bubbles.replyMessageIds ?? []),
+      ...(output?.messages.replyMessageIds ?? []),
       ...store.list("messages").filter((message) => message.runId === current.id).map((message) => message.id),
     ])];
     let shouldCompact = false;
@@ -394,11 +392,11 @@ export function createDaemonRunLifecycle({
     const account = store.find("accounts", current.accountId);
     const agent = store.find("agents", current.agentId);
     const output = outputs.get(current.id);
-    output?.bubbles.finish();
+    output?.messages.finish();
     expirePendingApprovalsForRun(store, hub, current.id);
     const replyMessageIds = [...new Set([
       ...(current.replyMessageIds ?? []),
-      ...(output?.bubbles.replyMessageIds ?? []),
+      ...(output?.messages.replyMessageIds ?? []),
       ...store.list("messages").filter((message) => message.runId === current.id).map((message) => message.id),
     ])];
     if (current.outputPolicy === "source") {

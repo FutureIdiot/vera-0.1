@@ -54,3 +54,14 @@ test("navigator swipe closes with a leftward horizontal touch while open", () =>
   assert.equal(closes, 1);
   detach();
 });
+
+test("navigator swipe commits before a mobile pointer cancellation", () => {
+  const { element, listeners } = fixture();
+  let opens = 0;
+  const detach = attachNavigatorSwipe(element, { onOpen: () => { opens += 1; } });
+  listeners.get("pointerdown")(pointerEvent(40, 100));
+  listeners.get("pointermove")(pointerEvent(110, 104));
+  listeners.get("pointercancel")(pointerEvent(110, 104));
+  assert.equal(opens, 1);
+  detach();
+});

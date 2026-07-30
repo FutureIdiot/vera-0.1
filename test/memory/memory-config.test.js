@@ -65,7 +65,7 @@ test("legacy global Digest settings migrate once into every existing Agent and l
     }
     const persisted = JSON.parse(await readFile(join(dataPath, "settings.json"), "utf8"));
     assert.equal(Object.keys(persisted).some((key) => key.startsWith("memory.digest")), false);
-    assert.equal(persisted["presentation.bubbleMaxLength"], 900);
+    assert.equal("presentation.bubbleMaxLength" in persisted, false);
     await assert.rejects(() => settingsStore.setAll({ "memory.digestTrigger": "manual" }),
       (error) => error.code === "invalid_request");
 

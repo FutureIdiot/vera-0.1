@@ -30,8 +30,9 @@ export async function run(ctx) {
     const firstCreated = related.find((e) => e.type === "message.created");
     assertEqual(firstCreated.data.message.status, "streaming", "first bubble should be created as streaming");
 
-    const completedCount = related.filter((e) => e.type === "message.completed").length;
-    assert(completedCount >= 2, `expected >=2 message.completed bubbles (mock replies with two paragraphs), got ${completedCount}`);
+    const completed = related.filter((e) => e.type === "message.completed");
+    assertEqual(completed.length, 1, "one provider response should complete one Message");
+    assert(completed[0].data.message.content.includes("\n\n"), "paragraph boundaries must remain inside the Message");
   });
 
   await check("f. seq is strictly monotonic across all captured events", async () => {

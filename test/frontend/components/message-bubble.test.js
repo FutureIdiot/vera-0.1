@@ -37,7 +37,7 @@ class FakeElement {
   }
 
   get textContent() {
-    return this._textContent;
+    return this._textContent + this.children.map((child) => child.textContent ?? "").join("");
   }
 
   set textContent(value) {
@@ -137,6 +137,47 @@ test("group Account message uses top-level frozen identity and model fields", ()
   }
 });
 
+test("Account replies render GFM blocks without turning remote images into active content", () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    createElement: (tagName) => new FakeElement(tagName),
+    createElementNS: (_namespace, tagName) => new FakeElement(tagName),
+  };
+  try {
+    const bubble = renderMessageBubble({
+      id: "msg_markdown",
+      itemType: "message",
+      status: "completed",
+      author: { type: "account", accountId: "acc_one" },
+      content: [
+        "**结论**",
+        "",
+        "| A | B |",
+        "|---|---|",
+        "| 1 | 2 |",
+        "",
+        "```js",
+        "const value = veryLongExpression();",
+        "```",
+        "",
+        "![diagram](https://example.com/diagram.png)",
+      ].join("\n"),
+    });
+
+    const text = bubble.querySelector(".vera-bubble__text");
+    const markdown = text.children[0];
+    assert.equal(text.classList.contains("is-markdown"), true);
+    assert.equal(markdown.className, "vera-markdown");
+    assert.equal(markdown.children[0].children[0].tagName, "strong");
+    assert.equal(markdown.children.some((child) => child.className === "vera-markdown__table-wrap"), true);
+    assert.equal(markdown.children.some((child) => child.tagName === "pre"), true);
+    assert.equal(markdown.children.some((child) => child.tagName === "img"), false);
+    assert.match(text.textContent, /图片：diagram/u);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
 test("private Account message hides the repeated name and model", () => {
   const previousDocument = globalThis.document;
   globalThis.document = {
@@ -168,7 +209,7 @@ test("private Account message hides the repeated name and model", () => {
   }
 });
 
-test("only the latest split bubble exposes the avatar and tail", () => {
+test("only the latest provider Message exposes the avatar and tail", () => {
   const previousDocument = globalThis.document;
   globalThis.document = {
     createElement: (tagName) => new FakeElement(tagName),
@@ -425,7 +466,7 @@ test("a new user message moves the tail from the former latest bubble", () => {
   assert.equal(resolveMessageGrouping(items, 1).showTail, true);
 });
 
-test("new split bubble moves the avatar from the former latest bubble", () => {
+test("a new provider Message moves the avatar from the former latest bubble", () => {
   const first = accountMessage("msg_1", "run_1");
   assert.equal(resolveMessageGrouping([first], 0, { isGroupChat: true }).showAvatar, true);
 

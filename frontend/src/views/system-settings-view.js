@@ -20,14 +20,6 @@ const GROUPS = [
       ["memory.injectionBudgetRetrievalTokens", "每轮记忆检索 Token 预算", "number", { min: 0, max: 4096, step: 1 }],
     ],
   },
-  {
-    title: "消息呈现",
-    fields: [
-      ["presentation.bubbleBoundaryPattern", "段落边界正则", "text"],
-      ["presentation.bubbleMinLength", "单气泡最短长度", "number", { min: 0, step: 1 }],
-      ["presentation.bubbleMaxLength", "单气泡最长长度", "number", { min: 0, step: 1 }],
-    ],
-  },
 ];
 
 const ACTIVE_UPDATE_STATES = new Set(["checking", "queued", "updating"]);

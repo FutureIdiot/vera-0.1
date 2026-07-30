@@ -33,10 +33,6 @@ const ALLOWED_KEYS = {
   // Memory注入预算仍是gateway全局配置；Digest触发已迁移为per-Agent配置。
   "memory.injectionBudgetResidentLines": { type: "number", min: 0 },
   "memory.injectionBudgetRetrievalTokens": { type: "number", min: 0, max: 4096, integer: true },
-  // 消息呈现（ground truth 4.1「消息呈现」：气泡切分规则）
-  "presentation.bubbleBoundaryPattern": { type: "string" },
-  "presentation.bubbleMinLength": { type: "number", min: 0 },
-  "presentation.bubbleMaxLength": { type: "number", min: 0 },
   // Appearance（ground truth 4.3 / api-contract.md Appearance 字段 [P4.6/F1]）
   "appearance.theme": { type: "enum", values: ["system", "light", "dark", "custom"] },
   "appearance.themeId": { type: "string" },
@@ -60,6 +56,11 @@ const ALLOWED_KEYS = {
   "paths.filesAttachmentsPath": { type: "string" },
   "paths.gateway.dataPath": { type: "string" },
 };
+const RETIRED_PRESENTATION_KEYS = new Set([
+  "presentation.bubbleBoundaryPattern",
+  "presentation.bubbleMinLength",
+  "presentation.bubbleMaxLength",
+]);
 
 // 从传入的 config 派生默认值（构造时一次性拍快照）。defaults 不写盘，只用于
 // getAll 合并视图。config 仍是启动默认 source，settings 覆盖之。
@@ -77,9 +78,6 @@ function deriveDefaults(config) {
     "isolation.agentState": "globalVisible",
     "memory.injectionBudgetResidentLines": config.memory.residentIndexMaxLines,
     "memory.injectionBudgetRetrievalTokens": config.memory.retrievalTokenBudget,
-    "presentation.bubbleBoundaryPattern": config.bubbles.boundaryPattern,
-    "presentation.bubbleMinLength": config.bubbles.minLength,
-    "presentation.bubbleMaxLength": config.bubbles.maxLength,
     "appearance.theme": a.theme ?? "system",
     "appearance.themeId": a.themeId ?? null,
     "appearance.themeColor": a.themeColor ?? "",
@@ -170,6 +168,9 @@ export async function createSettingsStore({ dataPath, config, debounceMs = 200 }
       }
     }
     if (Object.prototype.hasOwnProperty.call(parsed, "isolation.memory")) {
+      dirty = true;
+    }
+    if ([...RETIRED_PRESENTATION_KEYS].some((key) => Object.prototype.hasOwnProperty.call(parsed, key))) {
       dirty = true;
     }
     if (dirty) await flush();

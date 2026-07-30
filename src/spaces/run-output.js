@@ -1,7 +1,7 @@
 import { newActivityId } from "../core/id.js";
 import { inferToolActivityKind, normalizeActivityKind } from "../core/activity-events.js";
 import { requestApproval } from "./approvals.js";
-import { createBubbleStream } from "./bubble-stream.js";
+import { createMessageStream } from "./message-stream.js";
 
 function stripInternal({ _seq, ...rest }) {
   return rest;
@@ -33,10 +33,9 @@ export function createRunOutput({
   projectActivity = (activity) => activity,
   onMessageCompleted = null,
 }) {
-  const bubbles = createBubbleStream({
+  const messages = createMessageStream({
     store,
     hub,
-    config,
     spaceId,
     spaceSessionId,
     runId,
@@ -96,7 +95,7 @@ export function createRunOutput({
   }
 
   return {
-    bubbles,
+    messages,
     onActivity,
     requestApproval: (req) => acceptsOutput()
       ? requestApproval({
