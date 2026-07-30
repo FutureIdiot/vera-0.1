@@ -97,7 +97,14 @@ export function createMockAdapter({ chunkDelayMs = 30, approvalTimeoutMs = 15000
       let paragraph2 = `会话计数器已更新为 ${count}，可用于验证连续性。`;
       if (prompt.text.includes("!!approve")) {
         const answer = await raceTimeout(
-          requestApproval({ prompt: "mock 请求执行 rm -rf ./dist，允许吗？", options: ["allow", "deny"] }),
+          requestApproval({
+            prompt: "mock 请求执行 rm -rf ./dist，允许吗？",
+            options: ["allow", "deny"],
+            sessionRule: {
+              key: "mock.remove-build-output",
+              label: "Allow similar cleanup commands for this session",
+            },
+          }),
           approvalTimeoutMs,
         );
         paragraph2 =

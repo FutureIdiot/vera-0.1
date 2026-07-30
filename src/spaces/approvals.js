@@ -25,6 +25,12 @@ export function createApprovalRequest({ store, hub, spaceId, spaceSessionId, run
     agentId,
     prompt: req?.prompt ?? "",
     options: req?.options ?? ["allow", "deny"],
+    ...(req?.sessionRule ? {
+      sessionRule: {
+        key: req.sessionRule.key,
+        label: req.sessionRule.label,
+      },
+    } : {}),
     status: "pending",
     answer: null,
     createdAt: new Date().toISOString(),
@@ -48,6 +54,10 @@ export function answerApproval(store, hub, id, answer) {
   if (!approval) throw new ApiError("not_found", `approval ${id} does not exist`);
   if (approval.status !== "pending") {
     throw new ApiError("conflict", `approval ${id} is already ${approval.status}`);
+  }
+  if (typeof answer !== "string" || !approval.options.includes(answer) ||
+      (answer === "allow_session" && !approval.sessionRule)) {
+    throw new ApiError("invalid_request", "answer is not available for this approval");
   }
   const updated = store.update("approvals", id, { status: "answered", answer });
   hub.publish("approval.answered", { approval: stripInternal(updated) });

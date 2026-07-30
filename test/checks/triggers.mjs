@@ -67,6 +67,8 @@ export async function run(ctx) {
     const requested = await sse.waitFor((e) => e.type === "approval.requested" && e.data.approval.runId === ctx.approveRunId, 10000);
     assertEqual(requested.data.approval.status, "pending");
     assert(Array.isArray(requested.data.approval.options) && requested.data.approval.options.includes("allow"));
+    assert(requested.data.approval.options.includes("allow_session"));
+    assertEqual(requested.data.approval.sessionRule?.key, "mock.remove-build-output");
     ctx.approvalId = requested.data.approval.id;
   });
 

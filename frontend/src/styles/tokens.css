@@ -42,10 +42,10 @@
   --vera-color-activity-tool-border: color-mix(in srgb, var(--vera-color-muted-text), transparent 58%);
   --vera-color-activity-tool-label: var(--vera-color-muted-text);
   --vera-color-activity-detail-bg: color-mix(in srgb, var(--vera-color-background), transparent 38%);
-  --vera-color-approval-bg: var(--vera-color-warning-soft);
-  --vera-color-approval-border: var(--vera-color-warning);
-  --vera-color-approval-answered-bg: var(--vera-color-surface);
-  --vera-color-approval-answered-border: var(--vera-color-border);
+  --vera-color-approval-bg: var(--vera-color-surface-strong);
+  --vera-color-approval-border: var(--vera-color-border);
+  --vera-color-approval-action-bg: var(--vera-color-text);
+  --vera-color-approval-action-text: var(--vera-color-background);
 
   --vera-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --vera-font-family-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -104,6 +104,9 @@
   --vera-composer-height: 48px;
   --vera-composer-control-size: 36px;
   --vera-composer-input-max-height: 160px;
+  --vera-approval-max-width: 920px;
+  --vera-approval-icon-size: 18px;
+  --vera-approval-menu-width: 280px;
   --vera-session-ring-track-opacity: 0.24;
   --vera-activity-detail-max-height: 192px;
   --vera-activity-icon-size: 16px;

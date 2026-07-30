@@ -111,6 +111,10 @@ test("!!approve triggers requestApproval and reply carries the answer", async ()
   const result = await adapter.run(ctx);
   assert.equal(requests.length, 1);
   assert.deepEqual(requests[0].options, ["allow", "deny"]);
+  assert.deepEqual(requests[0].sessionRule, {
+    key: "mock.remove-build-output",
+    label: "Allow similar cleanup commands for this session",
+  });
   assert.match(result.content, /审批结果：allow/);
 });
 

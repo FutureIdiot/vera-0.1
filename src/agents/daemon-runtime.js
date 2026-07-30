@@ -289,10 +289,33 @@ export function createDaemonRuntime({
         }
       }
     } else if (kind === "createApproval") {
-      strictObject(body, { allowed: ["prompt", "options"], required: ["prompt", "options"] });
+      strictObject(body, {
+        allowed: ["prompt", "options", "sessionRule"],
+        required: ["prompt", "options"],
+      });
       if (typeof body.prompt !== "string" || !Array.isArray(body.options) ||
-          body.options.length === 0 || body.options.some((option) => typeof option !== "string" || !option)) {
+          body.options.length === 0 || new Set(body.options).size !== body.options.length ||
+          body.options.some((option) => !["allow", "allow_session", "deny"].includes(option)) ||
+          !body.options.includes("allow") || !body.options.includes("deny")) {
         invalid("approval prompt and options are invalid");
+      }
+      if (body.sessionRule === undefined && body.options.includes("allow_session")) {
+        invalid("allow_session requires sessionRule");
+      }
+      if (body.sessionRule !== undefined) {
+        strictObject(body.sessionRule, {
+          allowed: ["key", "label"],
+          required: ["key", "label"],
+          name: "sessionRule",
+        });
+        if (typeof body.sessionRule.key !== "string" ||
+            !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(body.sessionRule.key) ||
+            typeof body.sessionRule.label !== "string" ||
+            !body.sessionRule.label.trim() || body.sessionRule.label.length > 160 ||
+            /[\r\n]/u.test(body.sessionRule.label) ||
+            !body.options.includes("allow_session")) {
+          invalid("approval sessionRule is invalid");
+        }
       }
     }
     const authority = await runAuthority(runId, headers);

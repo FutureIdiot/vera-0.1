@@ -7,7 +7,7 @@ import {
   resolveMessageGrouping,
 } from "../components/message-bubble.js";
 import { renderActivity, applyActivity } from "../components/activity-item.js";
-import { renderApprovalCard, applyApprovalCard } from "../components/approval-card.js";
+import { renderApprovalCard } from "../components/approval-card.js";
 import { createComposer } from "../components/composer.js";
 import { createRunProgress } from "../components/run-progress.js";
 import { renderRunMessageCard } from "../components/run-message-card.js";
@@ -104,6 +104,10 @@ export function mountSpaceView({
   const forgeContextHost = document.createElement("div");
   forgeContextHost.className = "vera-forge-context-host";
   forgeContextHost.hidden = true;
+  const approvalHost = document.createElement("div");
+  approvalHost.className = "vera-approval-host";
+  approvalHost.hidden = true;
+  approvalHost.setAttribute("aria-live", "assertive");
   const spaces = createSpacesClient(createHttpClient(platform));
   const files = createFilesClient(createHttpClient(platform));
   const accountNameById = new Map();
@@ -175,10 +179,33 @@ export function mountSpaceView({
     }
   }
 
+  function approvalRequesterName(approval) {
+    const bootstrap = runtime.getBootstrap();
+    const account = (bootstrap.accounts ?? []).find((candidate) => candidate.ownerAgentId === approval.agentId);
+    return account?.name
+      ?? (bootstrap.agents ?? []).find((candidate) => candidate.id === approval.agentId)?.name
+      ?? "Permission request";
+  }
+
+  function syncApprovalHost(items = store.getOrderedItems()) {
+    const pending = items.filter((item) => item.itemType === "approval" && item.status === "pending");
+    approvalHost.replaceChildren();
+    approvalHost.hidden = pending.length === 0;
+    if (composer?.element) composer.element.hidden = pending.length > 0;
+    if (!pending.length) return;
+    approvalHost.appendChild(renderApprovalCard(pending[0], {
+      onAnswer: handleAnswer,
+      onError: (error) => setStatus(`权限操作失败：${error.message}`),
+      requesterName: approvalRequesterName(pending[0]),
+      position: 1,
+      total: pending.length,
+    }));
+  }
+
   function renderItem(item, items, index) {
     if (item.itemType === "message") return renderMessageBubble(item, messageContext(items, index));
     if (item.itemType === "activity") return renderActivity(item, activityContext());
-    if (item.itemType === "approval") return renderApprovalCard(item, { onAnswer: handleAnswer });
+    if (item.itemType === "approval") return null;
     if (item.itemType === "run-message") {
       return renderRunMessageCard(item, {
         onReply: (message, content) => spaces.replyToBackgroundRun(message.rootRunId, {
@@ -195,7 +222,7 @@ export function mountSpaceView({
   function applyItem(element, item, items, index) {
     if (item.itemType === "message") return applyMessageBubble(element, item, messageContext(items, index));
     if (item.itemType === "activity") return applyActivity(element, item, activityContext());
-    if (item.itemType === "approval") return applyApprovalCard(element, item, { onAnswer: handleAnswer });
+    if (item.itemType === "approval") return;
   }
 
   function refreshMessageBubble(items, index) {
@@ -252,6 +279,7 @@ export function mountSpaceView({
 
   const unsubscribeStore = store.subscribe((items, changedKey, removedKeys) => {
     if (!mounted) return;
+    syncApprovalHost(items);
     for (const removedKey of removedKeys) {
       nodeByKey.get(removedKey)?.remove();
       nodeByKey.delete(removedKey);
@@ -732,7 +760,8 @@ export function mountSpaceView({
   });
   if (cachedTimeline) composer.setDisabled(Boolean(space.archivedAt));
   const unsubscribeRuntime = runtime.subscribe(handleRuntimeEvent, { since: latestSeq });
-  root.appendChild(composer.element);
+  root.append(approvalHost, composer.element);
+  syncApprovalHost();
 
   olderButton.addEventListener("click", async () => {
     if (!space || !hasOlder || loadingOlder) return;

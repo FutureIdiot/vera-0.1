@@ -136,7 +136,19 @@ test("daemon Run endpoints authenticate the current Session lease and delegate s
       ["POST", "/api/agent/runs/run_runtime/activities", {
         phase: "coding", kind: "status", summary: "正在编码", callId: "call-1",
       }, 200],
-      ["POST", "/api/agent/runs/run_runtime/approvals", { prompt: "allow?", options: ["allow", "deny"] }, 201],
+      [
+        "POST",
+        "/api/agent/runs/run_runtime/approvals",
+        {
+          prompt: "allow?",
+          options: ["allow", "allow_session", "deny"],
+          sessionRule: {
+            key: "runtime.remove-build-output",
+            label: "Allow similar cleanup commands for this session",
+          },
+        },
+        201,
+      ],
       ["PATCH", "/api/agent/runs/run_runtime", {
         status: "completed",
         usage: {

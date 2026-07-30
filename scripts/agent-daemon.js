@@ -107,6 +107,7 @@ export async function main({ env = process.env, fetchImpl = globalThis.fetch, ex
         signal: context.signal,
         onDelta: context.onDelta,
         onActivity: context.onActivity,
+        requestApproval: context.requestApproval,
         persistProviderBinding: context.persistProviderBinding,
         rotateProviderBinding: context.rotateProviderBinding,
         delegate: context.delegate,

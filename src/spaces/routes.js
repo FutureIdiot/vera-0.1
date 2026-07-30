@@ -620,6 +620,10 @@ export function registerSpaceRoutes(router, {
     "/api/approvals/:id/answer",
     asHandler(async ({ req, res, params }) => {
       const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+          Object.keys(body).length !== 1 || typeof body.answer !== "string") {
+        throw new ApiError("invalid_request", "body must be exactly { answer }");
+      }
       const approval = answerApproval(store, hub, params.id, body.answer);
       sendJson(res, 200, { approval });
     }),

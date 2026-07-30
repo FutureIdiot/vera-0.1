@@ -28,6 +28,22 @@ function object(value, field) {
   return value;
 }
 
+function approvalSessionRule(value) {
+  if (value === undefined || value === null) return null;
+  const rule = object(value, "sessionRule");
+  if (Object.keys(rule).sort().join(",") !== "key,label" ||
+      typeof rule.key !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(rule.key) ||
+      typeof rule.label !== "string" || !rule.label.trim() ||
+      rule.label.length > 160 || /[\r\n]/u.test(rule.label)) {
+    throw new DaemonRunError("invalid_event", "sessionRule is invalid");
+  }
+  return { key: rule.key, label: rule.label.trim() };
+}
+
+function approvalRuleCacheKey(accountSessionId, ruleKey) {
+  return `${accountSessionId}\u0000${ruleKey}`;
+}
 
 function validateRunEvent(data, current) {
   const run = object(data?.run, "run");
@@ -127,6 +143,7 @@ export function createDaemonRunHandler({
   const activeRuns = new Map();
   const handledRuns = new Set();
   const approvalWaiters = new Map();
+  const allowedSessionApprovalRules = new Set();
   const knownGenerations = new Map();
 
   function safeActivity(activity, visibility) {
@@ -369,12 +386,18 @@ export function createDaemonRunHandler({
       });
     };
     const requestApproval = async (approvalRequest) => {
+      const sessionRule = approvalSessionRule(approvalRequest?.sessionRule);
+      const sessionRuleCacheKey = sessionRule
+        ? approvalRuleCacheKey(current.accountSessionId, sessionRule.key)
+        : null;
+      if (sessionRuleCacheKey && allowedSessionApprovalRules.has(sessionRuleCacheKey)) return "allow";
       await reportTail;
       if (reportError) throw reportError;
       void declareAgentStatus("needs_you");
       const response = await report(current.id, "/approvals", "POST", {
         prompt: String(approvalRequest?.prompt ?? ""),
-        options: Array.isArray(approvalRequest?.options) ? approvalRequest.options.map(String) : [],
+        options: sessionRule ? ["allow", "allow_session", "deny"] : ["allow", "deny"],
+        ...(sessionRule ? { sessionRule } : {}),
       });
       const approval = response?.approval ?? response;
       if (!approval?.id) throw new DaemonRunError("invalid_response", "gateway did not create Approval");
@@ -387,6 +410,7 @@ export function createDaemonRunHandler({
         controller.signal.addEventListener("abort", onAbort, { once: true });
         approvalWaiters.set(approval.id, {
           runId: current.id,
+          sessionRuleCacheKey,
           resolve: (answer) => {
             controller.signal.removeEventListener("abort", onAbort);
             resolve(answer);
@@ -597,7 +621,12 @@ export function createDaemonRunHandler({
       const waiter = approvalWaiters.get(approvalId);
       if (waiter) {
         approvalWaiters.delete(approvalId);
-        waiter.resolve(typeof answer === "string" ? answer : "deny");
+        if (answer === "allow_session" && waiter.sessionRuleCacheKey) {
+          allowedSessionApprovalRules.add(waiter.sessionRuleCacheKey);
+          waiter.resolve("allow");
+        } else {
+          waiter.resolve(answer === "allow" ? "allow" : "deny");
+        }
       }
       return true;
     }
