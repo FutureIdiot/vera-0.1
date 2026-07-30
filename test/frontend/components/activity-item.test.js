@@ -119,6 +119,20 @@ test("status-only thinking renders one summary line and never exposes detail", (
   });
 });
 
+test("group Activity reserves the agent avatar column", () => {
+  withFakeDocument(() => {
+    const activity = renderActivity({
+      id: "act_group_tool",
+      phase: "tool",
+      kind: "command",
+      summary: "已运行测试",
+      detail: null,
+    }, { isGroupChat: true });
+
+    assert.equal(activity.classList.contains("vera-activity--group"), true);
+  });
+});
+
 test("observed public reasoning starts expanded and the whole summary row toggles it", () => {
   withFakeDocument(() => {
     const activity = renderActivity({

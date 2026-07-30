@@ -229,7 +229,6 @@
   --vera-bubble-corner-tight: 5px;
   --vera-content-max-width: 760px;
   --vera-border-width: 1px;
-  --vera-scrollbar-width: 4px;
   --vera-backdrop-blur: 18px;
   --vera-shadow-sm: 0 1px 2px color-mix(in srgb, var(--vera-color-text), transparent 92%);
   --vera-shadow-lg: 0 16px 40px color-mix(in srgb, var(--vera-color-text), transparent 82%);

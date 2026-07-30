@@ -36,11 +36,11 @@ test("composer prefers the longest Account name at the same mention position", (
 test("composer exposes real commands and keeps future command interfaces disabled", () => {
   assert.deepEqual(
     DEFAULT_COMMANDS.filter((item) => item.available).map((item) => item.command),
-    ["/new", "/compact", "/resume", "/clear", "/export", "/forge"],
+    ["/new", "/compact", "/resume", "/clear", "/export", "/forge", "/help"],
   );
   assert.deepEqual(
     DEFAULT_COMMANDS.filter((item) => !item.available).map((item) => item.command),
-    ["/theme", "/help"],
+    ["/theme"],
   );
 });
 

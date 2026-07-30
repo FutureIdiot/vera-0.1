@@ -58,7 +58,7 @@ function toggleExpanded(el, expanded) {
   if (detail) detail.hidden = !expanded;
 }
 
-export function applyActivity(el, item, { canExpand = false } = {}) {
+export function applyActivity(el, item, { canExpand = false, isGroupChat = false } = {}) {
   const category = CATEGORY[item.phase] ?? {
     key: "status",
     fallback: "过程更新",
@@ -70,7 +70,12 @@ export function applyActivity(el, item, { canExpand = false } = {}) {
   const preferred = el.dataset.expansionPreference;
   const expanded = expandable && preferred !== "collapsed";
 
-  el.className = `vera-item vera-activity vera-activity--${category.key}`;
+  el.className = [
+    "vera-item",
+    "vera-activity",
+    `vera-activity--${category.key}`,
+    isGroupChat ? "vera-activity--group" : "",
+  ].filter(Boolean).join(" ");
   el.dataset.activityId = item.id;
   el.dataset.activityKind = kind;
   el.classList.toggle("is-expandable", expandable);

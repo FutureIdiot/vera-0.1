@@ -465,6 +465,10 @@
   overflow: hidden;
 }
 
+.vera-activity--group {
+  margin-inline-start: calc(var(--vera-avatar-size) + var(--vera-space-sm));
+}
+
 .vera-activity--thinking {
   background: var(--vera-color-activity-thinking-bg);
   border-color: var(--vera-color-activity-thinking-border);
@@ -539,25 +543,15 @@
   font-family: var(--vera-font-family);
   line-height: var(--vera-line-height-base);
   max-height: var(--vera-activity-detail-max-height);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   overflow-wrap: anywhere;
   padding: var(--vera-space-sm) var(--vera-space-md);
-  scrollbar-width: thin;
   white-space: pre-wrap;
 }
 
 .vera-activity--tool .vera-activity__detail {
   font-family: var(--vera-font-family-mono);
-}
-
-.vera-activity__detail::-webkit-scrollbar {
-  height: var(--vera-scrollbar-width);
-  width: var(--vera-scrollbar-width);
-}
-
-.vera-activity__detail::-webkit-scrollbar-thumb {
-  background: var(--vera-color-activity-border);
-  border-radius: var(--vera-control-radius);
 }
 
 .vera-approval-host {

@@ -159,6 +159,7 @@ export function mountSpaceView({
   };
   const activityContext = () => ({
     canExpand: (space?.seats?.length ?? 0) === 1 && observation?.observedSpaceId === space?.id,
+    isGroupChat: (space?.seats?.length ?? 0) > 1,
   });
 
   async function handleAnswer(approvalId, answer) {
