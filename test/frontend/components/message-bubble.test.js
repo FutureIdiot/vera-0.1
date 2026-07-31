@@ -24,6 +24,11 @@ class FakeElement {
         for (const name of names) current.add(name);
         this.className = [...current].join(" ");
       },
+      remove: (...names) => {
+        const current = new Set(this.className.split(" ").filter(Boolean));
+        for (const name of names) current.delete(name);
+        this.className = [...current].join(" ");
+      },
       contains: (name) => this.className.split(" ").includes(name),
       toggle: (name, force) => {
         const present = this.className.split(" ").includes(name);
