@@ -1,0 +1,31 @@
+[Unit]
+Description=Vera Antigravity Agent Daemon with Account wake supervisor
+Wants=network-online.target
+After=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/vera-workspaces/gemini
+EnvironmentFile=/etc/vera/agent.env
+ExecStart=/usr/bin/node --preserve-symlinks-main /opt/vera/current/scripts/agent-waker.js
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/.vera
+ReadWritePaths=/home/ubuntu/.gemini
+ReadWritePaths=/home/ubuntu/vera-workspaces/gemini
+ReadWritePaths=-/home/ubuntu/.cache
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

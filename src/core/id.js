@@ -31,3 +31,4 @@ export const newContextControlRequestId = () => makeId("ccr");
 export const newContextForgeDraftId = () => makeId("fgd");
 export const newAccountSessionId = () => makeId("acs");
 export const newExecutionLeaseId = () => makeId("exl");
+export const newWakeRequestId = () => makeId("wkr");

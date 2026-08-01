@@ -50,6 +50,7 @@ import { registerFilesRoutes } from "./memory/files-routes.js";
 import { createControlService } from "./agents/control-service.js";
 import { recoverAccountPresence } from "./agents/account-presence.js";
 import { createDaemonRuntime } from "./agents/daemon-runtime.js";
+import { createDaemonWakeRuntime } from "./agents/daemon-wake-runtime.js";
 import { createRequestSecurity } from "./api/request-security.js";
 import { createDaemonRunLifecycle } from "./spaces/daemon-run-lifecycle.js";
 import { createDaemonRunScheduler } from "./spaces/daemon-run-scheduler.js";
@@ -153,6 +154,11 @@ const controlService = createControlService({
   hub,
   projectActivity: observation.projectActivity,
   enableBuiltInMemory: legacyMemoryEnabled,
+});
+const daemonWakeRuntime = createDaemonWakeRuntime({
+  store,
+  controlService,
+  keepaliveMs: config.agentDaemon.heartbeatIntervalMs,
 });
 const memory = legacyMemoryEnabled ? createMemoryVault({
   vaultPath: config.memory.vaultPath,
@@ -406,6 +412,7 @@ registerAgentRoutes(router, {
   memoryConfigService: memoryConfig,
   controlService,
   daemonRuntime,
+  daemonWakeRuntime,
   enableBuiltInMemory: legacyMemoryEnabled,
 });
 registerMemoryTaskRoutes(router, {

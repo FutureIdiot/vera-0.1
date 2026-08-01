@@ -24,6 +24,7 @@ export function registerAgentRoutes(router, {
   memoryConfigService = null,
   controlService = null,
   daemonRuntime = null,
+  daemonWakeRuntime = null,
   enableBuiltInMemory = true,
 }) {
   if (controlService) {
@@ -66,6 +67,15 @@ export function registerAgentRoutes(router, {
         sendNoContent(res);
       }),
     );
+
+    if (daemonWakeRuntime) {
+      router.get(
+        "/api/agent/wake-events",
+        asHandler(async ({ req, res }) => {
+          await daemonWakeRuntime.openEvents(req, res);
+        }),
+      );
+    }
 
     if (daemonRuntime) {
       router.get(
@@ -284,6 +294,20 @@ export function registerAgentRoutes(router, {
       });
     }),
   );
+
+  if (daemonWakeRuntime) {
+    router.post(
+      "/api/accounts/:id/wake",
+      asHandler(async ({ req, res, params }) => {
+        const body = await readJsonBody(req);
+        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
+          throw new ApiError("invalid_request", "wake body must be exactly {}");
+        }
+        const wake = daemonWakeRuntime.requestWake(params.id);
+        sendJson(res, wake.state === "online" ? 200 : 202, { wake });
+      }),
+    );
+  }
 
   router.post(
     "/api/accounts/:id/access-key/rotate",

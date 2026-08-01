@@ -241,3 +241,54 @@ test("rotating a key refreshes the audit list without hiding the one-time key", 
     globalThis.Node = previousNode;
   }
 });
+
+test("offline Account detail sends a single-account wake request", async () => {
+  const previousDocument = globalThis.document;
+  const previousNode = globalThis.Node;
+  globalThis.document = { createElement: (tagName) => new FakeElement(tagName) };
+  globalThis.Node = FakeElement;
+  try {
+    const detail = {
+      account: {
+        id: "acc_a",
+        name: "Account A",
+        ownerAgentId: "agt_a",
+        activeAgentId: null,
+        presence: "offline",
+        accessKeyState: "active",
+        accessKeyVersion: 1,
+        workspace: null,
+      },
+      ownerAgent: { id: "agt_a", name: "Agent A" },
+      activeAgent: null,
+      recentLogins: [],
+    };
+    const requests = [];
+    const fetchImpl = async (url, init) => {
+      requests.push([url, init.method, init.body]);
+      if (init.method === "POST") {
+        assert.equal(url, "http://vera.test/api/accounts/acc_a/wake");
+        return new Response(JSON.stringify({ wake: { requestId: "wkr_a", state: "queued" } }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(detail), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const { root, runtime, platform } = fixture(detail, { fetchImpl });
+    const dispose = await mountAccountDetailView({ root, runtime, platform, accountId: "acc_a" });
+    const wake = descendants(root).find((node) => node.tagName === "BUTTON" && node.textContent === "唤起 Agent");
+    await wake.listeners.get("click")();
+
+    assert.deepEqual(requests, [
+      ["http://vera.test/api/accounts/acc_a", "GET", undefined],
+      ["http://vera.test/api/accounts/acc_a/wake", "POST", "{}"],
+      ["http://vera.test/api/accounts/acc_a", "GET", undefined],
+    ]);
+    assert.equal(root.textContent.includes("已发送唤起请求"), true);
+    dispose();
+  } finally {
+    globalThis.document = previousDocument;
+    globalThis.Node = previousNode;
+  }
+});

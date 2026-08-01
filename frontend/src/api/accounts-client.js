@@ -2,6 +2,7 @@ export function createAccountsClient(http) {
   return {
     list() { return http.get("/api/accounts"); },
     get(accountId) { return http.get(`/api/accounts/${encodeURIComponent(accountId)}`); },
+    wake(accountId) { return http.post(`/api/accounts/${encodeURIComponent(accountId)}/wake`, {}); },
     create(body) { return http.post("/api/accounts", body); },
     update(accountId, body) { return http.patch(`/api/accounts/${accountId}`, body); },
     updateModel(accountId, body) {

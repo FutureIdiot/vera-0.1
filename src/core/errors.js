@@ -30,6 +30,7 @@ export const STATUS_BY_CODE = {
   invalid_file: 422,
   memory_provider_unsupported: 422,
   memory_provider_unavailable: 503,
+  wake_unavailable: 503,
   extension_manifest_changed: 409,
   extension_load_failed: 503,
   extension_timeout: 504,

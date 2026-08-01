@@ -61,7 +61,14 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
   renameForm.append(field("名称", accountName), rename);
   const identityFacts = document.createElement("div");
   identityFacts.className = "vera-agent-info-panel";
-  identity.append(identityTitle, renameForm, identityFacts);
+  const wakeActions = document.createElement("div");
+  wakeActions.className = "vera-form-actions";
+  const wake = document.createElement("button");
+  wake.type = "button";
+  wake.className = "vera-secondary-button";
+  wake.textContent = "唤起 Agent";
+  wakeActions.append(wake);
+  identity.append(identityTitle, renameForm, identityFacts, wakeActions);
 
   const access = document.createElement("section");
   access.className = "vera-management-section";
@@ -135,6 +142,9 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
       infoRow("状态", account.presence ?? "offline"),
       infoRow("最近在线", formatTime(account.lastSeenAt)),
     );
+    const online = account.presence === "online";
+    wake.disabled = online;
+    wake.textContent = online ? "Agent 已在线" : "唤起 Agent";
     accessStatus.textContent = `状态：${account.accessKeyState ?? "未知"} · 版本：${account.accessKeyVersion ?? "—"}`;
     revoke.disabled = account.accessKeyState === "revoked";
     const workspaceValue = detail?.account?.workspace ?? account.workspace ?? null;
@@ -239,6 +249,26 @@ export async function mountAccountDetailView({ root, platform, runtime, accountI
       feedback.dataset.tone = "danger";
     } finally {
       setBusy(revoke, false);
+    }
+  });
+
+  wake.addEventListener("click", async () => {
+    if (!account || account.presence === "online") return;
+    setBusy(wake, true, "唤起中…");
+    try {
+      const response = await accountsClient.wake(account.id);
+      await load();
+      if (disposed) return;
+      feedback.textContent = response?.wake?.state === "online"
+        ? "Agent 已在线。"
+        : "已发送唤起请求，等待 Agent 上线…";
+      feedback.dataset.tone = "success";
+    } catch (error) {
+      feedback.textContent = error.message;
+      feedback.dataset.tone = "danger";
+    } finally {
+      setBusy(wake, false);
+      if (!disposed) render();
     }
   });
 
