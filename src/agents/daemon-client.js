@@ -164,6 +164,11 @@ export function createDaemonClient({
   let lastHeartbeat = 0;
   let lastEventId = null;
   let terminal = null;
+  let gatewayUpdateScheduledUntil = 0;
+
+  function gatewayUpdateScheduled() {
+    return gatewayUpdateScheduledUntil > Date.now();
+  }
 
   function authHeaders({ accountKey = false } = {}) {
     const headers = { Authorization: `Bearer ${credentials.agentToken}` };
@@ -242,6 +247,11 @@ export function createDaemonClient({
       lastHeartbeat = Date.now();
       return;
     }
+    if (envelope?.type === "gateway.update.scheduled") {
+      const expiresAt = Date.parse(envelope.data?.expiresAt ?? "");
+      if (Number.isFinite(expiresAt) && expiresAt > Date.now()) gatewayUpdateScheduledUntil = expiresAt;
+      return;
+    }
     if (envelope?.type === "stream.reset") {
       throw new DaemonClientError("stream_reset", "event stream requires a login snapshot refresh");
     }
@@ -268,7 +278,9 @@ export function createDaemonClient({
     clearInterval(heartbeatTimer);
     lastHeartbeat = Date.now();
     heartbeatTimer = setInterval(() => {
-      if (running && Date.now() - lastHeartbeat >= intervalMs * 3) void terminate("gateway_unreachable");
+      if (running && !gatewayUpdateScheduled() && Date.now() - lastHeartbeat >= intervalMs * 3) {
+        void terminate("gateway_unreachable");
+      }
     }, intervalMs);
     heartbeatTimer.unref?.();
   }
@@ -304,14 +316,32 @@ export function createDaemonClient({
           await terminate("account_reauthentication_required");
           break;
         }
-        if (failures >= maxConnectionFailures) {
+        if (failures >= maxConnectionFailures && !gatewayUpdateScheduled()) {
           await terminate("gateway_unreachable");
           break;
         }
-        await sleep(reconnectBaseMs * (2 ** (failures - 1)));
-        try { monitorHeartbeat(await login({ resume: true })); }
-        catch (loginError) {
-          if (loginError?.code === "account_reauthentication_required") {
+        await sleep(Math.min(reconnectBaseMs * (2 ** Math.min(failures - 1, 6)), 30000));
+        try {
+          const recoveringGatewayUpdate = gatewayUpdateScheduled();
+          monitorHeartbeat(await login({ resume: true }));
+          if (recoveringGatewayUpdate) {
+            gatewayUpdateScheduledUntil = 0;
+            failures = 0;
+          }
+        } catch (loginError) {
+          if (loginError?.code === "account_reauthentication_required" && gatewayUpdateScheduled()) {
+            try {
+              lastEventId = null;
+              monitorHeartbeat(await login({ resume: false }));
+              gatewayUpdateScheduledUntil = 0;
+              failures = 0;
+            } catch (reauthError) {
+              if (reauthError?.code === "account_reauthentication_required") {
+                await terminate("account_reauthentication_required");
+                break;
+              }
+            }
+          } else if (loginError?.code === "account_reauthentication_required") {
             await terminate("account_reauthentication_required");
             break;
           }

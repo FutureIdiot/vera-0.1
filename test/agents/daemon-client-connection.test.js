@@ -165,6 +165,65 @@ test("session reconnect never falls back to Account Key when reauthentication is
   assert.equal(calls.slice(1).some((call) => call.headers["X-Vera-Account-Key"]), false);
 });
 
+test("an explicit Gateway update notice permits one in-process reauthorization", async () => {
+  const calls = [];
+  let loginCount = 0;
+  let eventCount = 0;
+  const openStream = (signal) => new ReadableStream({
+    start(controller) {
+      signal?.addEventListener("abort", () => controller.close(), { once: true });
+    },
+  });
+  const fetchImpl = async (url, init) => {
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ url, method: init.method, headers: init.headers, body });
+    if (url.endsWith("/api/agent/login")) {
+      loginCount += 1;
+      if (loginCount === 2) {
+        return new Response(JSON.stringify({ error: { code: "account_reauthentication_required" } }), { status: 401 });
+      }
+      return new Response(JSON.stringify({
+        accountSession: {
+          id: loginCount === 1 ? "acs_a" : "acs_b",
+          token: loginCount === 1 ? "session-secret" : "session-after-update",
+          gatewayBootId: loginCount === 1 ? "gw_a" : "gw_b",
+        },
+        heartbeatIntervalMs: 10000,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.endsWith("/api/agent/memory-tasks/events")) return new Response(stream([]), { status: 200 });
+    if (url.endsWith("/api/agent/events")) {
+      if (eventCount++ === 0) {
+        return new Response(stream([{
+          type: "gateway.update.scheduled",
+          data: { requestId: "upd_a", expiresAt: new Date(Date.now() + 60000).toISOString() },
+        }]), { status: 200 });
+      }
+      return new Response(openStream(init.signal), { status: 200 });
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  const client = createDaemonClient({
+    gatewayUrl: "https://gateway.test", agentId: "agt_a", accountId: "acc_a",
+    runtime: { hostId: "host_a", kind: "cli", provider: "codex", model: "m", revision: "rev_a" },
+    workspace: { hostId: "host_a" }, credentialStore: { load: async () => ({ agentToken: TOKEN, accountKey: KEY }) },
+    executor: async () => ({}), fetchImpl, daemonBootId: "boot_a", reconnectBaseMs: 0,
+    sleep: async () => new Promise((resolve) => setTimeout(resolve, 1)),
+  });
+  await client.start();
+  try {
+    for (let attempt = 0; attempt < 40 && loginCount < 3; attempt += 1) await settle();
+    assert.equal(loginCount, 3);
+    const logins = calls.filter((call) => call.url.endsWith("/api/agent/login"));
+    assert.equal(logins[0].headers["X-Vera-Account-Key"], KEY);
+    assert.equal(logins[1].headers["X-Vera-Account-Session"], "session-secret");
+    assert.equal(logins[2].headers["X-Vera-Account-Key"], KEY);
+  } finally {
+    await client.stop();
+  }
+  assert.equal((await client.wait()).reason, "stopped");
+});
+
 test("SSE reconnect resumes from the last event sequence", async () => {
   const first = new Response(stream([{ seq: 41, type: "agent.heartbeat", data: { ts: "now" } }]), { status: 200 });
   const { client, calls } = fixture({ eventResponses: [first], maxConnectionFailures: 2 });

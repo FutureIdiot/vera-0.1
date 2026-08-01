@@ -143,7 +143,7 @@ export async function mountSystemSettingsView({ root, platform, shell } = {}) {
     applyUpdate.disabled = state !== "available" || !update?.target?.commit || !update?.requestId;
     reloadPage.hidden = state !== "succeeded";
     if (state === "disabled") updateNotice.textContent = "当前宿主没有配置独立更新服务。";
-    else if (state === "available") updateNotice.textContent = "已冻结这个目标版本；确认后只更新 Gateway。";
+    else if (state === "available") updateNotice.textContent = "已冻结这个目标版本；确认后更新 Gateway，并恢复当前在线 Agent。";
     else if (state === "up_to_date") updateNotice.textContent = "当前 Gateway 已是公开稳定分支的最新提交。";
     else if (state === "checking") updateNotice.textContent = "正在从固定远端检查最新提交…";
     else if (state === "queued") updateNotice.textContent = "请求已交给独立更新服务。";
@@ -189,7 +189,7 @@ export async function mountSystemSettingsView({ root, platform, shell } = {}) {
   applyUpdate.addEventListener("click", async () => {
     if (update?.state !== "available" || !update.target?.commit || !update.requestId) return;
     const target = update.target.commit;
-    if (!window.confirm(`只更新 Gateway 到 ${shortCommit(target)}。更新期间会短暂重启，是否继续？`)) return;
+    if (!window.confirm(`更新 Gateway 到 ${shortCommit(target)}，并在完成后恢复当前在线 Agent。更新期间会短暂重启，是否继续？`)) return;
     applyUpdate.disabled = true;
     updateNotice.textContent = "正在提交更新请求…";
     try {

@@ -54,6 +54,7 @@ test("System settings confirms an exact Gateway update and trusts the polled ter
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
     assert.equal(confirmations.length, 1);
     assert.match(confirmations[0], new RegExp(TARGET.slice(0, 12), "u"));
+    assert.match(confirmations[0], /恢复当前在线 Agent/u);
     assert.deepEqual(requests.find(([, path]) => path === "/api/system/update/apply"), [
       "POST",
       "/api/system/update/apply",

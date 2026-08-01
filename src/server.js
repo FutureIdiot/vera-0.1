@@ -66,7 +66,6 @@ const serveStatic = createStaticHandler(frontendRoot);
 
 const config = loadConfig(process.env);
 const enforceRequestSecurity = createRequestSecurity({ config });
-const updateControl = createGatewayUpdateControl({ config: config.updates });
 const bootPaths = await applyBootPathOverrides(config);
 const store = await createStore({ dataPath: config.dataPath, debounceMs: config.store.debounceMs });
 recoverAccountPresence(store);
@@ -321,6 +320,20 @@ daemonScheduler = createDaemonRunScheduler({
   observation,
   runBackground,
   runMessages,
+});
+const updateControl = createGatewayUpdateControl({
+  config: config.updates,
+  onApplyQueued: ({ requestId, expiresAt }) => {
+    const event = { type: "gateway.update.scheduled", data: { requestId, expiresAt } };
+    for (const account of listAccounts(store)) {
+      if (account.presence !== "online") continue;
+      try {
+        daemonRuntime.dispatchEvent({ accountId: account.id, event });
+      } catch {
+        // The session may disappear between the presence snapshot and dispatch.
+      }
+    }
+  },
 });
 runBackground.setResumePending((record) => {
   for (const runId of record.pendingRootRunIds ?? []) daemonScheduler.dispatchPendingRoot(runId);

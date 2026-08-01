@@ -21,6 +21,7 @@ const COMMIT = /^[0-9a-f]{40}$/u;
 const REQUEST_ID = /^upd_[0-9a-f]{32}$/u;
 const SAFE_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
 const MAX_JSON_BYTES = 64 * 1024;
+const AGENT_UPDATE_RECOVERY_WINDOW_MS = 20 * 60 * 1000;
 
 function exactKeys(value, keys) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -115,7 +116,12 @@ function unavailable() {
   return new ApiError("update_unavailable", "Gateway update control is unavailable");
 }
 
-export function createGatewayUpdateControl({ config, now = () => new Date(), randomUUIDFn = randomUUID } = {}) {
+export function createGatewayUpdateControl({
+  config,
+  now = () => new Date(),
+  randomUUIDFn = randomUUID,
+  onApplyQueued = null,
+} = {}) {
   if (!config) throw new TypeError("gateway update control requires config");
   const supported = typeof config.controlPath === "string" && config.controlPath.length > 0;
   const requestDirectory = supported ? join(config.controlPath, "requests") : null;
@@ -188,7 +194,7 @@ export function createGatewayUpdateControl({ config, now = () => new Date(), ran
     };
   }
 
-  async function writeRequest(request) {
+  async function writeRequest(request, { beforeLink = null } = {}) {
     if (!supported) throw unavailable();
     try {
       const directory = await lstat(requestDirectory);
@@ -203,6 +209,7 @@ export function createGatewayUpdateControl({ config, now = () => new Date(), ran
         await handle.close();
       }
       try {
+        await beforeLink?.();
         await link(tempPath, requestPath);
       } finally {
         await unlink(tempPath).catch(() => {});
@@ -238,13 +245,17 @@ export function createGatewayUpdateControl({ config, now = () => new Date(), ran
     }
     if (await readPendingRequest()) throw new ApiError("update_busy", "A Gateway update operation is already queued");
     const requestId = nextRequestId();
+    const requestedAt = now().toISOString();
+    const expiresAt = new Date(Date.parse(requestedAt) + AGENT_UPDATE_RECOVERY_WINDOW_MS).toISOString();
     await writeRequest({
       schemaVersion: 1,
       requestId,
       action: "apply",
       targetCommit,
       checkedRequestId: ifRequestId,
-      requestedAt: now().toISOString(),
+      requestedAt,
+    }, {
+      beforeLink: () => onApplyQueued?.({ requestId, targetCommit, expiresAt }),
     });
     return {
       supported: true,

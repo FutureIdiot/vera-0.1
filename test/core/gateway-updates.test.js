@@ -11,7 +11,7 @@ const CURRENT = "1".repeat(40);
 const TARGET = "2".repeat(40);
 const CHECK_ID = `upd_${"a".repeat(32)}`;
 
-async function fixture({ configured = true } = {}) {
+async function fixture({ configured = true, onApplyQueued = null } = {}) {
   const root = await mkdtemp(join(tmpdir(), "vera-updates-"));
   const controlPath = join(root, "control");
   const releaseMetadataPath = join(root, "release.json");
@@ -21,6 +21,7 @@ async function fixture({ configured = true } = {}) {
   let uuid = 0;
   const control = createGatewayUpdateControl({
     config: { controlPath: configured ? controlPath : null, releaseMetadataPath },
+    onApplyQueued,
     now: () => new Date("2026-07-23T01:02:03.000Z"),
     randomUUIDFn: () => `${String(++uuid).padStart(8, "0")}-0000-0000-0000-000000000000`,
   });
@@ -75,6 +76,28 @@ test("apply requires the exact available check and writes no remote-controlled f
   const request = JSON.parse(await readFile(join(controlPath, "requests", "request.json"), "utf8"));
   assert.deepEqual(Object.keys(request).sort(), ["action", "checkedRequestId", "requestId", "requestedAt", "schemaVersion", "targetCommit"]);
   assert.equal(JSON.stringify(queued).includes("must-not-project"), false);
+});
+
+test("apply notifies the current daemon before exposing the updater request", async () => {
+  const notifications = [];
+  const { control, controlPath } = await fixture({ onApplyQueued: async (value) => notifications.push(value) });
+  await writeFile(join(controlPath, "status", "status.json"), JSON.stringify({
+    schemaVersion: 1,
+    state: "available",
+    requestId: CHECK_ID,
+    target: { commit: TARGET, version: "0.0.2" },
+    checkedAt: "2026-07-23T01:00:00.000Z",
+    startedAt: null,
+    finishedAt: null,
+    error: null,
+  }));
+  const queued = await control.queueApply({ targetCommit: TARGET, ifRequestId: CHECK_ID });
+  assert.deepEqual(notifications, [{
+    requestId: queued.requestId,
+    targetCommit: TARGET,
+    expiresAt: "2026-07-23T01:22:03.000Z",
+  }]);
+  assert.equal((await readFile(join(controlPath, "requests", "request.json"), "utf8")).includes(queued.requestId), true);
 });
 
 test("unsafe control files and symlink request directories fail closed", async () => {
