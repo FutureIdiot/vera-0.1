@@ -59,7 +59,7 @@ function activeAgentSessionsForSpace(store, space, spaceSessionId) {
 }
 
 export function registerSpaceRoutes(router, {
-  store, hub, config, daemonScheduler, memoryDigestScheduler,
+  store, hub, config, daemonScheduler, memoryDigestScheduler, extensionHooks,
   daemonRuntime, daemonRunLifecycle, contextCompaction, memory, files, observation,
   contextForge,
   runBackground, controlService,
@@ -510,6 +510,7 @@ export function registerSpaceRoutes(router, {
         hub,
         daemonScheduler,
         memoryDigestScheduler,
+        extensionHooks,
         files,
         observation,
         runBackground,

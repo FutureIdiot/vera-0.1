@@ -68,7 +68,7 @@ const COLLECTIONS = [
   "memoryTaskVerifications", "memoryDreamJobs",
   "spaceSessions", "agentSessions", "providerBindings", "apiHistories",
   "contextCompactionJobs", "contextControlRequests", "contextForgeDrafts",
-  "runCatchups", "runMessages",
+  "runCatchups", "runMessages", "extensions", "extensionBindings",
   "files",
 ];
 

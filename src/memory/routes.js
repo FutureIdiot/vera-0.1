@@ -17,7 +17,7 @@ const MARKDOWN_PROVIDER_OPTION = Object.freeze({
 
 export function registerMemoryRoutes(router, {
   memory, retrieval, store, digestService = null, dreamService = null,
-  configService = null, taskRuntime = null, digestScheduler = null, dreamScheduler = null,
+  configService = null, taskRuntime = null, digestScheduler = null, dreamScheduler = null, extensionLoader = null,
 }) {
   function requireAgent(agentId) {
     const agent = store.find("agents", agentId);
@@ -25,6 +25,8 @@ export function registerMemoryRoutes(router, {
     return agent;
   }
   function requireGatewayProvider(agentId) {
+    const external = extensionLoader?.getAgentCapability(agentId, "memory-provider");
+    if (external) return { providerId: external.extension.extensionId, placement: { runtime: "extension", extensionId: external.extension.extensionId }, external };
     const provider = configService?.getConfig?.(agentId)?.config?.provider;
     if (!provider || provider.placement?.runtime !== "gateway") {
       throw new ApiError("memory_provider_unavailable", "Memory Provider is not available on the gateway");
@@ -66,7 +68,7 @@ export function registerMemoryRoutes(router, {
       const result = await memory.listWithDiagnostics(params.agentId);
       const memories = result.memories.map(({ sourceRefs, links, schemaVersion, scope, ...summary }) => ({
         ...summary,
-        pinned: retrieval.getPin(params.agentId, summary.slug).pinned,
+        pinned: retrieval.getPin?.(params.agentId, summary.slug)?.pinned ?? false,
         sourceCount: sourceRefs?.length ?? summary.sourceCount ?? 0,
       }));
       sendJson(res, 200, { memories, errors: result.errors, index: result.index });
@@ -77,6 +79,11 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory/_config",
     asHandler(async ({ res, params }) => {
       requireAgent(params.agentId);
+      const provider = requireGatewayProvider(params.agentId);
+      if (provider.external) {
+        sendJson(res, 200, { config: { provider, digest: null, dream: null }, version: provider.external.binding.version });
+        return;
+      }
       if (!configService) throw new ApiError("memory_provider_unavailable", "Memory configuration is unavailable");
       sendJson(res, 200, configService.getConfig(params.agentId));
     }),
@@ -86,6 +93,8 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory/_config",
     asHandler(async ({ req, res, params }) => {
       requireAgent(params.agentId);
+      const provider = requireGatewayProvider(params.agentId);
+      if (provider.external) throw new ApiError("invalid_request", "external Memory configuration is managed by its Agent extension binding");
       if (!configService) throw new ApiError("memory_provider_unavailable", "Memory configuration is unavailable");
       const body = await readJsonBody(req);
       const current = configService.getConfig(params.agentId);
@@ -105,6 +114,11 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory/_options",
     asHandler(async ({ res, params }) => {
       requireAgent(params.agentId);
+      const external = extensionLoader?.getAgentCapability(params.agentId, "memory-provider");
+      if (external) {
+        sendJson(res, 200, { providers: [{ providerId: external.extension.extensionId, name: external.extension.name, source: "extension", kind: "memory-provider", availability: "available" }], tasks: { digest: { executors: [] }, dream: { executors: [] } } });
+        return;
+      }
       if (!taskRuntime) throw new ApiError("memory_task_unavailable", "Memory task options are unavailable");
       sendJson(res, 200, {
         providers: [structuredClone(MARKDOWN_PROVIDER_OPTION)],
@@ -117,6 +131,12 @@ export function registerMemoryRoutes(router, {
     "/api/agents/:agentId/memory/_status",
     asHandler(async ({ res, params }) => {
       requireAgent(params.agentId);
+      const external = extensionLoader?.getAgentCapability(params.agentId, "memory-provider");
+      if (external) {
+        const result = await memory.listWithDiagnostics(params.agentId);
+        sendJson(res, 200, { provider: { providerId: external.extension.extensionId, placement: { runtime: "extension", extensionId: external.extension.extensionId }, state: "available", capabilities: external.extension.capabilities }, longTerm: { activeCount: result.memories.filter((item) => item.status === "active").length, archivedCount: result.memories.filter((item) => item.status === "archived").length, logicalBytes: null, estimatedTokens: { estimator: "vera-utf8-v1", value: null } }, pendingContext: { messageCount: 0, charCount: 0, estimatedTokens: { estimator: "vera-utf8-v1", value: 0 }, spaces: [] }, digest: { status: "unavailable" }, dream: { status: "unavailable" } });
+        return;
+      }
       const digestJobs = digestService?.listJobs(params.agentId) ?? [];
       const dreamJobs = dreamService?.listJobs(params.agentId) ?? [];
       const lastDigest = digestJobs.at(-1) ?? null;
@@ -255,6 +275,7 @@ export function registerMemoryRoutes(router, {
     asHandler(async ({ req, res, params }) => {
       requireAgent(params.agentId);
       requireGatewayProvider(params.agentId);
+      if (extensionLoader?.getAgentCapability(params.agentId, "memory-provider")) throw new ApiError("invalid_request", "external Memory provider does not expose pinning");
       await memory.getMemory(params.agentId, params.slug);
       const body = await readJsonBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body) ||

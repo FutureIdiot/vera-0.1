@@ -59,6 +59,7 @@ export function parseRoute(hash = "") {
   if (path === "/settings/system" || path === "/settings/system/") return { name: "system-settings" };
   if (path === "/settings/appearance" || path === "/settings/appearance/") return { name: "appearance" };
   if (path === "/settings/paths" || path === "/settings/paths/") return { name: "path-settings" };
+  if (path === "/settings/extensions" || path === "/settings/extensions/") return { name: "extensions-settings" };
   if (path === "/settings/control-center" || path === "/settings/control-center/") return { name: "control-center" };
   const settingsMatch = path.match(/^\/spaces\/([^/]+)\/settings\/?$/);
   if (settingsMatch) {
@@ -113,6 +114,7 @@ export function createAppRouter({
   loadAppearanceView = () => import("../views/appearance-view.js"),
   loadPathSettingsView = () => import("../views/path-settings-view.js"),
   loadControlCenterView = () => import("../views/control-center-view.js"),
+  loadExtensionsSettingsView = () => import("../views/extensions-settings-view.js"),
   loadCapabilityDirectoryView = () => import("../views/capability-directory-view.js"),
   loadAgentDataView = () => import("../views/agent-data-view.js"),
   loadAgentMemoryConfigView = () => import("../views/agent-memory-config-view.js"),
@@ -210,6 +212,7 @@ export function createAppRouter({
       { names: ["appearance"], loader: loadAppearanceView, mount: "mountAppearanceView" },
       { names: ["path-settings"], loader: loadPathSettingsView, mount: "mountPathSettingsView" },
       { names: ["control-center"], loader: loadControlCenterView, mount: "mountControlCenterView" },
+      { names: ["extensions-settings"], loader: loadExtensionsSettingsView, mount: "mountExtensionsSettingsView" },
       { names: ["agent-skills", "agent-hooks", "agent-mcp"], loader: loadCapabilityDirectoryView, mount: "mountCapabilityDirectoryView" },
       { names: ["agent-data"], loader: loadAgentDataView, mount: "mountAgentDataView" },
       { names: ["agent-memory-config"], loader: loadAgentMemoryConfigView, mount: "mountAgentMemoryConfigView" },

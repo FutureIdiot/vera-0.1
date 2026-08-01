@@ -75,7 +75,7 @@ function publishOfflineActivity({ store, hub, space, spaceSession, account, obse
 }
 
 export function postMessage({
-  store, hub, daemonScheduler, memoryDigestScheduler, files, observation, runBackground, runMessages, spaceId, body,
+  store, hub, daemonScheduler, memoryDigestScheduler, extensionHooks, files, observation, runBackground, runMessages, spaceId, body,
 }) {
   const space = getSpaceOrThrow(store, spaceId);
   const content = typeof body?.content === "string" ? body.content : "";
@@ -118,6 +118,7 @@ export function postMessage({
   const updatedSpace = touchSpaceUpdatedAt(store, spaceId, storedMessage.createdAt);
   hub.publish("message.created", { message: files.projectMessage(stripInternal(storedMessage), spaceId) });
   hub.publish("space.updated", { space: updatedSpace });
+  extensionHooks?.onMessageCommitted?.({ message: storedMessage, space });
   memoryDigestScheduler?.onMessageCommitted(storedMessage);
 
   if (body.author?.type === "account") {

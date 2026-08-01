@@ -385,3 +385,34 @@ test("unknown long-term totals stay unavailable and a failed initial load can re
     dispose();
   });
 });
+
+test("loads a registered memory-provider extension into the Agent configuration", async () => {
+  await withDom(async () => {
+    const extension = {
+      extensionId: "vera-memory",
+      name: "Vera Memory",
+      version: "0.1.0",
+      status: "registered",
+      capabilities: [{ capability: "memory-provider", unitId: "vera.memory.provider", kind: "plugin", name: "Provider" }],
+    };
+    let bound = false;
+    const fixture = createFixture({
+      onRequest(request) {
+        if (request.method === "GET" && request.path === "/api/extensions") return jsonResponse({ extensions: [extension] });
+        if (request.method === "GET" && request.path === "/api/agents/agt_owner/extensions") {
+          return jsonResponse({ extensions: [{ extension, binding: bound ? { enabled: true, version: "binding-2" } : null, instance: bound ? { status: "initialized" } : null }] });
+        }
+        if (request.method === "POST" && request.path === "/api/agents/agt_owner/extensions/vera-memory/bind") {
+          bound = true;
+          return jsonResponse({ binding: { enabled: true, version: "binding-2", instance: { status: "initialized" } } });
+        }
+        return null;
+      },
+    });
+    const dispose = await mountAgentMemoryConfigView({ ...fixture, agentId: "agt_owner" });
+    await emit(control(fixture.root, "memory-extension-vera-memory"), "click");
+    assert.equal(fixture.requests.some((request) => request.method === "POST" && request.path.endsWith("/extensions/vera-memory/bind")), true);
+    assert.match(fixture.root.textContent, /已初始化/u);
+    dispose();
+  });
+});

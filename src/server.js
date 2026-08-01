@@ -60,11 +60,27 @@ import { registerSystemUpdateRoutes } from "./api/system-update-routes.js";
 import { createObservationService, registerObservationRoutes } from "./spaces/observation.js";
 import { createRunBackgroundService } from "./spaces/run-background.js";
 import { createRunMessageService } from "./spaces/run-messages.js";
+import { createExtensionLoader } from "./extensions/loader.js";
+import { createExternalMemoryRuntime } from "./extensions/external-memory-runtime.js";
+import { registerExtensionRoutes } from "./extensions/routes.js";
+import {
+  createDisabledMemoryConfig,
+  createDisabledMemoryDigestScheduler,
+  createDisabledMemoryDigestService,
+  createDisabledMemoryDreamScheduler,
+  createDisabledMemoryDreamService,
+  createDisabledMemoryEmbeddingIndex,
+  createDisabledMemoryRetrieval,
+  createDisabledMemoryTaskRuntime,
+  createDisabledMemoryTaskTransport,
+  createDisabledMemoryVault,
+} from "./extensions/disabled-memory.js";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "dist");
 const serveStatic = createStaticHandler(frontendRoot);
 
 const config = loadConfig(process.env);
+const legacyMemoryEnabled = process.env.VERA_MEMORY_LEGACY === "true";
 const enforceRequestSecurity = createRequestSecurity({ config });
 const bootPaths = await applyBootPathOverrides(config);
 const store = await createStore({ dataPath: config.dataPath, debounceMs: config.store.debounceMs });
@@ -86,6 +102,27 @@ const observation = createObservationService({
   dispatchRunVisibility: ({ accountId, event }) => daemonRuntime?.dispatchRun({ accountId, event }),
 });
 const agentStates = createAgentStateTracker({ hub });
+const extensionLoader = createExtensionLoader({
+  store,
+  config,
+  onUpdated: (extension) => hub.publish("extension.updated", { extension }),
+});
+await extensionLoader.initializeExistingBindings();
+const extensionHooks = {
+  onMessageCommitted: ({ message, space }) => {
+    for (const seat of space.seats ?? []) {
+      const account = store.find("accounts", seat.accountId);
+      const agentId = account?.ownerAgentId;
+      if (!agentId) continue;
+      const extension = extensionLoader.getAgentCapability(agentId, "memory-provider");
+      if (!extension) continue;
+      void extensionLoader.callHook(extension.extension.extensionId, agentId, {
+        unitId: "vera.memory.write",
+        event: { messageId: message.id, spaceId: message.spaceId, spaceSessionId: message.spaceSessionId, author: message.author },
+      }).catch(() => {});
+    }
+  },
+};
 const settingsStore = await createSettingsStore({ dataPath: config.dataPath, config });
 const files = await createFilesService({
   store,
@@ -94,20 +131,20 @@ const files = await createFilesService({
   maxUploadBytes: config.files.maxUploadBytes,
   maxAttachmentsPerMessage: config.files.maxAttachmentsPerMessage,
 });
-const memoryTaskRuntime = createMemoryTaskRuntime({ store });
-const memoryTaskTransport = createMemoryTaskTransport({
+const memoryTaskRuntime = legacyMemoryEnabled ? createMemoryTaskRuntime({ store }) : createDisabledMemoryTaskRuntime();
+const memoryTaskTransport = legacyMemoryEnabled ? createMemoryTaskTransport({
   taskRuntime: memoryTaskRuntime,
   timeoutMs: config.memory.taskDaemonTimeoutMs,
-});
-const memoryConfig = createMemoryConfigService({
+}) : createDisabledMemoryTaskTransport();
+const memoryConfig = legacyMemoryEnabled ? createMemoryConfigService({
   store,
   settingsStore,
   config,
   validateTaskSelection: ({ ownerAgentId, taskKind, taskConfig }) =>
     memoryTaskRuntime.resolveTaskSnapshot({ ownerAgentId, taskKind, taskConfig }),
-});
+}) : createDisabledMemoryConfig();
 await memoryConfig.initializeExistingAgents();
-for (const agent of store.list("agents")) ensureUnitBindings(store, agent.id);
+if (legacyMemoryEnabled) for (const agent of store.list("agents")) ensureUnitBindings(store, agent.id);
 const controlService = createControlService({
   store,
   config,
@@ -115,8 +152,9 @@ const controlService = createControlService({
   memoryConfigService: memoryConfig,
   hub,
   projectActivity: observation.projectActivity,
+  enableBuiltInMemory: legacyMemoryEnabled,
 });
-const memory = createMemoryVault({
+const memory = legacyMemoryEnabled ? createMemoryVault({
   vaultPath: config.memory.vaultPath,
   resolveSource: ({ messageId }) => store.find("messages", messageId),
   onExternalEdit: ({ agentId, slug }) => {
@@ -125,9 +163,9 @@ const memory = createMemoryVault({
     if (store.find("memorySignals", id)) store.update("memorySignals", id, signal);
     else store.insert("memorySignals", signal);
   },
-});
-const memoryEmbeddingIndex = createMemoryEmbeddingIndex({ memory });
-const memoryRetrieval = createMemoryRetrievalService({
+}) : createExternalMemoryRuntime({ loader: extensionLoader });
+const memoryEmbeddingIndex = legacyMemoryEnabled ? createMemoryEmbeddingIndex({ memory }) : createDisabledMemoryEmbeddingIndex();
+const memoryRetrieval = legacyMemoryEnabled ? createMemoryRetrievalService({
   store,
   memory,
   embeddingIndex: memoryEmbeddingIndex,
@@ -137,7 +175,7 @@ const memoryRetrieval = createMemoryRetrievalService({
     derivedWeightSeed: config.memory.derivedWeightSeed,
   },
   isRecallEnabled: (agentId) => getUnitBinding(store, agentId, "vera.memory.recall").enabled,
-});
+}) : memory;
 
 // provider -> adapter：显式的普通map，不做注册表抽象
 // （AGENTS.md「可配置 ≠ 抽象层」）。
@@ -230,21 +268,21 @@ async function executeMemoryDream({ job, payload, signal }) {
 }
 
 applyRuntimeSettings({ settings: settingsStore.getAll(), memoryRetrieval });
-const memoryDigestService = createMemoryDigestService({
+const memoryDigestService = legacyMemoryEnabled ? createMemoryDigestService({
   store,
   memory,
   freezeTask: freezeMemoryTask,
   validateTaskSnapshot: validateMemoryTask,
   proposalExecutor: executeMemoryDigest,
   onJobUpdated: (job) => hub.publish("memory.digest-job.updated", { job }),
-});
-const memoryDigestScheduler = createMemoryDigestScheduler({
+}) : createDisabledMemoryDigestService();
+const memoryDigestScheduler = legacyMemoryEnabled ? createMemoryDigestScheduler({
   store,
   digestService: memoryDigestService,
   configService: memoryConfig,
   isWriteEnabled: (agentId) => getUnitBinding(store, agentId, "vera.memory.write").enabled,
-});
-const memoryDreamService = createMemoryDreamService({
+}) : createDisabledMemoryDigestScheduler();
+const memoryDreamService = legacyMemoryEnabled ? createMemoryDreamService({
   store,
   memory,
   freezeTask: freezeMemoryTask,
@@ -252,8 +290,8 @@ const memoryDreamService = createMemoryDreamService({
   proposalExecutor: executeMemoryDream,
   batchSize: config.memory.dreamBatchSize,
   onJobUpdated: (job) => hub.publish("memory.dream-job.updated", { agentId: job.agentId, job }),
-});
-const memoryDreamScheduler = createMemoryDreamScheduler({ configService: memoryConfig, dreamService: memoryDreamService });
+}) : createDisabledMemoryDreamService();
+const memoryDreamScheduler = legacyMemoryEnabled ? createMemoryDreamScheduler({ configService: memoryConfig, dreamService: memoryDreamService }) : createDisabledMemoryDreamScheduler();
 memoryDigestService.start();
 memoryDigestScheduler.start();
 memoryDreamService.start();
@@ -343,6 +381,8 @@ const router = createRouter();
 
 router.get("/api/health", ({ res }) => sendJson(res, 200, { app: "vera", ok: true }));
 
+registerExtensionRoutes(router, { loader: extensionLoader });
+
 router.get("/api/bootstrap", ({ res }) => {
   sendJson(res, 200, {
     agents: listAgents(store),
@@ -366,6 +406,7 @@ registerAgentRoutes(router, {
   memoryConfigService: memoryConfig,
   controlService,
   daemonRuntime,
+  enableBuiltInMemory: legacyMemoryEnabled,
 });
 registerMemoryTaskRoutes(router, {
   controlService,
@@ -378,6 +419,7 @@ registerSpaceRoutes(router, {
   contextForge,
   runBackground, controlService,
   runMessages,
+  extensionHooks,
 });
 registerObservationRoutes(router, { observation });
 registerFilesRoutes(router, { files, hub });
@@ -391,6 +433,7 @@ registerMemoryRoutes(router, {
   taskRuntime: memoryTaskRuntime,
   digestScheduler: memoryDigestScheduler,
   dreamScheduler: memoryDreamScheduler,
+  extensionLoader,
 });
 // 系统设置（Phase 4.5）：独立 settings.json 模块，不进 store.js（避免与 4.3+4.4 并行分支冲突）。
 // boot 顺序：store → hub/agentStates/memory → settingsStore → 路由注册。
@@ -433,6 +476,7 @@ async function shutdown() {
   await memoryDreamService.close();
   await memoryDigestService.close();
   await memoryEmbeddingIndex.drain();
+  await extensionLoader.close();
   for (const adapter of Object.values(adapters)) {
     try {
       await adapter.shutdown?.();

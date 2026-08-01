@@ -64,6 +64,7 @@ export function createControlService({
   agentStates = null,
   hub = null,
   projectActivity = (activity) => activity,
+  enableBuiltInMemory = true,
 }) {
   const credentials = createAgentCredentialStore({ tokensPath: config.agentDaemon.tokensPath });
   const sessions = createAccountSessionService();
@@ -236,7 +237,7 @@ export function createControlService({
           });
           token = await credentials.issue(agent.id);
           agentStates?.ensure?.(agent.id);
-          ensureUnitBindings(store, agent.id);
+          if (enableBuiltInMemory) ensureUnitBindings(store, agent.id);
           memoryConfigService?.ensureAgentConfig?.(agent.id);
           return { agent: projectAgent(agent), agentToken: token.token, account: projectAccount(updatedAccount) };
         } catch (error) {

@@ -409,6 +409,7 @@ export async function startGateway({ repoRoot, env, cwd = repoRoot }) {
     resolvedEnv.VERA_ALLOW_LOOPBACK_DEVELOPMENT = "true";
   }
   if (resolvedEnv.NODE_ENV === undefined) resolvedEnv.NODE_ENV = "test";
+  if (resolvedEnv.VERA_MEMORY_LEGACY === undefined) resolvedEnv.VERA_MEMORY_LEGACY = "true";
   if (resolvedEnv.VERA_DATA_PATH && !resolvedEnv.VERA_FILES_ATTACHMENTS_PATH) {
     resolvedEnv.VERA_FILES_ATTACHMENTS_PATH = join(resolvedEnv.VERA_DATA_PATH, "files");
   }

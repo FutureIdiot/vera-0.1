@@ -1,6 +1,7 @@
 // Agent HTTP 路由（api-contract.md 三、Agent 表格）。
 
 import { asHandler, readJsonBody, sendJson, sendNoContent } from "../api/http.js";
+import { ApiError } from "../core/errors.js";
 import { listAgents, createAgent, updateAgent, deleteAgent, projectAgent } from "./agents.js";
 import {
   listAccounts,
@@ -23,6 +24,7 @@ export function registerAgentRoutes(router, {
   memoryConfigService = null,
   controlService = null,
   daemonRuntime = null,
+  enableBuiltInMemory = true,
 }) {
   if (controlService) {
     router.post(
@@ -198,7 +200,7 @@ export function registerAgentRoutes(router, {
       const body = await readJsonBody(req);
       const { agent, account } = createAgent(store, body);
       memoryConfigService?.ensureAgentConfig(agent.id);
-      ensureUnitBindings(store, agent.id);
+      if (enableBuiltInMemory) ensureUnitBindings(store, agent.id);
       sendJson(res, 201, { agent, account });
     }),
   );
@@ -206,13 +208,14 @@ export function registerAgentRoutes(router, {
   router.get(
     "/api/agents/:id/unit-bindings",
     asHandler(async ({ res, params, query }) => {
-      sendJson(res, 200, { bindings: listUnitBindings(store, params.id, { kind: query.get("kind") }) });
+      sendJson(res, 200, { bindings: enableBuiltInMemory ? listUnitBindings(store, params.id, { kind: query.get("kind") }) : [] });
     }),
   );
 
   router.patch(
     "/api/agents/:id/unit-bindings/:unitId",
     asHandler(async ({ req, res, params }) => {
+      if (!enableBuiltInMemory) throw new ApiError("not_found", "built-in memory units are disabled; use the Agent extension bindings");
       const body = await readJsonBody(req);
       const binding = updateUnitBinding(store, params.id, params.unitId, body);
       sendJson(res, 200, { binding });

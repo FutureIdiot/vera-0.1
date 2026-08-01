@@ -1,5 +1,6 @@
 import { createHttpClient } from "../api/http-client.js";
 import { createMemoryClient } from "../api/memory-client.js";
+import { createExtensionsClient } from "../api/extensions-client.js";
 import {
   isMemoryTaskAvailable,
   memorySectionTitle,
@@ -26,6 +27,7 @@ export async function mountAgentMemoryConfigView({ root, platform, runtime, agen
   }
 
   const memoryClient = createMemoryClient(createHttpClient(platform));
+  const extensionsClient = createExtensionsClient(createHttpClient(platform));
   let disposed = false;
   let loading = true;
   let loadError = null;
@@ -36,6 +38,9 @@ export async function mountAgentMemoryConfigView({ root, platform, runtime, agen
   let digestDraft = null;
   let dreamDraft = null;
   let selectedPendingKey = null;
+  let memoryExtensions = [];
+  let extensionError = null;
+  let extensionBusy = null;
 
   const content = document.createElement("div");
   content.className = "vera-management-content";
@@ -43,6 +48,8 @@ export async function mountAgentMemoryConfigView({ root, platform, runtime, agen
   feedback.hidden = true;
   const providerSection = document.createElement("section");
   providerSection.className = "vera-management-section";
+  const extensionSection = document.createElement("section");
+  extensionSection.className = "vera-management-section";
   const statusSection = document.createElement("section");
   statusSection.className = "vera-management-section";
   const digestSection = document.createElement("section");
@@ -73,6 +80,69 @@ export async function mountAgentMemoryConfigView({ root, platform, runtime, agen
 
   function providerAvailable() {
     return status?.provider?.state === "available";
+  }
+
+  function memoryProviderExtensions() {
+    return memoryExtensions.filter((item) => (item.extension?.capabilities ?? []).some((capability) => capability.capability === "memory-provider"));
+  }
+
+  function renderExtensionSection() {
+    extensionSection.replaceChildren(memorySectionTitle("外部 Memory 模块"));
+    if (extensionError) {
+      extensionSection.appendChild(createNotice(`外部模块状态不可用：${extensionError}`, "danger"));
+      return;
+    }
+    const candidates = memoryProviderExtensions();
+    if (!candidates.length) {
+      extensionSection.appendChild(createNotice("没有已登记的 Memory 模块；请先在 Extension 管理中登记。"));
+      return;
+    }
+    for (const item of candidates) {
+      const card = document.createElement("article");
+      card.className = "vera-management-card";
+      const title = document.createElement("strong");
+      title.textContent = `${item.extension.name} · ${item.extension.version}`;
+      const state = document.createElement("span");
+      state.textContent = item.instance?.status === "initialized"
+        ? "已初始化"
+        : item.binding?.enabled ? "绑定中" : item.extension.status === "failed" ? "载入失败" : "未载入";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "vera-secondary-button";
+      button.dataset.control = `memory-extension-${item.extension.extensionId}`;
+      button.textContent = item.instance?.status === "initialized" ? "已载入" : "载入并初始化";
+      button.disabled = Boolean(extensionBusy || item.instance?.status === "initialized");
+      button.addEventListener("click", async () => {
+        if (extensionBusy) return;
+        extensionBusy = item.extension.extensionId;
+        renderExtensionSection();
+        try {
+          await extensionsClient.bindAgent(agentId, item.extension.extensionId, { enabled: true, ifMatch: item.binding?.version ?? null });
+          await refreshExtensions();
+          showFeedback("Memory 模块已载入并完成初始化", "success");
+        } catch (error) {
+          showFeedback(`Memory 模块初始化失败：${error.message}`, "danger");
+        } finally {
+          extensionBusy = null;
+          renderExtensionSection();
+        }
+      });
+      card.append(title, document.createElement("br"), state, button);
+      extensionSection.appendChild(card);
+    }
+  }
+
+  async function refreshExtensions() {
+    try {
+      const [all, bound] = await Promise.all([extensionsClient.list(), extensionsClient.listAgent(agentId)]);
+      const boundById = new Map((bound.extensions ?? bound.bindings ?? []).map((item) => [item.extension?.extensionId ?? item.extensionId, item.binding ?? item]));
+      memoryExtensions = (all.extensions ?? []).map((extension) => ({ extension, ...(boundById.has(extension.extensionId) ? { binding: boundById.get(extension.extensionId) } : {}), ...(bound.extensions ?? bound.bindings ?? []).find((item) => (item.extension?.extensionId ?? item.extensionId) === extension.extensionId)?.instance ? { instance: (bound.extensions ?? bound.bindings ?? []).find((item) => (item.extension?.extensionId ?? item.extensionId) === extension.extensionId).instance } : {} }));
+      extensionError = null;
+    } catch (error) {
+      memoryExtensions = [];
+      extensionError = error.message;
+    }
+    if (!disposed) renderExtensionSection();
   }
 
   function pendingSpaces() {
@@ -200,10 +270,12 @@ export async function mountAgentMemoryConfigView({ root, platform, runtime, agen
       retry.className = "vera-secondary-button";
       retry.textContent = "重试";
       retry.addEventListener("click", () => { void load(); });
-      content.replaceChildren(createNotice(`Memory 配置读取失败：${loadError}`, "danger"), retry, libraryLink);
+      content.replaceChildren(feedback, extensionSection, createNotice(`Memory 配置读取失败：${loadError}`, "danger"), retry, libraryLink);
+      renderExtensionSection();
       return;
     }
-    content.replaceChildren(feedback, providerSection, statusSection, digestSection, dreamSection, actionsSection);
+    content.replaceChildren(feedback, extensionSection, providerSection, statusSection, digestSection, dreamSection, actionsSection);
+    renderExtensionSection();
     renderMemoryProviderSection(providerSection, { config, options, status });
     renderMemoryStatusSection(statusSection, status);
     renderTask("digest");
@@ -215,6 +287,7 @@ export async function mountAgentMemoryConfigView({ root, platform, runtime, agen
     loading = true;
     loadError = null;
     render();
+    await refreshExtensions();
     try {
       const [configResponse, optionsResponse, statusResponse] = await Promise.all([
         memoryClient.getConfig(agentId),
@@ -242,6 +315,7 @@ export async function mountAgentMemoryConfigView({ root, platform, runtime, agen
   await load();
   const unsubscribe = runtime.subscribe((envelope) => {
     const eventAgentId = envelope.data?.agentId ?? envelope.data?.job?.agentId;
+    if (envelope.type === "extension.updated") void refreshExtensions();
     if (["memory.digest-job.updated", "memory.dream-job.updated"].includes(envelope.type) && eventAgentId === agentId) {
       void refreshStatus();
     }
