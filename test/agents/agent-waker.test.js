@@ -18,7 +18,7 @@ test("host waker starts the daemon once and only starts it again after an explic
     });
     return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
   };
-  const spawnImpl = (_command, _args, options) => {
+  const spawnImpl = (command, args, options) => {
     const child = new EventEmitter();
     child.exitCode = null;
     child.killed = false;
@@ -27,7 +27,7 @@ test("host waker starts the daemon once and only starts it again after an explic
       child.exitCode = 0;
       child.emit("exit", 0);
     };
-    children.push({ child, options });
+    children.push({ child, command, args, options });
     return child;
   };
   const waker = createAgentWaker({
@@ -43,6 +43,9 @@ test("host waker starts the daemon once and only starts it again after an explic
   try {
     await settle();
     assert.equal(children.length, 1);
+    assert.equal(children[0].command, process.execPath);
+    assert.deepEqual(children[0].args.slice(0, 1), ["--preserve-symlinks-main"]);
+    assert.match(children[0].args[1], /agent-daemon\.js$/u);
     children[0].child.exitCode = 0;
     children[0].child.emit("exit", 0);
     await settle();

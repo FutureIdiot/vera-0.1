@@ -73,7 +73,7 @@ export function createAgentWaker({
 
   function startDaemon() {
     if (child && child.exitCode === null && !child.killed) return false;
-    const next = spawnImpl(process.execPath, [daemonPath], {
+    const next = spawnImpl(process.execPath, ["--preserve-symlinks-main", daemonPath], {
       env: { ...env },
       stdio: "inherit",
     });
