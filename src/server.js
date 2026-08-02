@@ -469,7 +469,11 @@ const server = createServer(async (req, res) => {
     }
     sendError(res, 404, "not_found", `no route for ${req.method} ${req.url}`);
   } catch (err) {
-    sendError(res, 500, "internal", err?.message || "internal error");
+    if (!res.headersSent && !res.writableEnded) {
+      sendError(res, 500, "internal", err?.message || "internal error");
+    } else if (!res.writableEnded) {
+      res.end();
+    }
   }
 });
 

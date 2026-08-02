@@ -45,7 +45,44 @@ export function createDisabledMemoryTaskRuntime() {
 }
 
 export function createDisabledMemoryTaskTransport() {
-  return { dispatch: async () => { throw new ApiError("memory_task_unavailable", "Memory extension is not loaded for this Gateway"); }, close: () => {} };
+  const subscribers = new Map();
+  let seq = 0;
+
+  function taskUnavailable() {
+    throw new ApiError("memory_task_unavailable", "Memory extension is not loaded for this Gateway");
+  }
+
+  return {
+    subscribe(agentId, listener) {
+      if (typeof agentId !== "string" || !agentId || typeof listener?.write !== "function") {
+        throw new ApiError("invalid_request", "Memory task subscriber is invalid");
+      }
+      const listeners = subscribers.get(agentId) ?? new Set();
+      listeners.add(listener);
+      subscribers.set(agentId, listeners);
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) subscribers.delete(agentId);
+      };
+    },
+    dispatch: async () => taskUnavailable(),
+    submitResult: taskUnavailable,
+    heartbeat(agentId) {
+      const listeners = subscribers.get(agentId);
+      if (!listeners?.size) return false;
+      const timestamp = new Date().toISOString();
+      const envelope = {
+        seq: ++seq,
+        type: "agent.heartbeat",
+        ts: timestamp,
+        data: { ts: timestamp },
+      };
+      const frame = `id: ${envelope.seq}\ndata: ${JSON.stringify(envelope)}\n\n`;
+      for (const listener of listeners) listener.write(frame);
+      return true;
+    },
+    close() { subscribers.clear(); },
+  };
 }
 
 export function createDisabledMemoryDigestService() {

@@ -42,7 +42,11 @@ export function asHandler(fn) {
     } catch (err) {
       const code = err?.code || "internal";
       const status = STATUS_BY_CODE[code] || 500;
-      sendError(ctx.res, status, code, err?.message || "internal error", err?.details);
+      if (!ctx.res.headersSent && !ctx.res.writableEnded) {
+        sendError(ctx.res, status, code, err?.message || "internal error", err?.details);
+      } else if (!ctx.res.writableEnded) {
+        ctx.res.end();
+      }
       recordError("api", code, err?.message || "internal error");
     }
   };
