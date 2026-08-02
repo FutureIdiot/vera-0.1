@@ -114,3 +114,38 @@ test("unsafe control files and symlink request directories fail closed", async (
   const unsafe = createGatewayUpdateControl({ config: { controlPath: unsafeRoot, releaseMetadataPath: two.releaseMetadataPath } });
   await assert.rejects(() => unsafe.queueCheck(), { code: "update_unavailable" });
 });
+
+test("SSH-only candidate and rollback requests have safe pending projections", async () => {
+  const candidate = await fixture();
+  await writeFile(join(candidate.controlPath, "requests", "request.json"), JSON.stringify({
+    schemaVersion: 1,
+    requestId: CHECK_ID,
+    action: "candidate",
+    targetCommit: TARGET,
+    requestedAt: "2026-07-23T01:02:03.000Z",
+  }));
+  assert.deepEqual((await candidate.control.getStatus()).target, { commit: TARGET, version: null });
+
+  const rollback = await fixture();
+  await writeFile(join(rollback.controlPath, "requests", "request.json"), JSON.stringify({
+    schemaVersion: 1,
+    requestId: CHECK_ID,
+    action: "rollback",
+    ifCurrentCommit: CURRENT,
+    requestedAt: "2026-07-23T01:02:03.000Z",
+  }));
+  assert.deepEqual((await rollback.control.getStatus()).target, { commit: CURRENT, version: null });
+});
+
+test("Gateway cannot project candidate requests with extra source fields", async () => {
+  const { control, controlPath } = await fixture();
+  await writeFile(join(controlPath, "requests", "request.json"), JSON.stringify({
+    schemaVersion: 1,
+    requestId: CHECK_ID,
+    action: "candidate",
+    targetCommit: TARGET,
+    requestedAt: "2026-07-23T01:02:03.000Z",
+    repository: "file:///tmp/evil",
+  }));
+  await assert.rejects(() => control.getStatus(), { code: "update_unavailable" });
+});

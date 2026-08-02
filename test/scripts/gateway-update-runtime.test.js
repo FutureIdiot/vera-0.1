@@ -16,6 +16,7 @@ async function fixture() {
   const updateRoot = join(root, "update");
   const releaseRoot = join(root, "release");
   const dataPath = join(root, "data");
+  const candidateRepository = join(root, "candidate.git");
   await mkdir(join(updateRoot, "requests"), { recursive: true });
   await mkdir(join(updateRoot, "status"), { recursive: true });
   await mkdir(releaseRoot);
@@ -24,12 +25,13 @@ async function fixture() {
     VERA_UPDATE_ROOT: updateRoot,
     VERA_RELEASE_ROOT: releaseRoot,
     VERA_UPDATE_DATA_PATH: dataPath,
+    VERA_UPDATE_CANDIDATE_REPOSITORY: candidateRepository,
     VERA_UPDATE_REPOSITORY: "https://github.com/FutureIdiot/vera-0.1.git",
     VERA_UPDATE_BRANCH: "master",
     VERA_UPDATE_SERVICE: "vera-gateway.service",
     VERA_UPDATE_HEALTH_URL: "http://127.0.0.1:3210/api/health",
   };
-  return { root, updateRoot, releaseRoot, dataPath, env };
+  return { root, updateRoot, releaseRoot, dataPath, candidateRepository, env };
 }
 
 async function applyFixture() {
@@ -99,9 +101,34 @@ function releaseExec(fixtureValue, { mutateOnNewStart = false, failTests = false
 test("root updater config rejects browser-shaped targets and overlapping paths", async () => {
   const { env, releaseRoot } = await fixture();
   assert.equal(parseUpdateConfig(env).branch, "master");
+  assert.equal(parseUpdateConfig({ ...env, VERA_UPDATE_CANDIDATE_REPOSITORY: undefined }).candidateRepository, null);
+  assert.throws(() => parseUpdateConfig({ ...env, VERA_UPDATE_CANDIDATE_REPOSITORY: "relative.git" }), { code: "configuration_invalid" });
+  assert.throws(() => parseUpdateConfig({ ...env, VERA_UPDATE_CANDIDATE_REPOSITORY: releaseRoot }), { code: "configuration_invalid" });
+  assert.throws(() => parseUpdateConfig({ ...env, VERA_UPDATE_CANDIDATE_REPOSITORY: join(env.VERA_UPDATE_ROOT, "candidate.git") }), { code: "configuration_invalid" });
   assert.throws(() => parseUpdateConfig({ ...env, VERA_UPDATE_REPOSITORY: "ssh://evil/repo" }), { code: "configuration_invalid" });
   assert.throws(() => parseUpdateConfig({ ...env, VERA_UPDATE_BRANCH: "../evil" }), { code: "configuration_invalid" });
   assert.throws(() => parseUpdateConfig({ ...env, VERA_UPDATE_DATA_PATH: join(releaseRoot, "data") }), { code: "configuration_invalid" });
+});
+
+test("candidate initializes its private workspace without fetching the public branch", async () => {
+  const value = await applyFixture();
+  await writeFile(join(value.updateRoot, "requests", "request.json"), JSON.stringify({
+    schemaVersion: 1,
+    requestId: REQUEST_ID,
+    action: "candidate",
+    targetCommit: TARGET,
+    requestedAt: "2026-07-23T00:00:00.000Z",
+  }));
+  const commands = releaseExec(value);
+  await runGatewayUpdate(value.env, {
+    exec: commands.exec,
+    fetchImpl: async () => new Response(JSON.stringify({ app: "vera", ok: true })),
+    sleep: async () => {},
+    now: () => new Date("2026-07-23T01:02:03.000Z"),
+  });
+  assert.equal(commands.calls.some(([command, args]) => command === "git" && args[0] === "init"), true);
+  assert.equal(commands.calls.some(([command, args]) => command === "git" && args[0] === "clone"), false);
+  assert.equal(commands.calls.some(([command, args]) => command === "git" && args.includes("fetch") && args.includes("origin")), false);
 });
 
 test("root updater request parser accepts only frozen check and apply shapes", () => {
@@ -111,6 +138,12 @@ test("root updater request parser accepts only frozen check and apply shapes", (
   const apply = { ...check, action: "apply", targetCommit: TARGET, checkedRequestId: `upd_${"b".repeat(32)}` };
   assert.deepEqual(parseUpdateRequest(apply), apply);
   assert.throws(() => parseUpdateRequest({ ...apply, targetCommit: "master" }), { code: "request_invalid" });
+  const candidate = { ...check, action: "candidate", targetCommit: TARGET };
+  assert.deepEqual(parseUpdateRequest(candidate), candidate);
+  assert.throws(() => parseUpdateRequest({ ...candidate, ref: "refs/heads/main" }), { code: "request_invalid" });
+  const rollback = { ...check, action: "rollback", ifCurrentCommit: TARGET };
+  assert.deepEqual(parseUpdateRequest(rollback), rollback);
+  assert.throws(() => parseUpdateRequest({ ...rollback, service: "vera-gateway.service" }), { code: "request_invalid" });
 });
 
 test("check request writes only a safe available status", async () => {
@@ -232,4 +265,94 @@ test("unhealthy new release restores the old symlink and pre-update data", async
   assert.equal(status.state, "rolled_back");
   assert.equal(status.error.code, "service_failed");
   assert.equal(commands.startCount, 2);
+});
+
+test("candidate fetch is pinned to its fixed repository ref and marks the release", async () => {
+  const value = await applyFixture();
+  const candidateRequest = {
+    schemaVersion: 1,
+    requestId: REQUEST_ID,
+    action: "candidate",
+    targetCommit: TARGET,
+    requestedAt: "2026-07-23T00:00:00.000Z",
+  };
+  await writeFile(join(value.updateRoot, "requests", "request.json"), JSON.stringify(candidateRequest));
+  const commands = releaseExec(value);
+  await runGatewayUpdate(value.env, {
+    exec: commands.exec,
+    fetchImpl: async () => new Response(JSON.stringify({ app: "vera", ok: true }), { status: 200 }),
+    sleep: async () => {},
+    now: () => new Date("2026-07-23T01:02:03.000Z"),
+  });
+  const fetchCall = commands.calls.find(([command, args]) => command === "git" && args[0] === "-C" && args.includes("fetch"));
+  assert.deepEqual(fetchCall[1].slice(-2), [value.candidateRepository, `refs/heads/candidates/${TARGET}`]);
+  const marker = JSON.parse(await readFile(join(value.releaseRoot, "releases", TARGET, ".vera-release.json"), "utf8"));
+  assert.equal(marker.source, "candidate");
+  const metadata = JSON.parse(await readFile(join(value.updateRoot, "rollback.json"), "utf8"));
+  assert.deepEqual(Object.keys(metadata).sort(), ["backupPath", "candidateCommit", "createdAt", "previousRelease", "schemaVersion", "source"]);
+  assert.equal(metadata.candidateCommit, TARGET);
+  assert.equal((await stat(join(value.updateRoot, "rollback.json"))).mode & 0o777, 0o600);
+});
+
+test("candidate rollback is a CAS transaction and preserves the candidate data", async () => {
+  const value = await applyFixture();
+  await writeFile(join(value.updateRoot, "requests", "request.json"), JSON.stringify({
+    schemaVersion: 1,
+    requestId: REQUEST_ID,
+    action: "candidate",
+    targetCommit: TARGET,
+    requestedAt: "2026-07-23T00:00:00.000Z",
+  }));
+  const commands = releaseExec(value);
+  const options = { exec: commands.exec, fetchImpl: async () => new Response(JSON.stringify({ app: "vera", ok: true })), sleep: async () => {}, now: () => new Date("2026-07-23T01:02:03.000Z") };
+  await runGatewayUpdate(value.env, options);
+  await writeFile(join(value.dataPath, "candidate-change"), "candidate");
+  await writeFile(join(value.updateRoot, "requests", "request.json"), JSON.stringify({
+    schemaVersion: 1,
+    requestId: `upd_${"c".repeat(32)}`,
+    action: "rollback",
+    ifCurrentCommit: TARGET,
+    requestedAt: "2026-07-23T01:03:03.000Z",
+  }));
+  await runGatewayUpdate(value.env, options);
+  assert.equal(await readlink(join(value.releaseRoot, "current")), value.oldRelease);
+  assert.equal(await readFile(join(value.dataPath, "canary"), "utf8"), "original");
+  assert.equal(await readFile(join(value.root, "data.failed-update-cccccccc", "candidate-change"), "utf8"), "candidate");
+  await assert.rejects(() => readFile(join(value.updateRoot, "rollback.json")), { code: "ENOENT" });
+  const status = JSON.parse(await readFile(join(value.updateRoot, "status", "status.json"), "utf8"));
+  assert.equal(status.state, "rolled_back");
+  assert.equal(status.error, null);
+  assert.equal(status.target.commit, value.oldCommit);
+});
+
+test("rollback rejects a stale CAS or unsafe metadata without touching current or data", async () => {
+  const value = await applyFixture();
+  const commands = releaseExec(value);
+  await writeFile(join(value.updateRoot, "requests", "request.json"), JSON.stringify({ schemaVersion: 1, requestId: REQUEST_ID, action: "candidate", targetCommit: TARGET, requestedAt: "2026-07-23T00:00:00.000Z" }));
+  const options = { exec: commands.exec, fetchImpl: async () => new Response(JSON.stringify({ app: "vera", ok: true })), sleep: async () => {}, now: () => new Date("2026-07-23T01:02:03.000Z") };
+  await runGatewayUpdate(value.env, options);
+  await writeFile(join(value.updateRoot, "rollback.json"), JSON.stringify({ schemaVersion: 1, source: "candidate", candidateCommit: TARGET, previousRelease: "../escape", backupPath: "backup", createdAt: "2026-07-23T01:02:03.000Z" }), { mode: 0o600 });
+  await writeFile(join(value.updateRoot, "requests", "request.json"), JSON.stringify({ schemaVersion: 1, requestId: `upd_${"d".repeat(32)}`, action: "rollback", ifCurrentCommit: "4".repeat(40), requestedAt: "2026-07-23T01:04:03.000Z" }));
+  await assert.rejects(() => runGatewayUpdate(value.env, options), { code: "rollback_invalid" });
+  assert.equal(await readlink(join(value.releaseRoot, "current")), join(value.releaseRoot, "releases", TARGET));
+  assert.equal(await readFile(join(value.dataPath, "canary"), "utf8"), "original");
+  const status = JSON.parse(await readFile(join(value.updateRoot, "status", "status.json"), "utf8"));
+  assert.equal(status.state, "failed");
+  assert.equal(status.error.code, "rollback_invalid");
+});
+
+test("unhealthy candidate release rolls back without leaving rollback metadata", async () => {
+  const value = await applyFixture();
+  await writeFile(join(value.updateRoot, "requests", "request.json"), JSON.stringify({ schemaVersion: 1, requestId: REQUEST_ID, action: "candidate", targetCommit: TARGET, requestedAt: "2026-07-23T00:00:00.000Z" }));
+  const commands = releaseExec(value);
+  const fetchImpl = async () => {
+    const target = await readlink(join(value.releaseRoot, "current"));
+    const ok = target === value.oldRelease;
+    return new Response(JSON.stringify({ app: "vera", ok }), { status: ok ? 200 : 503 });
+  };
+  await runGatewayUpdate(value.env, { exec: commands.exec, fetchImpl, sleep: async () => {}, now: () => new Date("2026-07-23T01:02:03.000Z") });
+  assert.equal(await readlink(join(value.releaseRoot, "current")), value.oldRelease);
+  await assert.rejects(() => readFile(join(value.updateRoot, "rollback.json")), { code: "ENOENT" });
+  const status = JSON.parse(await readFile(join(value.updateRoot, "status", "status.json"), "utf8"));
+  assert.equal(status.state, "rolled_back");
 });

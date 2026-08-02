@@ -11,6 +11,10 @@
   "scripts": {
     "start": "node src/server.js",
     "setup": "node scripts/setup.mjs",
+    "deploy:candidate": "node scripts/release.mjs candidate",
+    "deploy:verify": "node scripts/release.mjs verify",
+    "deploy:promote": "node scripts/release.mjs promote",
+    "deploy:rollback": "node scripts/release.mjs rollback",
     "test": "node --test",
     "dev:web": "vite --config frontend/vite.config.js",
     "build:web": "vite build --config frontend/vite.config.js",

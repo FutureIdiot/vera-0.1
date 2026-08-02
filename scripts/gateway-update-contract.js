@@ -33,6 +33,9 @@ export function parseUpdateConfig(env) {
   const updateRoot = absolute(env, "VERA_UPDATE_ROOT");
   const releaseRoot = absolute(env, "VERA_RELEASE_ROOT");
   const dataPath = absolute(env, "VERA_UPDATE_DATA_PATH");
+  const candidateRepository = env.VERA_UPDATE_CANDIDATE_REPOSITORY
+    ? absolute(env, "VERA_UPDATE_CANDIDATE_REPOSITORY")
+    : null;
   const repository = required(env, "VERA_UPDATE_REPOSITORY");
   const branch = required(env, "VERA_UPDATE_BRANCH");
   const service = required(env, "VERA_UPDATE_SERVICE");
@@ -50,12 +53,18 @@ export function parseUpdateConfig(env) {
   }
   if (
     isPathWithin(releaseRoot, dataPath) || isPathWithin(dataPath, releaseRoot) ||
-    isPathWithin(updateRoot, dataPath) || isPathWithin(dataPath, updateRoot)
+    isPathWithin(updateRoot, dataPath) || isPathWithin(dataPath, updateRoot) ||
+    (candidateRepository && (
+      isPathWithin(updateRoot, candidateRepository) || isPathWithin(candidateRepository, updateRoot) ||
+      isPathWithin(releaseRoot, candidateRepository) || isPathWithin(candidateRepository, releaseRoot) ||
+      isPathWithin(dataPath, candidateRepository) || isPathWithin(candidateRepository, dataPath)
+    ))
   ) throw new UpdateFailure("configuration_invalid", "Updater paths overlap");
   return {
     updateRoot,
     releaseRoot,
     dataPath,
+    candidateRepository,
     repository,
     branch,
     service,
@@ -65,6 +74,7 @@ export function parseUpdateConfig(env) {
     statusDirectory: join(updateRoot, "status"),
     statusPath: join(updateRoot, "status", "status.json"),
     backupRoot: join(updateRoot, "backups"),
+    rollbackMetadataPath: join(updateRoot, "rollback.json"),
     currentPath: join(releaseRoot, "current"),
     releasesPath: join(releaseRoot, "releases"),
   };
@@ -82,6 +92,16 @@ export function parseUpdateRequest(value) {
     throw new UpdateFailure("request_invalid", "Update request is invalid");
   }
   if (value.action === "check" && exactKeys(value, ["action", "requestId", "requestedAt", "schemaVersion"])) return value;
+  if (
+    value.action === "candidate" &&
+    exactKeys(value, ["action", "requestId", "requestedAt", "schemaVersion", "targetCommit"]) &&
+    COMMIT.test(value.targetCommit)
+  ) return value;
+  if (
+    value.action === "rollback" &&
+    exactKeys(value, ["action", "ifCurrentCommit", "requestId", "requestedAt", "schemaVersion"]) &&
+    COMMIT.test(value.ifCurrentCommit)
+  ) return value;
   if (
     value.action === "apply" &&
     exactKeys(value, ["action", "checkedRequestId", "requestId", "requestedAt", "schemaVersion", "targetCommit"]) &&
@@ -102,6 +122,7 @@ export function safeUpdateError(error) {
     backup_failed: "Gateway data could not be backed up",
     service_failed: "Gateway did not become healthy",
     rollback_failed: "Gateway rollback needs administrator attention",
+    rollback_invalid: "Gateway rollback state is invalid",
   };
   return { code, message: messages[code] ?? "Gateway update failed" };
 }

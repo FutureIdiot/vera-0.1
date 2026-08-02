@@ -94,6 +94,14 @@ function safeRequest(value) {
       ? value
       : null;
   }
+  if (value.action === "candidate") {
+    if (!exactKeys(value, ["action", "requestId", "requestedAt", "schemaVersion", "targetCommit"])) return null;
+    return COMMIT.test(value.targetCommit) && nullableIso(value.requestedAt) ? value : null;
+  }
+  if (value.action === "rollback") {
+    if (!exactKeys(value, ["action", "ifCurrentCommit", "requestId", "requestedAt", "schemaVersion"])) return null;
+    return COMMIT.test(value.ifCurrentCommit) && nullableIso(value.requestedAt) ? value : null;
+  }
   return null;
 }
 
@@ -169,11 +177,14 @@ export function createGatewayUpdateControl({
     }
     const [status, pending] = await Promise.all([readUpdaterStatus(), readPendingRequest()]);
     if (pending) {
+      const targetCommit = pending.action === "apply" || pending.action === "candidate"
+        ? pending.targetCommit
+        : pending.action === "rollback" ? pending.ifCurrentCommit : null;
       return {
         supported: true,
         state: pending.action === "check" ? "checking" : "queued",
         current,
-        target: pending.action === "apply" ? { commit: pending.targetCommit, version: status?.target?.version ?? null } : null,
+        target: targetCommit ? { commit: targetCommit, version: status?.target?.version ?? null } : null,
         requestId: pending.requestId,
         checkedAt: status?.checkedAt ?? null,
         startedAt: null,
