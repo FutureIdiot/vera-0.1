@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createExtensionLoader } from "../../src/extensions/loader.js";
+import { createExtensionLoader, permissionModelFlag } from "../../src/extensions/loader.js";
 
 function storeFixture() {
   const data = new Map();
@@ -23,6 +23,12 @@ async function extensionFixture() {
   await writeFile(join(root, "src/index.js"), "export function getManifest(){return {schemaVersion:1,extensionId:'example.test',name:'Example',version:'1.0.0',entry:'src/index.js',capabilities:[{unitId:'example.test.mcp',kind:'mcp',name:'Example MCP'},{unitId:'example.test.hook',kind:'hook',name:'Example Hook'}]}}; export async function initialize(){return {mcp:{call:async({name})=>({name})},hooks:{hook:{handle:async({event})=>({echo:event.value})}},shutdown(){}}}");
   return root;
 }
+
+test("selects the permission-model flag supported by the Node runtime", () => {
+  assert.equal(permissionModelFlag(new Set(["--permission", "--experimental-permission"])), "--permission");
+  assert.equal(permissionModelFlag(new Set(["--experimental-permission"])), "--experimental-permission");
+  assert.equal(permissionModelFlag(new Set()), null);
+});
 
 test("registers, binds, initializes and unloads an external extension", async () => {
   const store = storeFixture();

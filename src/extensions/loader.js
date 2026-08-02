@@ -14,6 +14,12 @@ function extensionId(value) {
   return value;
 }
 
+export function permissionModelFlag(allowedFlags = process.allowedNodeEnvironmentFlags) {
+  if (allowedFlags?.has("--permission")) return "--permission";
+  if (allowedFlags?.has("--experimental-permission")) return "--experimental-permission";
+  return null;
+}
+
 export function createExtensionLoader({ store, config = {}, onUpdated = null } = {}) {
   if (!store) throw new TypeError("extension loader requires store");
   const instances = new Map();
@@ -74,10 +80,11 @@ export function createExtensionLoader({ store, config = {}, onUpdated = null } =
 
   function spawnWorker(key, root, { writePaths = [] } = {}) {
     const workerPath = fileURLToPath(new URL("./worker.js", import.meta.url));
-    if (!process.allowedNodeEnvironmentFlags?.has("--permission")) {
+    const permissionFlag = permissionModelFlag();
+    if (!permissionFlag) {
       throw new ApiError("extension_load_failed", "external extensions require a Node runtime with the permission model");
     }
-    const execArgv = ["--permission", `--allow-fs-read=${root}`, `--allow-fs-read=${workerPath}`, ...writePaths.filter((path) => typeof path === "string" && path.startsWith("/")).flatMap((path) => [`--allow-fs-read=${path}`, `--allow-fs-write=${path}`])];
+    const execArgv = [permissionFlag, `--allow-fs-read=${root}`, `--allow-fs-read=${workerPath}`, ...writePaths.filter((path) => typeof path === "string" && path.startsWith("/")).flatMap((path) => [`--allow-fs-read=${path}`, `--allow-fs-write=${path}`])];
     const child = fork(workerPath, [], { cwd: root, silent: true, execArgv, env: { PATH: process.env.PATH ?? "", NODE_ENV: "production" } });
     let sequence = 0;
     const pending = new Map();
