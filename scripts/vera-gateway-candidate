@@ -5,4 +5,4 @@ set -a
 . /etc/vera/gateway-update.env
 set +a
 
-exec /usr/bin/node /opt/vera/current/scripts/gateway-candidate-control.js "$@"
+exec /usr/bin/node --preserve-symlinks-main /opt/vera/current/scripts/gateway-candidate-control.js "$@"

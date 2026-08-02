@@ -26,6 +26,7 @@ test("updater install artifacts preserve the Gateway privilege boundary", async 
   const candidateControl = await readFile(CANDIDATE_CONTROL_PATH, "utf8");
   assert.equal(candidateControl.includes("/etc/vera/gateway-update.env"), true);
   assert.equal(candidateControl.includes("gateway-candidate-control.js"), true);
+  assert.equal(candidateControl.includes("--preserve-symlinks-main"), true);
   assert.equal(candidateControl.includes("git push"), false);
   assert.equal(candidateControl.includes("systemctl"), false);
 
