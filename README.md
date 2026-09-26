@@ -1,52 +1,44 @@
 # Vera
 
-> Early-stage software. The current package version is 0.1.0, and the project
-> is not yet a turn-key deployment.
+[中文](#中文) · [English](#english)
 
-Vera is an open-source, owner-operated workspace for running multiple AI
-agents across private devices. It combines Space-based conversations,
-independently hosted Agents, project Workspaces, approvals, files, and
-long-term Memory behind one Gateway and a mobile-first web client.
+## 中文
 
-## Architecture
+**自部署的多 Agent 协作空间，在手机和电脑上连接你自己的 AI Agents。**
 
-- **Gateway** — the authoritative HTTP/SSE API and persistent state owner.
-- **Agent daemon** — runs independently on the host that owns an Agent runtime
-  and its Workspace.
-- **Web client** — a mobile-first interface shared by desktop and phone
-  browsers.
-- **Private network** — production deployments are designed for Tailscale
-  Serve in front of a loopback-only Gateway.
+Vera 将运行在本地或云端设备上的 Agents 汇集到同一个界面。你可以在不同的 Space 中组织对话和项目，查看流式回复、处理执行审批，并管理文件、上下文和 Agent 的长期 Memory。
 
-## Current capabilities
+> 当前版本：**0.1.0 · 早期开发阶段**。面向单用户私网自部署，尚不提供开箱即用的一键部署。
 
-The current tree includes:
+### 核心能力
 
-- private and group Spaces with streamed replies;
-- Account identity separated from Agent runtime ownership;
-- independently hosted Agent daemons with reconnect and execution leases;
-- Codex CLI, OpenCode, and Ollama adapters;
-- approvals, activity status, file attachments, and context sessions;
-- Agent-scoped long-term Memory, retrieval, Digest, and Dream workflows;
-- an owner-triggered, rollback-capable Gateway updater;
-- a responsive web client and System, Agent, and Account management views.
+- **围绕 Space 工作**：私聊、群聊、流式回复、文件附件与上下文会话。
+- **跨设备运行 Agent**：独立 daemon 在拥有运行环境和 Workspace 的设备上执行，由 Gateway 统一协调。
+- **接入不同模型运行环境**：包括 Codex CLI、OpenCode 和 Ollama adapter。
+- **保持身份与记忆连续**：区分 Account 对外身份与 Agent 执行身份，支持 Agent 独立的长期 Memory、检索、Digest 与 Dream 流程。
+- **随时观察与授权**：手机优先的 Web 界面，提供执行审批、活动状态以及 System、Agent、Account 管理。
+- **可回滚的 Gateway 更新**：由 owner 主动触发，包含隔离构建、数据冷备、健康检查与失败恢复。
 
-## Requirements
+### 如何组成
 
-- Node.js 20 or newer
-- npm
-- Provider-specific runtimes when using the corresponding Agent adapter
-- Tailscale and systemd for the intended private VPS deployment model
+| 组件 | 职责 |
+| --- | --- |
+| **Gateway** | HTTP/SSE API、调度与持久状态的唯一事实来源 |
+| **Agent daemon** | 在 Agent 所在设备上运行，并使用该设备上的 Workspace |
+| **Web client** | 手机与桌面浏览器共享的控制界面 |
+| **Tailscale Serve** | 为仅监听 loopback 的 Gateway 提供私网访问入口 |
 
-## Local development
+### 本地开发
 
-Install dependencies:
+需要 **Node.js 20+** 与 **npm**。使用真实 Agent 时，还需要安装相应供应商的运行环境。
+
+在仓库目录安装依赖：
 
 ```sh
 npm ci
 ```
 
-Start the Gateway with disposable local data:
+启动 Gateway，使用独立的临时开发数据目录：
 
 ```sh
 PORT=3210 \
@@ -55,91 +47,141 @@ VERA_ALLOW_LOOPBACK_DEVELOPMENT=true \
 npm start
 ```
 
-In another terminal, start the Vite development server:
+在另一个终端启动 Web 开发服务器：
 
 ```sh
 npm run dev:web
 ```
 
-Open the URL printed by Vite. The development server proxies `/api` to the
-Gateway on port 3210. `VERA_ALLOW_LOOPBACK_DEVELOPMENT` is a development-only
-bypass and is rejected when `NODE_ENV=production`.
+打开 Vite 输出的地址。开发服务器会把 `/api` 请求转发至 `3210` 端口的 Gateway。上述步骤启动 Gateway 与 Web；真实模型回复还需要接入 Agent daemon 并配置对应运行环境。
 
-## Verification
+`VERA_ALLOW_LOOPBACK_DEVELOPMENT` 仅用于本地开发，在 `NODE_ENV=production` 下会被拒绝。`/tmp/vera-dev` 会在重复启动时复用，不适合存放需要长期保留的数据。
 
-Run the unit and component test suite:
+### 验证
+
+| 命令 | 检查内容 |
+| --- | --- |
+| `npm test` | 单元与组件测试 |
+| `npm run build:web` | Web 生产构建 |
+| `npm run analyze:web` | 生产构建、资源体积预算、路由懒加载与时间线检查 |
+| `node scripts/verify.mjs` | Gateway HTTP/SSE 黑盒验收 |
+
+真实供应商冒烟测试需要显式启用，不属于默认测试套件。
+
+### 部署与更新
+
+生产部署面向 **owner 单用户私网使用**，预期环境包含 Tailscale 与 systemd。Gateway 仅监听 loopback，通过 Tailscale Serve 访问；公网端口、Funnel 和公网反向代理不在支持范围内。
+
+`npm run setup` 当前只执行只读环境预检并生成部署计划，结果停在 `planned`、`applied: false`。它不会安装依赖、写入部署文件、修改服务、防火墙或 Tailscale 配置。
+
+安装并配置 root updater 后，可以在 System 页面主动检查和应用 Gateway 更新。更新流程会准备隔离 release、安装依赖、运行测试、构建并检查 Web、冷备数据、原子切换并检查健康状态；启动失败时恢复之前的 release 与数据。
+
+更新范围仅限 Gateway，不包含 Agent daemon、原生客户端、Workspace 或 Memory Provider 数据。
+
+### 项目状态与凭证
+
+Gateway、Web 客户端和核心运行时已有实现与测试。部署引导、原生客户端、Extension 体系及更多 Space 界面仍在开发中。
+
+本仓库包含公开运行代码、测试与部署相关文件；内部设计和计划单独维护，不包含在公开默认分支中。
+
+凭证必须保存在仓库之外。不要提交 `~/.vera/secrets.json`、Account Keys、Agent Tokens 或会话凭证。
+
+### 许可证
+
+[MIT License](LICENSE)
+
+[切换到 English ↓](#english)
+
+---
+
+## English
+
+[中文](#中文) · **English**
+
+**A self-hosted workspace for multiple AI agents, accessible from your phone and computer.**
+
+Vera brings Agents running on local or cloud devices into one interface. Organize conversations and projects in Spaces, follow streamed replies, approve execution, and manage files, context sessions, and each Agent’s long-term Memory.
+
+> Current version: **0.1.0 · Early development**. Built for a single owner on a private network; a turn-key deployment is not yet available.
+
+### Core capabilities
+
+- **Work in Spaces**: direct and group conversations, streamed replies, file attachments, and context sessions.
+- **Run Agents across devices**: independent daemons execute on the hosts that own their runtimes and Workspaces, coordinated by the Gateway.
+- **Connect different model runtimes**: adapters include Codex CLI, OpenCode, and Ollama.
+- **Maintain identity and memory**: separate Account-facing identity from Agent execution identity, with Agent-scoped long-term Memory, retrieval, Digest, and Dream workflows.
+- **Observe and authorize**: a mobile-first web interface with approvals, activity status, and System, Agent, and Account management.
+- **Update the Gateway with rollback**: owner-triggered updates include isolated builds, cold data backups, health checks, and failure recovery.
+
+### Architecture
+
+| Component | Responsibility |
+| --- | --- |
+| **Gateway** | Authoritative HTTP/SSE API, coordination, and persistent state |
+| **Agent daemon** | Execution on the Agent’s host using that host’s Workspace |
+| **Web client** | Shared control interface for phone and desktop browsers |
+| **Tailscale Serve** | Private network access to a loopback-only Gateway |
+
+### Local development
+
+Requires **Node.js 20+** and **npm**. Real Agents also require the corresponding provider runtime.
+
+Install dependencies from the repository directory:
 
 ```sh
-npm test
+npm ci
 ```
 
-Build the web client:
+Start the Gateway with a separate temporary development data directory:
 
 ```sh
-npm run build:web
+PORT=3210 \
+VERA_DATA_PATH=/tmp/vera-dev \
+VERA_ALLOW_LOOPBACK_DEVELOPMENT=true \
+npm start
 ```
 
-Run the production build, bundle budget, lazy-route, and timeline checks:
+In another terminal, start the web development server:
 
 ```sh
-npm run analyze:web
+npm run dev:web
 ```
 
-Run the black-box Gateway HTTP/SSE acceptance suite:
+Open the URL printed by Vite. The development server proxies `/api` to the Gateway on port `3210`. These steps start the Gateway and web client; real model replies additionally require a connected Agent daemon and its configured runtime.
 
-```sh
-node scripts/verify.mjs
-```
+`VERA_ALLOW_LOOPBACK_DEVELOPMENT` is for local development only and is rejected when `NODE_ENV=production`. The `/tmp/vera-dev` directory is reused across restarts and is unsuitable for data you need to retain long-term.
 
-Real provider smoke tests are opt-in and are not required by the default test
-suite.
+### Verification
 
-## Deployment status
+| Command | Coverage |
+| --- | --- |
+| `npm test` | Unit and component tests |
+| `npm run build:web` | Production web build |
+| `npm run analyze:web` | Production build, bundle budget, lazy routes, and timeline checks |
+| `node scripts/verify.mjs` | Black-box Gateway HTTP/SSE acceptance |
 
-Vera does not yet provide a supported one-command deployment.
+Real provider smoke tests are opt-in and are not part of the default test suite.
 
-`npm run setup` currently performs read-only host preflight and produces a
-deployment plan. It stops at `planned` with `applied: false`; it does not
-install packages, write deployment files, change services, configure
-firewalls, or modify Tailscale.
+### Deployment and updates
 
-The intended production topology is an owner-only private deployment: the
-Gateway listens on loopback and is exposed only through Tailscale Serve. Do
-not expose the Gateway directly to the public internet.
+Production deployment is intended for **one owner on a private network**, with Tailscale and systemd. The Gateway listens only on loopback and is accessed through Tailscale Serve. Public ports, Funnel, and public reverse proxies are outside the supported deployment model.
 
-## Gateway updates
+`npm run setup` currently performs read-only host preflight and produces a deployment plan, stopping at `planned` with `applied: false`. It does not install dependencies, write deployment files, or change services, firewalls, or Tailscale configuration.
 
-The System view can explicitly check for and apply a Gateway code update when
-the root updater is installed and configured.
+Once the root updater is installed and configured, the System view can explicitly check for and apply Gateway updates. The updater prepares an isolated release, installs dependencies, runs tests, builds and validates the web client, creates a cold data backup, switches atomically, and checks health. If startup fails, it restores the previous release and data.
 
-The updater prepares an isolated release, installs dependencies, runs tests,
-builds and validates the web client, creates a cold data backup, switches
-atomically, performs a health check, and restores the previous release and
-data if startup fails.
+Updates cover the Gateway only, excluding Agent daemons, native clients, Workspaces, and Memory Provider data.
 
-It updates the Gateway only. It does not update Agent daemons, native clients,
-Workspaces, or Memory Provider data.
+### Project status and credentials
 
-## Security boundaries
+The Gateway, web client, and core runtime have implementations and tests. Guided deployment, native clients, the Extension system, and additional Space surfaces remain under development.
 
-- Vera is currently an owner-only system, not a multi-user service.
-- The production Gateway must remain loopback-only behind Tailscale Serve.
-- Public ingress, Funnel, public reverse proxies, and public Vera ports are
-  outside the supported deployment model.
-- Agent and Account credentials must remain outside the repository.
-- Do not commit `~/.vera/secrets.json`, Account Keys, Agent Tokens, or session
-  material.
+This repository contains public runtime code, tests, and deployment-related files. Internal design and planning documents are maintained separately and are not included in the public default branch.
 
-## Project status
+Keep credentials outside the repository. Never commit `~/.vera/secrets.json`, Account Keys, Agent Tokens, or session credentials.
 
-The web Gateway and core runtime are implemented and tested. Guided
-deployment, native clients, the Extension system, and additional Space
-surfaces remain under development.
+### License
 
-This repository contains the public runtime code, tests, and deployment
-artifacts. Internal design and planning documents are maintained separately
-and are not part of the public default branch.
+[MIT License](LICENSE)
 
-## License
-
-Vera is released under the [MIT License](LICENSE).
+[切换到中文 ↑](#中文)
